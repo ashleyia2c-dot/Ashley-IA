@@ -18,13 +18,19 @@ const { app, ipcMain } = require('electron');
 
 // ─── Configuracion ────────────────────────────────────────────────────────
 
-// NO descargar automaticamente — queremos notificar primero a la UI por si
-// el usuario esta en medio de algo importante. En un futuro podriamos
-// hacerlo automatico con un toggle en Settings.
+// Descarga automatica en background — no preguntamos, solo bajamos.
+// Ashley es un companion app, la gente quiere "just works" no micro-decisiones.
 autoUpdater.autoDownload = true;
 
-// Tampoco aplicar automaticamente al quit — respetamos la eleccion del user.
-autoUpdater.autoInstallOnAppQuit = false;
+// Instalar automaticamente cuando el usuario cierre Ashley normalmente.
+// Combinado con el pill "click para aplicar ahora" da la mejor experiencia:
+//   - Quieren actualizar YA    → click en el pill → se reinicia y aplica
+//   - Estan ocupados           → ignoran el pill → al cerrar Ashley, el
+//                                 update se aplica solo en el proximo
+//                                 arranque (sin preguntar nada).
+// Asi nunca quedan atascados en una version vieja a menos que apaguen la PC
+// bruscamente (en cuyo caso el update se aplica en el siguiente arranque).
+autoUpdater.autoInstallOnAppQuit = true;
 
 // Intervalo de re-chequeo: cada 4h mientras la app este abierta.
 // Suficiente para que salgan hotfixes el mismo dia, no tan seguido como para
