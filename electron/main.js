@@ -505,14 +505,27 @@ app.whenReady().then(async () => {
     'clipboard-read', 'clipboard-sanitized-write',
   ]);
 
+  // Permisos que se deniegan silenciosamente (Chromium/Reflex los chequea en
+  // bucle y llenaban el log con spam inútil cada 60s). Los denegamos igual,
+  // sólo no lo registramos.
+  const SILENT_DENY = new Set([
+    'background-sync',    // service worker de Next.js: no lo usamos
+    'notifications',       // no queremos notifs del sistema
+    'periodic-background-sync',
+  ]);
+
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const allowed = ALLOWED_PERMS.has(permission);
-    log(`Permission REQUEST: "${permission}" → ${allowed ? 'GRANTED' : 'DENIED'} (mediaTypes=${(details && details.mediaTypes) || 'n/a'})`);
+    if (!SILENT_DENY.has(permission)) {
+      log(`Permission REQUEST: "${permission}" → ${allowed ? 'GRANTED' : 'DENIED'} (mediaTypes=${(details && details.mediaTypes) || 'n/a'})`);
+    }
     callback(allowed);
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, origin) => {
     const allowed = ALLOWED_PERMS.has(permission);
-    log(`Permission CHECK:   "${permission}" for "${origin}" → ${allowed}`);
+    if (!SILENT_DENY.has(permission)) {
+      log(`Permission CHECK:   "${permission}" for "${origin}" → ${allowed}`);
+    }
     return allowed;
   });
 
