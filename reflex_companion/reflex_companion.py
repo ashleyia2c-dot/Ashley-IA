@@ -161,7 +161,11 @@ class State(rx.State):
     def is_english(self) -> bool:
         return self.language == "en"
 
-    @rx.var
+    # Dependencias declaradas explícitamente: Reflex no puede inferirlas
+    # porque el import de .achievements ocurre dentro del cuerpo y su
+    # analyzer estático falla con módulos locales. Con deps= le decimos
+    # exactamente de qué state vars depende la computed var.
+    @rx.var(auto_deps=False, deps=["achievements_data", "language"])
     def achievements_gallery(self) -> list[dict[str, str]]:
         """All achievements as a flat list for the gallery. Each has
         icon, name, desc, unlocked ('true'/'false'), and date.
@@ -179,11 +183,6 @@ class State(rx.State):
             fresh = load_achievements()
         except Exception:
             fresh = self.achievements_data or {}
-        # Dependencia explícita de self.achievements_data para que Reflex
-        # invalide esta computed var cuando _check_achievements lo actualiza
-        # tras un nuevo unlock (de lo contrario la galería mostraría el
-        # nuevo logro sólo en el próximo hard reload).
-        _state_size = len(self.achievements_data)  # noqa: F841
         result = []
         for a in ACHIEVEMENTS:
             aid = a["id"]

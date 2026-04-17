@@ -444,6 +444,33 @@
 
 
   /* ══════════════════════════════════════════
+     VERSION BADGE
+     Muestra "v0.9.0" abajo a la derecha, muy discreto.
+     Sólo aparece cuando corremos dentro de Electron (ahí tenemos acceso
+     a la versión real del package.json via window.ashleyUpdate).
+  ══════════════════════════════════════════ */
+  function initVersionBadge() {
+    if (!window.ashleyUpdate || typeof window.ashleyUpdate.getVersion !== 'function') {
+      return;
+    }
+    window.ashleyUpdate.getVersion().then(function (version) {
+      if (!version) return;
+      var badge = document.createElement('div');
+      badge.id = 'ashley-version-badge';
+      badge.textContent = 'v' + version;
+      badge.style.cssText =
+        'position:fixed;bottom:6px;right:10px;z-index:9998;' +
+        'color:rgba(255,255,255,0.28);font-size:10px;' +
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",monospace;' +
+        'pointer-events:none;user-select:none;letter-spacing:0.5px;';
+      document.body.appendChild(badge);
+    }).catch(function (e) {
+      console.warn('[ashley-version] failed to read version:', e);
+    });
+  }
+
+
+  /* ══════════════════════════════════════════
      AUTO-UPDATER PILL
      Muestra un pill flotante cuando hay un update descargado.
      `window.ashleyUpdate` viene de electron/preload.js — sólo existe
@@ -527,6 +554,7 @@
     initVisibilityReload();
     initAffectionObserver();
     initAchievementObserver();
+    initVersionBadge();
     initUpdateNotifier();
   }
 
