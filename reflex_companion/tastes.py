@@ -1,26 +1,21 @@
 """
 tastes.py — Gustos del jefe y control de discovery proactivo.
 """
-import json, os, uuid
+import uuid
 from datetime import datetime
 from .config import TASTES_FILE, DISCOVERY_FILE
+from .memory import load_json, save_json
 
 
+# Wrappers finos sobre load_json/save_json (escritura atómica + fallback .bak).
 def _load(path):
-    if not os.path.exists(path): return []
-    try:
-        with open(path, "r", encoding="utf-8") as f: return json.load(f)
-    except: return []
+    return load_json(path, [])
 
 def _load_dict(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
+    return load_json(path, {})
 
 def _save(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    save_json(path, data)
 
 
 def load_tastes() -> list[dict]:

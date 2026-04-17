@@ -68,6 +68,103 @@ let isShuttingDown = false;         // true cuando el usuario cierra la app
 let reflexRestartCount = 0;
 const MAX_REFLEX_RESTARTS = 5;
 
+// ─── Detección de crash loops ─────────────────────────────────────────────
+// Si un update (o la app actual) crashea 3 veces seguidas antes de mostrar
+// la ventana principal, asumimos que la versión instalada está rota.
+// Mostramos un diálogo con link a GitHub para que el user descargue una
+// versión anterior — evita el escenario "update borró a todos mis users".
+//
+// Flujo:
+//   1. Al arrancar: incrementamos counter en disk.
+//   2. Si counter ya era >= CRASH_LOOP_THRESHOLD, mostramos diálogo
+//      y abrimos la página de releases antes de seguir.
+//   3. Cuando mainWindow.ready-to-show dispara → reseteamos a 0.
+//   4. Si el user mata el proceso o crashea antes del ready-to-show,
+//      el counter queda incrementado para el próximo arranque.
+
+const CRASH_COUNTER_FILE = path.join(app.getPath('userData'), 'launch-health.json');
+const CRASH_LOOP_THRESHOLD = 3;
+
+function readCrashCounter() {
+  try {
+    if (fs.existsSync(CRASH_COUNTER_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CRASH_COUNTER_FILE, 'utf-8'));
+      return { count: data.count || 0, version: data.version || null };
+    }
+  } catch (e) {
+    log(`crash counter read failed: ${e.message}`);
+  }
+  return { count: 0, version: null };
+}
+
+function writeCrashCounter(count, version) {
+  try {
+    // Usamos el mismo patrón atómico que en Python: tmp + rename.
+    const tmp = CRASH_COUNTER_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ count, version }, null, 2));
+    fs.renameSync(tmp, CRASH_COUNTER_FILE);
+  } catch (e) {
+    log(`crash counter write failed: ${e.message}`);
+  }
+}
+
+function checkForCrashLoop() {
+  const { count, version } = readCrashCounter();
+  const myVersion = app.getVersion();
+
+  // Si la versión cambió desde el último arranque, reseteamos — la
+  // versión actual no tiene culpa de que la anterior crasheara.
+  if (version && version !== myVersion) {
+    writeCrashCounter(0, myVersion);
+    return false;
+  }
+
+  // ¿Estamos en la enésima vez de una racha de crashes?
+  if (count >= CRASH_LOOP_THRESHOLD) {
+    log(`CRASH LOOP detected: version ${myVersion} failed ${count} times`);
+
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'Ashley no pudo arrancar',
+      message: `Ashley falló al abrir ${count} veces seguidas.`,
+      detail:
+        `La versión ${myVersion} parece tener un problema. Podés descargar ` +
+        `una versión anterior desde GitHub para recuperar tu Ashley.\n\n` +
+        `Tus datos (chat, logros, afecto) están a salvo — no se pierden al ` +
+        `reinstalar.`,
+      buttons: ['Abrir página de descarga', 'Intentar arrancar de nuevo', 'Cerrar'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+
+    if (choice === 0) {
+      shell.openExternal('https://github.com/ashleyia2c-dot/Ashley-IA/releases');
+      // Reseteamos para que, tras reinstalar la versión anterior, no
+      // se dispare de nuevo el diálogo si esa versión arranca bien.
+      writeCrashCounter(0, myVersion);
+      app.quit();
+      return true;
+    } else if (choice === 1) {
+      // El user quiere dar otra chance. Reseteamos a 0 para darle 3
+      // arranques limpios antes de pedirle downgrade otra vez.
+      writeCrashCounter(0, myVersion);
+      return false;
+    } else {
+      app.quit();
+      return true;
+    }
+  }
+
+  // No hay crash loop: incrementamos para este intento (se resetea al
+  // mostrarse la ventana principal).
+  writeCrashCounter(count + 1, myVersion);
+  return false;
+}
+
+function markLaunchSuccessful() {
+  writeCrashCounter(0, app.getVersion());
+}
+
 // ─── Logging ──────────────────────────────────────────────────────────────
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 19);
@@ -469,6 +566,10 @@ function createMainWindow() {
   mainWindow.once('ready-to-show', () => {
     if (splashWindow) splashWindow.close();
     mainWindow.show();
+    // Ashley arrancó OK — resetear el contador de crashes.
+    // Si la app crashea DESPUÉS de esto (mid-use), no cuenta como crash
+    // de arranque; el user al menos puede cerrarla y los datos están a salvo.
+    markLaunchSuccessful();
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -497,6 +598,11 @@ function killReflex() {
 // ─── Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+
+  // Detección de crash loop: si los últimos N arranques crashearon antes
+  // de mostrar la ventana, ofrecemos al user descargar una versión anterior.
+  // Protección clave contra "update malo deja a todos los users con app rota".
+  if (checkForCrashLoop()) return;
 
   // Conceder permiso de micrófono al renderer (sin esto getUserMedia falla silencioso)
   const ALLOWED_PERMS = new Set([

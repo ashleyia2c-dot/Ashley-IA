@@ -370,26 +370,36 @@ def normalize_lang(lang: str | None) -> str:
 
 
 def load_language() -> str:
+    """Carga el idioma persistido. Si el archivo está corrupto, loguea un
+    warning y cae al default — así podemos rastrearlo en soporte en vez
+    de ver a un user con idioma "incorrecto" sin saber por qué."""
+    from .memory import load_json
+    data = load_json(LANG_FILE, None)
+    if data is None:
+        return DEFAULT_LANG
     try:
-        if os.path.exists(LANG_FILE):
-            with open(LANG_FILE, "r", encoding="utf-8") as f:
-                return normalize_lang(json.load(f).get("language"))
-    except Exception:
-        pass
-    return DEFAULT_LANG
+        return normalize_lang(data.get("language"))
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.i18n").warning(
+            "load_language: invalid language.json (%s), using default", e,
+        )
+        return DEFAULT_LANG
 
 
 def save_language(lang: str) -> None:
+    """Persist selected language atomically via memory.save_json."""
+    from .memory import save_json
     try:
-        os.makedirs(os.path.dirname(LANG_FILE) or ".", exist_ok=True)
-        with open(LANG_FILE, "w", encoding="utf-8") as f:
-            json.dump({"language": normalize_lang(lang)}, f)
-    except Exception:
-        pass
+        save_json(LANG_FILE, {"language": normalize_lang(lang)})
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.i18n").warning("save_language failed: %s", e)
 
 
 def load_voice_config() -> dict:
     """Devuelve tts_enabled, elevenlabs_key, openai_key, voice_id, voice_mode, vision_enabled."""
+    from .memory import load_json
     default = {
         "tts_enabled": False,
         "elevenlabs_key": "",
@@ -398,39 +408,41 @@ def load_voice_config() -> dict:
         "voice_mode": False,  # True = Ashley habla natural, sin *gestos*
         "vision_enabled": False,
     }
+    data = load_json(VOICE_FILE, None)
+    if data is None:
+        return default
     try:
-        if os.path.exists(VOICE_FILE):
-            with open(VOICE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return {
-                "tts_enabled": bool(data.get("tts_enabled", False)),
-                "elevenlabs_key": str(data.get("elevenlabs_key", "")),
-                "openai_key": str(data.get("openai_key", "")),
-                "voice_id": str(data.get("voice_id", DEFAULT_VOICE_ID)) or DEFAULT_VOICE_ID,
-                "voice_mode": bool(data.get("voice_mode", False)),
-                "vision_enabled": bool(data.get("vision_enabled", False)),
-            }
+        return {
+            "tts_enabled": bool(data.get("tts_enabled", False)),
+            "elevenlabs_key": str(data.get("elevenlabs_key", "")),
+            "openai_key": str(data.get("openai_key", "")),
+            "voice_id": str(data.get("voice_id", DEFAULT_VOICE_ID)) or DEFAULT_VOICE_ID,
+            "voice_mode": bool(data.get("voice_mode", False)),
+            "vision_enabled": bool(data.get("vision_enabled", False)),
+        }
     except Exception:
-        pass
-    return default
+        return default
 
 
 def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       openai_key: str = "", voice_mode: bool = False,
                       vision_enabled: bool = False) -> None:
+    """Persist voice config atomically. El archivo contiene la API key de
+    ElevenLabs del user — un write corrupto perdería su config de voz
+    entera. Con save_json atómico + .bak, nunca pasa."""
+    from .memory import save_json
     try:
-        os.makedirs(os.path.dirname(VOICE_FILE) or ".", exist_ok=True)
-        with open(VOICE_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "tts_enabled": bool(tts_enabled),
-                "elevenlabs_key": str(elevenlabs_key or ""),
-                "openai_key": str(openai_key or ""),
-                "voice_id": str(voice_id or DEFAULT_VOICE_ID),
-                "voice_mode": bool(voice_mode),
-                "vision_enabled": bool(vision_enabled),
-            }, f)
-    except Exception:
-        pass
+        save_json(VOICE_FILE, {
+            "tts_enabled": bool(tts_enabled),
+            "elevenlabs_key": str(elevenlabs_key or ""),
+            "openai_key": str(openai_key or ""),
+            "voice_id": str(voice_id or DEFAULT_VOICE_ID),
+            "voice_mode": bool(voice_mode),
+            "vision_enabled": bool(vision_enabled),
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.i18n").warning("save_voice_config failed: %s", e)
 
 
 def ui(lang: str) -> dict[str, str]:

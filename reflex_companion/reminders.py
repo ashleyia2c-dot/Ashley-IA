@@ -10,30 +10,24 @@ Importantes: el jefe (o Ashley) añade cosas a una lista persistente con
   Se marcan como hechas con [action:done_important:texto_o_id].
 """
 
-import json
-import os
 import uuid
 import re
 from datetime import datetime
 
 from .config import REMINDERS_FILE, IMPORTANT_FILE
+from .memory import load_json, save_json
 
 
 # ── Helpers internos ─────────────────────────────────────────────────────────
+# Usan load_json/save_json centralizados de memory.py — tienen escritura
+# atómica + fallback automático a .bak si el archivo principal se corrompe.
 
 def _load(path: str) -> list:
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    return load_json(path, [])
 
 
 def _save(path: str, data: list) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    save_json(path, data)
 
 
 def _parse_dt(dt_str: str) -> datetime:

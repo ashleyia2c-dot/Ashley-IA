@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -9,24 +10,122 @@ DIARY_KEYWORDS = [
     "anteriormente", "la última vez",
 ]
 
+_log = logging.getLogger("ashley.io")
+
 
 # ─────────────────────────────────────────────
-#  I/O
+#  I/O atómico con fallback
 # ─────────────────────────────────────────────
+#
+# Objetivo: bajo ninguna circunstancia perdemos los datos del usuario.
+#
+# save_json:
+#   1. Serializamos primero a memoria (si el JSON es inválido aborta
+#      aquí SIN tocar el archivo real).
+#   2. Si el archivo real existe y parsea OK, lo copiamos a `.bak`.
+#      Este respaldo es nuestra red de seguridad.
+#   3. Escribimos a `archivo.tmp` + fsync (bytes en disco físico).
+#   4. os.replace(tmp, archivo) — operación atómica del filesystem:
+#      pasa del todo o no pasa. Sin archivo a medias.
+#
+# load_json:
+#   1. Intenta leer `archivo`.
+#   2. Si está corrupto (JSON inválido) → intenta `archivo.bak`.
+#   3. Si ambos están rotos → devuelve `default` y loguea.
+
+def _is_valid_json_file(path: str) -> bool:
+    """True si el archivo existe y parsea como JSON válido."""
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)
+        return True
+    except Exception:
+        return False
+
 
 def load_json(path: str, default):
-    if os.path.exists(path):
+    """Carga JSON del disco con recuperación automática desde .bak.
+
+    Si `path` no existe o está corrupto, intenta `path.bak` (copia válida
+    anterior). Si ambos fallan, devuelve `default` y loguea un warning
+    para que quede trazado en soporte.
+    """
+    for candidate in (path, path + ".bak"):
+        if not os.path.exists(candidate):
+            continue
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+            with open(candidate, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if candidate.endswith(".bak"):
+                _log.warning(
+                    "load_json: main file %s was corrupt, recovered from .bak",
+                    path,
+                )
+            return data
+        except Exception as e:
+            _log.warning("load_json: failed to read %s: %s", candidate, e)
+            continue
     return default
 
 
 def save_json(path: str, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Escritura atómica con .bak previo. Nunca deja el archivo a medias.
+
+    Pasos:
+      1. Serializar en memoria (falla limpia si data no es JSON-friendly).
+      2. Respaldar la versión actual a .bak si existía y era válida.
+      3. Escribir al .tmp con fsync forzado.
+      4. os.replace(.tmp, archivo) → atómico.
+
+    Si algún paso falla, el archivo original queda intacto. En el peor
+    caso (crash entre 2 y 4) el user conserva el archivo original +
+    posiblemente un .tmp huérfano que no se usa.
+    """
+    # 1. Serializar primero — si data es inválida, fallamos sin tocar disco.
+    serialized = json.dumps(data, ensure_ascii=False, indent=2)
+
+    # Crear directorio padre si hace falta.
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    # 2. Backup del actual si es válido.
+    if _is_valid_json_file(path):
+        try:
+            import shutil
+            shutil.copy2(path, path + ".bak")
+        except Exception as e:
+            _log.warning("save_json: could not backup %s: %s", path, e)
+            # seguimos — el backup es best-effort, no vale parar por él
+
+    # 3. Escribir a .tmp con fsync.
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(serialized)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                # Algunos filesystems (red, VMs) no soportan fsync —
+                # mejor que perder el write, pero no siempre disponible.
+                pass
+
+        # 4. Rename atómico. En Windows, os.replace sobrescribe limpio.
+        os.replace(tmp, path)
+    except Exception as e:
+        # Algo catastrófico pasó — el archivo original sigue intacto
+        # gracias a que NO lo tocamos hasta el replace. Limpiamos el
+        # .tmp huérfano si quedó.
+        _log.error("save_json: write failed for %s: %s", path, e)
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        raise
 
 
 def now_iso() -> str:

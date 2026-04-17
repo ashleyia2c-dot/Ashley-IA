@@ -5,10 +5,9 @@ Defines all achievements, their unlock conditions, and persistence.
 Achievements are saved to a JSON file and checked after each interaction.
 """
 
-import json
-import os
 from datetime import datetime
 from .config import _data_path
+from .memory import load_json, save_json
 
 ACHIEVEMENTS_FILE = _data_path("achievements_ashley.json")
 
@@ -79,26 +78,25 @@ _ACHIEVEMENTS_BY_ID = {a["id"]: a for a in ACHIEVEMENTS}
 # ─────────────────────────────────────────────
 
 def load_achievements() -> dict:
-    """Returns dict of achievement_id -> {"unlocked": bool, "unlocked_at": str|None}."""
-    try:
-        if os.path.exists(ACHIEVEMENTS_FILE):
-            with open(ACHIEVEMENTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
+    """Returns dict of achievement_id -> {"unlocked": bool, "unlocked_at": str|None}.
+
+    Usa load_json con fallback automático a .bak si el archivo principal se
+    corrompe — así nunca perdemos logros por un write interrumpido.
+    """
+    return load_json(ACHIEVEMENTS_FILE, {})
 
 
 def save_achievements(data: dict):
-    """Persist achievements dict to disk."""
+    """Persist achievements dict to disk atomically.
+
+    save_json hace: serializar → .bak del actual → tmp + fsync → rename atómico.
+    Si algo falla, el archivo anterior queda intacto.
+    """
     try:
-        parent = os.path.dirname(ACHIEVEMENTS_FILE)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(ACHIEVEMENTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        save_json(ACHIEVEMENTS_FILE, data)
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.achievements").warning("save failed: %s", e)
 
 
 def unlock_achievement(achievement_id: str) -> bool:

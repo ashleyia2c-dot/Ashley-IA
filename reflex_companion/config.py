@@ -22,8 +22,13 @@ def _data_path(filename: str) -> str:
     if env_dir:
         try:
             os.makedirs(env_dir, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            # Si esto falla, todos los writes siguientes van a fallar.
+            # Logueamos para que quede traza en soporte (antes era silencioso).
+            import logging
+            logging.getLogger("ashley.config").warning(
+                "could not create data dir %s: %s", env_dir, e,
+            )
         return os.path.join(env_dir, filename)
     return f"../{filename}"
 
