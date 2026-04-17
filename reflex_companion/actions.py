@@ -1,0 +1,1973 @@
+"""
+actions.py — Ejecutor de acciones del sistema para Ashley.
+
+Dependencias:
+  pip install pyautogui pyperclip pycaw comtypes pillow
+
+  - pyautogui  → control de teclado / ratón
+  - pyperclip  → portapapeles (para texto con acentos y caracteres especiales)
+  - pycaw      → control preciso de volumen en Windows (opcional; fallback a PowerShell)
+  - pillow     → screenshots
+"""
+
+import base64
+import io
+import os
+import subprocess
+import time
+import urllib.parse
+import webbrowser
+from typing import Optional
+
+
+# ── Mapa de nombres de apps → ejecutables (Windows) ──────────────────────────
+
+# Apps que son solo una URL web (sin instalación local)
+URL_APPS: dict[str, str] = {
+    "tiktok":       "https://www.tiktok.com",
+    "youtube":      "https://www.youtube.com",
+    "twitter":      "https://www.twitter.com",
+    "x":            "https://www.x.com",
+    "reddit":       "https://www.reddit.com",
+    "gmail":        "https://mail.google.com",
+    "instagram":    "https://www.instagram.com",
+    "instagram.com": "https://www.instagram.com",
+    "netflix":      "https://www.netflix.com",
+    "twitch":       "https://www.twitch.tv",
+    "chatgpt":      "https://chat.openai.com",
+    "claude":       "https://claude.ai",
+    "github":       "https://www.github.com",
+    "google":       "https://www.google.com",
+    "facebook":     "https://www.facebook.com",
+    "pinterest":    "https://www.pinterest.com",
+    "linkedin":     "https://www.linkedin.com",
+}
+
+APP_MAP: dict[str, str] = {
+    # Sistema
+    "notepad": "notepad.exe",
+    "bloc de notas": "notepad.exe",
+    "calculadora": "calc.exe",
+    "calculator": "calc.exe",
+    "paint": "mspaint.exe",
+    "explorador": "explorer.exe",
+    "explorer": "explorer.exe",
+    "explorador de archivos": "explorer.exe",
+    "administrador de tareas": "taskmgr.exe",
+    "task manager": "taskmgr.exe",
+    "cmd": "cmd.exe",
+    "terminal": "cmd.exe",
+    "powershell": "powershell.exe",
+    "herramienta de recorte": "SnippingTool.exe",
+    "snipping tool": "SnippingTool.exe",
+    "configuracion": "ms-settings:",
+    "settings": "ms-settings:",
+    "panel de control": "control.exe",
+    "control panel": "control.exe",
+    # Navegadores
+    "chrome": "chrome",
+    "google chrome": "chrome",
+    "firefox": "firefox",
+    "edge": "msedge",
+    "microsoft edge": "msedge",
+    "brave": "brave",
+    "opera": "opera",
+    "opera gx": "opera",
+    # Multimedia
+    "spotify": "spotify",
+    "vlc": "vlc",
+    "windows media player": "wmplayer.exe",
+    "media player": "wmplayer.exe",
+    # Productividad Microsoft
+    "word": "winword",
+    "excel": "excel",
+    "powerpoint": "powerpnt",
+    "outlook": "outlook",
+    "teams": "teams",
+    "onenote": "onenote",
+    # Dev
+    "vscode": "code",
+    "visual studio code": "code",
+    "vs code": "code",
+    "visual studio": "devenv",
+    "git bash": "git-bash",
+    "android studio": "studio64",
+    "intellij": "idea64",
+    "pycharm": "pycharm64",
+    "webstorm": "webstorm64",
+    "rider": "rider64",
+    # Comunicación
+    "discord": "discord",
+    "telegram": "telegram",
+    "whatsapp": "whatsapp",
+    "slack": "slack",
+    "zoom": "zoom",
+    "skype": "skype",
+    # Entretenimiento / gaming
+    "steam": "steam://open/main",   # protocolo URI — funciona aunque no esté en PATH
+    "epic games": "com.epicgames.launcher://",
+    "epic": "com.epicgames.launcher://",
+    "epic games launcher": "com.epicgames.launcher://",
+    # Herramientas
+    "obs": "obs64",
+    "obs studio": "obs64",
+    "figma": "figma",
+    "notion": "notion",
+    "obsidian": "obsidian",
+    "postman": "postman",
+    "docker": "docker desktop",
+    "insomnia": "insomnia",
+    "dbeaver": "dbeaver",
+}
+
+# Teclas con nombre legible para el diálogo de permisos
+KEY_LABELS: dict[str, str] = {
+    "enter": "Enter", "tab": "Tab", "space": "Espacio",
+    "backspace": "Retroceso", "delete": "Suprimir", "escape": "Escape",
+    "up": "↑", "down": "↓", "left": "←", "right": "→",
+    "home": "Inicio", "end": "Fin", "pageup": "Re Pág", "pagedown": "Av Pág",
+    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5",
+    "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10",
+    "f11": "F11", "f12": "F12",
+}
+
+
+# ── Screenshot ────────────────────────────────────────────────────────────────
+
+def take_screenshot() -> str:
+    """Captura la pantalla completa. Devuelve base64 PNG (≤1920px de ancho)."""
+    from PIL import ImageGrab
+    img = ImageGrab.grab(all_screens=True)
+    w, h = img.size
+    if w > 1920:
+        img = img.resize((1920, int(h * 1920 / w)))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def take_screenshot_low_res() -> str:
+    """Captura la pantalla a resolución media (1280px ancho, JPEG q=60).
+    Suficiente para que el LLM lea títulos de ventanas y contenido general.
+    640px era demasiado bajo — el LLM no podía leer texto y alucinaba.
+    Tamaño típico: ~80-150KB en base64 (~2000-3000 tokens de imagen)."""
+    from PIL import ImageGrab
+    img = ImageGrab.grab(all_screens=True)
+    w, h = img.size
+    new_w = 1280
+    new_h = int(h * new_w / w)
+    img = img.resize((new_w, new_h))
+    img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=60, optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/jpeg;base64,{b64}"
+
+
+# ── Alias de apps (abreviaturas comunes → nombre real) ───────────────────────
+
+_APP_ALIASES: dict[str, list[str]] = {
+    "lol": ["league of legends", "league"],
+    "league": ["league of legends"],
+    "valo": ["valorant"],
+    "val": ["valorant"],
+    "tft": ["teamfight tactics"],
+    "ow": ["overwatch"],
+    "overwatch": ["overwatch 2", "overwatch"],
+    "wow": ["world of warcraft"],
+    "mc": ["minecraft"],
+    "genshin": ["genshin impact"],
+    "apex": ["apex legends"],
+    "csgo": ["counter-strike", "counter strike", "cs2"],
+    "cs2": ["counter-strike", "counter strike"],
+    "fortnite": ["fortnite", "epic games launcher"],
+    "cod": ["call of duty"],
+    "rl": ["rocket league"],
+    "r6": ["rainbow six"],
+    "dota": ["dota 2"],
+    "poe": ["path of exile"],
+    "gta": ["grand theft auto", "gta v", "gta5"],
+    "hsr": ["honkai star rail", "honkai: star rail"],
+}
+
+
+# ── Abrir aplicación ──────────────────────────────────────────────────────────
+
+def _search_start_menu(hint: str) -> str | None:
+    """
+    Busca un acceso directo (.lnk) en el menú de inicio cuyo nombre contenga `hint`.
+    Devuelve la ruta completa al .lnk si lo encuentra, None si no.
+    """
+    import glob
+    hint_lower = hint.lower()
+    # Menú de inicio del usuario + todos los usuarios
+    username = os.getenv("USERNAME", "")
+    search_roots = [
+        rf"C:\Users\{username}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs",
+        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+    ]
+    for root in search_roots:
+        for lnk in glob.iglob(os.path.join(root, "**", "*.lnk"), recursive=True):
+            name = os.path.splitext(os.path.basename(lnk))[0].lower()
+            if hint_lower in name or name in hint_lower:
+                return lnk
+    return None
+
+
+def _open_msg(lang: str, kind: str, **kw) -> str:
+    """Mensajes localizados para open_app.
+    kind: 'launched' | 'web' | 'proto_fail' | 'not_found'"""
+    is_en = (lang == "en")
+    if kind == "launched":
+        if is_en:
+            return f"Launched '{kw['name']}'. Its window may take a few seconds to appear — trust this confirmation."
+        return f"Lanzado '{kw['name']}'. Su ventana puede tardar unos segundos en aparecer — confía en esta confirmación."
+    if kind == "web":
+        if is_en:
+            return f"Opened '{kw['name']}' in the browser."
+        return f"'{kw['name']}' abierto en el navegador."
+    if kind == "proto_fail":
+        if is_en:
+            return f"Couldn't open '{kw['name']}' (protocol {kw['exe']}): {kw['err']}"
+        return f"No pude abrir '{kw['name']}' (protocolo {kw['exe']}): {kw['err']}"
+    # not_found fallback
+    if is_en:
+        return f"Couldn't find '{kw['name']}'. Searched direct launch, PowerShell, Start Menu and common install folders. Last error: {kw.get('err','?')}"
+    return f"No pude encontrar '{kw['name']}'. Probé lanzamiento directo, PowerShell, Menú Inicio y carpetas comunes. Último error: {kw.get('err','?')}"
+
+
+def open_app(app_name: str, lang: str = "en") -> str:
+    key = app_name.lower().strip()
+
+    # 1. Apps que son solo una URL web
+    if key in URL_APPS:
+        webbrowser.open(URL_APPS[key])
+        return _open_msg(lang, "web", name=app_name)
+
+    exe = APP_MAP.get(key, key)
+
+    # 2. Protocolos URI (steam://, ms-settings:, com.epicgames...) → os.startfile
+    if "://" in exe or exe.endswith(":"):
+        try:
+            os.startfile(exe)
+            return _open_msg(lang, "launched", name=app_name)
+        except Exception as e:
+            return _open_msg(lang, "proto_fail", name=app_name, exe=exe, err=e)
+
+    # 3. Intentar directamente con os.startfile (busca en registro de Windows)
+    try:
+        os.startfile(exe)
+        return _open_msg(lang, "launched", name=app_name)
+    except Exception:
+        pass
+
+    # 4. PowerShell Start-Process — busca en PATH, App Paths del registro y UWP
+    try:
+        ps = f'Start-Process "{exe}" -ErrorAction Stop'
+        result = subprocess.run(
+            ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+            capture_output=True, text=True, timeout=8,
+        )
+        if result.returncode == 0:
+            return _open_msg(lang, "launched", name=app_name)
+    except Exception:
+        pass
+
+    # 5. Buscar acceso directo en menú de inicio (cubre apps como LoL, Riot, etc.)
+    search_terms = [key, exe, app_name]
+    # Expandir alias (ej. "lol" → "league of legends")
+    for alias_term in _APP_ALIASES.get(key, []):
+        if alias_term not in search_terms:
+            search_terms.append(alias_term)
+    for search_term in search_terms:
+        lnk = _search_start_menu(search_term)
+        if lnk:
+            try:
+                os.startfile(lnk)
+                return _open_msg(lang, "launched", name=app_name)
+            except Exception:
+                pass
+
+    # 6. Buscar el .exe en rutas comunes de instalación
+    username = os.getenv("USERNAME", "")
+    common_roots = [
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        rf"C:\Users\{username}\AppData\Local",
+        rf"C:\Users\{username}\AppData\Roaming",
+        rf"C:\Users\{username}\AppData\Local\Programs",
+        r"C:\Riot Games",
+    ]
+    exe_name = exe if exe.endswith(".exe") else exe + ".exe"
+    for root in common_roots:
+        if not os.path.isdir(root):
+            continue
+        for folder_name in [app_name, exe, key]:
+            candidate = os.path.join(root, folder_name, exe_name)
+            if os.path.exists(candidate):
+                try:
+                    subprocess.Popen([candidate])
+                    return _open_msg(lang, "launched", name=app_name)
+                except Exception:
+                    pass
+
+    # 7. Último recurso: shell=True
+    try:
+        subprocess.Popen(exe, shell=True)
+        return _open_msg(lang, "launched", name=app_name)
+    except Exception as e:
+        return _open_msg(lang, "not_found", name=app_name, err=e)
+
+
+# ── Música ────────────────────────────────────────────────────────────────────
+
+def _resolve_youtube_url(query: str) -> tuple[str, str]:
+    """
+    Obtiene la URL directa del primer video de YouTube para query.
+    Devuelve (video_url, title). Lanza excepción si falla.
+    """
+    import re
+    import requests
+
+    search_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "es-ES,es;q=0.9",
+    }
+    resp = requests.get(search_url, headers=headers, timeout=8)
+    resp.raise_for_status()
+
+    video_id_match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
+    if not video_id_match:
+        raise ValueError("No se encontró ningún videoId")
+
+    video_id  = video_id_match.group(1)
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    title_match = re.search(
+        r'"videoId":"' + re.escape(video_id) + r'".*?"title":\{"runs":\[\{"text":"([^"]+)"',
+        resp.text,
+    )
+    if not title_match:
+        title_match = re.search(r'"title":\{"runs":\[\{"text":"([^"]+)"', resp.text)
+    title = title_match.group(1) if title_match else query
+
+    return video_url, title
+
+
+def _find_browser_exe() -> str | None:
+    """Encuentra el ejecutable del navegador por defecto desde el registro de Windows."""
+    try:
+        import winreg
+        import re as _re
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+        ) as key:
+            prog_id = winreg.QueryValueEx(key, "ProgId")[0]
+        with winreg.OpenKey(
+            winreg.HKEY_CLASSES_ROOT,
+            f"{prog_id}\\shell\\open\\command",
+        ) as key:
+            cmd = winreg.QueryValueEx(key, "")[0]
+        m = _re.match(r'"([^"]+)"', cmd)
+        if m and os.path.exists(m.group(1)):
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
+def _close_window_by_hwnd(hwnd: int) -> bool:
+    """Envía WM_CLOSE a una ventana y espera a que se cierre."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    if not hwnd or not user32.IsWindow(hwnd):
+        return True
+    user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    for _ in range(10):
+        time.sleep(0.2)
+        if not user32.IsWindow(hwnd):
+            return True
+    return False
+
+
+def play_music(query: str, browser_already_open: bool = False) -> tuple[str, bool]:
+    """
+    Busca el primer video en YouTube y lo reproduce.
+    - Si ya hay una pestaña de YouTube que Ashley abrió antes → NAVEGA a la nueva URL
+      en esa misma pestaña (no abre otra ni cierra nada del usuario).
+    - Si no hay pestaña previa → abre una nueva pestaña (NO ventana nueva).
+    NUNCA cierra ventanas/pestañas del usuario. Solo reutiliza las que Ashley abrió.
+    Devuelve (mensaje, nuevo_valor_de_browser_opened).
+
+    VERIFICACIÓN: tras la acción cuenta las pestañas del navegador. Si no
+    aumentó (ni navegó a URL visible), devuelve un mensaje de error honesto
+    para que Ashley NO mienta diciendo que reprodujo algo que no abrió.
+    """
+    global _youtube_hwnd
+    import logging
+    log = logging.getLogger("ashley.music")
+
+    try:
+        video_url, title = _resolve_youtube_url(query)
+    except Exception as e:
+        log.warning(f"play_music: resolve failed: {e}")
+        video_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query)
+        title = query
+
+    log.warning(f"play_music: query={query!r} hwnd={_youtube_hwnd} url={video_url}")
+
+    # Snapshot PRE-acción: cuántas pestañas hay en navegadores antes de actuar.
+    # Usamos este conteo para verificar que la pestaña realmente se abrió.
+    def _count_tabs_fresh() -> tuple[int, list[str]]:
+        try:
+            _tabs_cache["ts"] = 0.0  # forzar lectura fresca
+            tabs = _get_browser_tabs_via_uia(_get_all_browser_hwnds())
+            return len(tabs), tabs
+        except Exception:
+            return -1, []
+
+    pre_count, pre_tabs = _count_tabs_fresh()
+    log.warning(f"play_music: pre-action tab count={pre_count}")
+
+    # Intentar reutilizar la pestaña que Ashley abrió antes
+    navigated = False
+    if _youtube_hwnd:
+        import ctypes
+        if ctypes.windll.user32.IsWindow(_youtube_hwnd):
+            log.warning(f"play_music: reusing existing tab hwnd={_youtube_hwnd}, navigating to new URL")
+            navigated = _navigate_browser_subprocess(video_url, _youtube_hwnd)
+            if not navigated:
+                log.warning("play_music: navigation failed, opening new tab instead")
+        if not navigated:
+            _youtube_hwnd = 0
+
+    # No hay pestaña previa (o falló navegación) → abrir nueva pestaña
+    if not navigated:
+        log.warning("play_music: opening new tab via webbrowser.open")
+        webbrowser.open(video_url)
+
+    # Capturar HWND (para reutilizar la próxima vez)
+    captured = _capture_browser_hwnd(wait=2.0)
+    if captured:
+        _youtube_hwnd = captured
+    log.warning(f"play_music: captured hwnd={_youtube_hwnd}")
+
+    # ── VERIFICACIÓN post-acción ────────────────────────────────────────
+    # Esperar un poco para que el navegador procese y MSAA refleje el cambio.
+    time.sleep(1.0)
+    post_count, post_tabs = _count_tabs_fresh()
+    log.warning(f"play_music: post-action tab count={post_count}")
+
+    # Caso 1: conteo aumentó → nueva pestaña abierta, éxito.
+    if pre_count >= 0 and post_count > pre_count:
+        return f"Reproduciendo: '{title}'", True
+
+    # Caso 2: conteo igual pero navegamos una pestaña existente. Buscar un
+    # título que contenga algo del query o 'youtube' entre las pestañas.
+    if navigated and post_count >= 0:
+        q_lower = query.lower()
+        q_words = [w for w in q_lower.split() if len(w) > 3]
+        for t in post_tabs:
+            t_lower = t.lower()
+            if "youtube" in t_lower or any(w in t_lower for w in q_words):
+                return f"Reproduciendo: '{title}'", True
+
+    # Caso 3: no podemos verificar que la pestaña apareció. Ser honesto:
+    # Ashley recibirá este mensaje y así no le mentirá al usuario.
+    if post_count < 0 or pre_count < 0:
+        # MSAA no disponible — no podemos verificar. Asumir éxito tentativo
+        # para no bloquear acciones legítimas si MSAA falla por otros motivos.
+        log.warning("play_music: MSAA verification unavailable, assuming success")
+        return f"Reproduciendo: '{title}'", True
+
+    log.warning(f"play_music: VERIFICATION FAILED — pre={pre_count} post={post_count}")
+    return (
+        f"Error: intenté reproducir '{title}' pero no detecté que se abriera "
+        f"la pestaña (el navegador puede no haber recibido el foco). "
+        f"Pide al usuario que abra una ventana del navegador manualmente e intenta de nuevo."
+    ), False
+
+
+# ── Búsqueda web ──────────────────────────────────────────────────────────────
+
+def search_web(query: str) -> str:
+    url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
+    webbrowser.open(url)
+    return f"Búsqueda de '{query}' abierta en Google."
+
+
+# ── Abrir URL ─────────────────────────────────────────────────────────────────
+
+def open_url(url: str) -> str:
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    webbrowser.open(url)
+    return f"URL abierta: {url}"
+
+
+# ── Cerrar ventana / app ──────────────────────────────────────────────────────
+
+def _find_window_title(hint: str) -> str | None:
+    """Devuelve el título exacto de la primera ventana que contenga hint."""
+    ps = (
+        f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{hint}*" }}'
+        f' | Select-Object -First 1 -ExpandProperty MainWindowTitle'
+    )
+    result = subprocess.run(
+        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+        capture_output=True, text=True, timeout=5,
+    )
+    title = result.stdout.strip()
+    return title if title else None
+
+
+def _terminate_process_by_name(proc_name: str) -> bool:
+    """
+    Mata un proceso por nombre usando SeDebugPrivilege + TerminateProcess vía ctypes.
+    Funciona contra procesos elevados si el usuario tiene cuenta de administrador.
+    Devuelve True si mató al menos un proceso.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32  = ctypes.windll.kernel32
+    advapi32  = ctypes.windll.advapi32
+
+    # ── Intentar habilitar SeDebugPrivilege ──────────────────────────────────
+    TOKEN_ADJUST_PRIVILEGES = 0x0020
+    TOKEN_QUERY             = 0x0008
+    SE_PRIVILEGE_ENABLED    = 0x00000002
+
+    class LUID(ctypes.Structure):
+        _fields_ = [("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG)]
+
+    class LUID_AND_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [("Luid", LUID), ("Attributes", wintypes.DWORD)]
+
+    class TOKEN_PRIVILEGES(ctypes.Structure):
+        _fields_ = [("PrivilegeCount", wintypes.DWORD),
+                    ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+
+    htoken = wintypes.HANDLE()
+    if advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            ctypes.byref(htoken)):
+        luid = LUID()
+        if advapi32.LookupPrivilegeValueW(None, "SeDebugPrivilege", ctypes.byref(luid)):
+            tp = TOKEN_PRIVILEGES()
+            tp.PrivilegeCount = 1
+            tp.Privileges[0].Luid = luid
+            tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
+            advapi32.AdjustTokenPrivileges(
+                htoken, False, ctypes.byref(tp), ctypes.sizeof(tp), None, None)
+        kernel32.CloseHandle(htoken)
+
+    # ── Snapshot de procesos y TerminateProcess ──────────────────────────────
+    TH32CS_SNAPPROCESS = 0x00000002
+    PROCESS_TERMINATE  = 0x0001
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize",             wintypes.DWORD),
+            ("cntUsage",           wintypes.DWORD),
+            ("th32ProcessID",      wintypes.DWORD),
+            ("th32DefaultHeapID",  ctypes.POINTER(wintypes.ULONG)),
+            ("th32ModuleID",       wintypes.DWORD),
+            ("cntThreads",         wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase",     wintypes.LONG),
+            ("dwFlags",            wintypes.DWORD),
+            ("szExeFile",          ctypes.c_wchar * 260),
+        ]
+
+    target = proc_name.lower().replace(".exe", "")
+    killed = False
+
+    hsnap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if hsnap == wintypes.HANDLE(-1).value:
+        return False
+    try:
+        pe = PROCESSENTRY32W()
+        pe.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        more = kernel32.Process32FirstW(hsnap, ctypes.byref(pe))
+        while more:
+            exe = pe.szExeFile.lower().replace(".exe", "")
+            if target == exe or target in exe:
+                hproc = kernel32.OpenProcess(PROCESS_TERMINATE, False, pe.th32ProcessID)
+                if hproc:
+                    kernel32.TerminateProcess(hproc, 1)
+                    kernel32.CloseHandle(hproc)
+                    killed = True
+            more = kernel32.Process32NextW(hsnap, ctypes.byref(pe))
+    finally:
+        kernel32.CloseHandle(hsnap)
+
+    return killed
+
+
+def _process_running_by_name(proc_name: str) -> bool:
+    """
+    Comprueba si existe algún proceso vivo cuyo exe contenga proc_name.
+    Usa CreateToolhelp32Snapshot — funciona independientemente de privilegios de ventana.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    TH32CS_SNAPPROCESS = 0x00000002
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize",              wintypes.DWORD),
+            ("cntUsage",            wintypes.DWORD),
+            ("th32ProcessID",       wintypes.DWORD),
+            ("th32DefaultHeapID",   ctypes.POINTER(wintypes.ULONG)),
+            ("th32ModuleID",        wintypes.DWORD),
+            ("cntThreads",          wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase",      wintypes.LONG),
+            ("dwFlags",             wintypes.DWORD),
+            ("szExeFile",           ctypes.c_wchar * 260),
+        ]
+
+    target = proc_name.lower().replace(".exe", "")
+    hsnap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if hsnap == wintypes.HANDLE(-1).value:
+        return False
+    try:
+        pe = PROCESSENTRY32W()
+        pe.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        more = kernel32.Process32FirstW(hsnap, ctypes.byref(pe))
+        while more:
+            exe = pe.szExeFile.lower().replace(".exe", "")
+            if target == exe or target in exe:
+                return True
+            more = kernel32.Process32NextW(hsnap, ctypes.byref(pe))
+    finally:
+        kernel32.CloseHandle(hsnap)
+    return False
+
+
+def _normalize(text: str) -> str:
+    """Quita tildes/diacríticos y pasa a minúsculas para comparación flexible."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def close_window(hint: str) -> str:
+    """
+    Cierra la ventana o aplicación indicada.
+    PROTECCIÓN: si el hint parece una pestaña del navegador (no una app standalone),
+    redirige a close_browser_tab para no matar toda la ventana del navegador.
+    """
+    key = _normalize(hint)
+
+    # ── Protección anti-destrucción de navegador ──────────────────────
+    # Si el hint es algo que suena a pestaña (YouTube, un título de web, etc.)
+    # y NO es el nombre del navegador en sí (opera, chrome, firefox),
+    # redirigir a close_browser_tab que cierra SOLO la pestaña.
+    _BROWSER_NAMES = {"opera", "chrome", "firefox", "edge", "brave", "opera gx", "navegador", "browser"}
+    if key not in _BROWSER_NAMES:
+        # Comprobar si el hint matchea alguna pestaña conocida via MSAA
+        try:
+            all_tabs = _get_browser_tabs_via_uia(_get_all_browser_hwnds())
+            for tab_title in all_tabs:
+                if key in tab_title.lower():
+                    # Es una pestaña! Redirigir a close_browser_tab
+                    import logging
+                    logging.getLogger("ashley.tabs").warning(
+                        f"close_window '{hint}' matched browser tab '{tab_title}' → redirecting to close_browser_tab"
+                    )
+                    return close_browser_tab(hint)
+        except Exception:
+            pass
+
+    # 1. YouTube → cerrar la ventana dedicada
+    if "youtube" in key:
+        global _youtube_hwnd
+        yt = _find_youtube_hwnd() or _youtube_hwnd
+        if yt and _close_window_by_hwnd(yt):
+            _youtube_hwnd = 0
+            return "Ventana de YouTube cerrada."
+
+    import ctypes as _ct
+    _u32 = _ct.windll.user32
+
+    # Mapeo español → nombre de proceso
+    _CLOSE_MAP = {
+        "administrador de tareas": "taskmgr", "task manager": "taskmgr",
+        "bloc de notas": "notepad", "notepad": "notepad",
+        "explorador": "explorer", "explorer": "explorer",
+        "calculadora": "calculatorapp", "calculator": "calculatorapp",
+        "paint": "mspaint", "microsoft paint": "mspaint",
+        "word": "winword", "excel": "excel", "powerpoint": "powerpnt",
+        "steam": "steam", "discord": "discord", "spotify": "spotify",
+        "chrome": "chrome", "opera": "opera", "firefox": "firefox",
+        "edge": "msedge", "brave": "brave",
+    }
+
+    # Construir lista de nombres de proceso candidatos
+    exe_hint = APP_MAP.get(key, hint)
+    if "://" in exe_hint:
+        exe_hint = key
+    proc_name = exe_hint.replace(".exe", "").replace(".EXE", "").split("/")[0].split("\\")[-1]
+    proc_variants: set[str] = {proc_name}
+    if key in _CLOSE_MAP:
+        proc_variants.add(_CLOSE_MAP[key])
+    # También buscar el proceso directamente por nombre del exe detectado en la ventana
+    found_title = ""
+
+    # 2. Intentar WM_CLOSE por título de ventana
+    found_hwnd = [0]
+    found_title_ref = [""]
+    CB = _ct.WINFUNCTYPE(_ct.c_bool, _ct.c_void_p, _ct.c_void_p)
+    def _enum_cb(hwnd, _):
+        if not _u32.IsWindowVisible(hwnd):
+            return True
+        n = _u32.GetWindowTextLengthW(hwnd)
+        if n == 0:
+            return True
+        buf = _ct.create_unicode_buffer(n + 1)
+        _u32.GetWindowTextW(hwnd, buf, n + 1)
+        if key in _normalize(buf.value):
+            found_hwnd[0] = hwnd
+            found_title_ref[0] = buf.value
+            return False
+        return True
+    _u32.EnumWindows(CB(_enum_cb), 0)
+
+    if found_hwnd[0]:
+        found_title = found_title_ref[0]
+        # Añadir el proceso de la ventana encontrada a los candidatos
+        proc_from_hwnd = _get_process_name_for_hwnd(found_hwnd[0]).replace(".exe", "")
+        if proc_from_hwnd:
+            proc_variants.add(proc_from_hwnd)
+        _close_window_by_hwnd(found_hwnd[0])
+        time.sleep(0.5)
+
+    # 3. Stop-Process + taskkill por nombre — independiente de si vemos la ventana
+    for pname in list(proc_variants):
+        try:
+            subprocess.run(
+                ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c",
+                 f'Stop-Process -Name "{pname}" -Force -ErrorAction SilentlyContinue'],
+                capture_output=True, text=True, timeout=5,
+            )
+        except Exception:
+            pass
+        try:
+            subprocess.run(
+                ["cmd", "/c", f"taskkill /F /IM {pname}.exe"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except Exception:
+            pass
+
+    # 4. SeDebugPrivilege + TerminateProcess — último recurso para procesos elevados
+    for pname in list(proc_variants):
+        _terminate_process_by_name(pname)
+
+    # Verificar con snapshot de procesos (NO con ventanas — las elevadas pueden ser invisibles)
+    time.sleep(0.8)
+    still_running = any(_process_running_by_name(p) for p in proc_variants)
+
+    if not still_running:
+        return f"'{found_title or hint}' cerrado."
+
+    # Sigue corriendo — informar honestamente
+    if found_title:
+        return (
+            f"No pude cerrar '{found_title}'. "
+            f"Probablemente requiere permisos de administrador que Reflex no tiene. "
+            f"Tendría que cerrarlo el jefe manualmente."
+        )
+    # No encontramos ventana ni proceso — no estaba abierto
+    still_by_proc = any(_process_running_by_name(p) for p in proc_variants)
+    if still_by_proc:
+        return f"No pude cerrar '{hint}'."
+    return f"No encontré '{hint}' abierto."
+
+
+# ── Navegador: HWND capturado ─────────────────────────────────────────────────
+
+# HWND de la ventana del navegador que abrió YouTube.
+# Se captura justo después de webbrowser.open() en el proceso principal
+# (donde no hay foreground lock) y se reutiliza en llamadas posteriores.
+_youtube_hwnd: int = 0
+
+_BROWSER_WIN32_CLASSES = {"Chrome_WidgetWin_1", "MozillaWindowClass"}
+
+# Procesos que son browsers reales (tienen pestañas que se cierran con Ctrl+W)
+# Apps Electron como Riot Client, Discord, VS Code NO están aquí aunque usen Chrome_WidgetWin_1
+_REAL_BROWSER_PROCS = {
+    "opera.exe", "operagx.exe", "chrome.exe", "firefox.exe",
+    "brave.exe", "msedge.exe", "vivaldi.exe", "iexplore.exe",
+}
+
+
+def _find_youtube_hwnd() -> int:
+    """
+    Enumera todas las ventanas de navegador visibles y devuelve el HWND
+    de la que tenga 'youtube' en el título (tab activo = YouTube).
+    Devuelve 0 si no encuentra ninguna.
+    """
+    import ctypes
+    user32 = ctypes.windll.user32
+    result = [0]
+
+    CB = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def _cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        if cls.value not in _BROWSER_WIN32_CLASSES:
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        if "youtube" in buf.value.lower():
+            result[0] = hwnd
+            return False  # parar en el primero que coincida
+        return True
+
+    user32.EnumWindows(CB(_cb), 0)
+    return result[0]
+
+
+def _capture_browser_hwnd(wait: float = 1.5) -> int:
+    """
+    Espera hasta `wait + 4` segundos a que aparezca una ventana de navegador
+    con 'YouTube' en el título (el tab activo cargó YouTube).
+    """
+    import logging
+    log = logging.getLogger("ashley.music")
+
+    deadline = time.time() + wait + 4.0
+    time.sleep(wait)
+
+    while time.time() < deadline:
+        hwnd = _find_youtube_hwnd()
+        if hwnd:
+            log.warning(f"captured hwnd={hwnd} (YouTube tab found)")
+            return hwnd
+        time.sleep(0.4)
+
+    log.warning("capture: YouTube window not found within timeout")
+    return 0
+
+
+def reset_youtube_hwnd():
+    """Llamar en on_load para limpiar el HWND entre reinicios."""
+    global _youtube_hwnd
+    _youtube_hwnd = 0
+
+
+def _send_keys_subprocess(hwnd: int, keys_sequence: list[tuple[int, ...]]) -> bool:
+    """
+    Lanza un subprocess que enfoca `hwnd` y envía secuencias de teclas via keybd_event.
+    Usa AllowSetForegroundWindow + keybd_event (funciona desde background, a diferencia de SendInput).
+    keys_sequence: lista de tuplas de VK codes, ej: [(0x11, 0x57)] → Ctrl+W
+    """
+    import sys, ctypes, json
+
+    script = r"""
+import sys, time, ctypes, json
+
+hwnd = int(sys.argv[1])
+keys_sequence = json.loads(sys.argv[2])
+
+user32   = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+if not user32.IsWindow(hwnd):
+    sys.exit(1)
+
+fg     = user32.GetForegroundWindow()
+fg_tid = user32.GetWindowThreadProcessId(fg, None)
+my_tid = kernel32.GetCurrentThreadId()
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, True)
+if user32.IsIconic(hwnd):
+    user32.ShowWindow(hwnd, 9)
+user32.BringWindowToTop(hwnd)
+user32.SetForegroundWindow(hwnd)
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, False)
+time.sleep(0.5)
+
+KEYEVENTF_KEYUP = 0x0002
+
+def hotkey(*vks):
+    for vk in vks:           user32.keybd_event(vk, 0, 0, 0); time.sleep(0.05)
+    for vk in reversed(vks): user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0); time.sleep(0.05)
+
+for combo in keys_sequence:
+    hotkey(*combo)
+    time.sleep(0.3)
+
+sys.exit(0)
+"""
+    keys_json = json.dumps(keys_sequence)
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script, str(hwnd), keys_json],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        ctypes.windll.user32.AllowSetForegroundWindow(proc.pid)
+        proc.wait(timeout=8)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def _find_and_close_tab_subprocess(hwnd: int, hint: str) -> bool:
+    """
+    Subprocess con AllowSetForegroundWindow + keybd_event que:
+    1. Enfoca la ventana hwnd
+    2. Cicla tabs con Ctrl+Tab (keybd_event — funciona desde background)
+    3. Lee el título tras cada ciclo
+    4. Cierra con Ctrl+W cuando encuentra el hint
+    """
+    import sys, ctypes, logging
+    log = logging.getLogger("ashley.tabs")
+
+    script = r"""
+import sys, time, ctypes
+
+hwnd = int(sys.argv[1])
+hint = sys.argv[2].lower()
+
+user32   = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+if not user32.IsWindow(hwnd):
+    print("ERR: hwnd invalid", file=sys.stderr)
+    sys.exit(1)
+
+def get_title(h):
+    n = user32.GetWindowTextLengthW(h)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    user32.GetWindowTextW(h, buf, n + 1)
+    return buf.value
+
+# ── Enfocar ──────────────────────────────────────
+fg     = user32.GetForegroundWindow()
+fg_tid = user32.GetWindowThreadProcessId(fg, None)
+my_tid = kernel32.GetCurrentThreadId()
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, True)
+if user32.IsIconic(hwnd):
+    user32.ShowWindow(hwnd, 9)
+user32.BringWindowToTop(hwnd)
+user32.SetForegroundWindow(hwnd)
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, False)
+time.sleep(0.6)
+
+# ── Teclado via keybd_event ──────────────────────
+KEYEVENTF_KEYUP = 0x0002
+VK_CONTROL = 0x11
+VK_TAB     = 0x09
+VK_W       = 0x57
+
+def hotkey(*vks):
+    for vk in vks:           user32.keybd_event(vk, 0, 0, 0); time.sleep(0.05)
+    for vk in reversed(vks): user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0); time.sleep(0.05)
+
+# ── Comprobar tab activo ─────────────────────────
+title_now = get_title(hwnd).lower()
+print(f"CURRENT: {title_now}", file=sys.stderr)
+if hint in title_now:
+    hotkey(VK_CONTROL, VK_W)
+    time.sleep(0.2)
+    print("CLOSED_ACTIVE", file=sys.stderr)
+    sys.exit(0)
+
+# ── Ciclar tabs ──────────────────────────────────
+start_title = title_now
+MAX_TABS = 40
+
+for i in range(MAX_TABS):
+    hotkey(VK_CONTROL, VK_TAB)
+    time.sleep(1.0)
+    title = get_title(hwnd).lower()
+    print(f"TAB {i+1}: {title}", file=sys.stderr)
+    if hint in title:
+        hotkey(VK_CONTROL, VK_W)
+        time.sleep(0.2)
+        print(f"CLOSED_TAB_{i+1}", file=sys.stderr)
+        sys.exit(0)
+    if i > 0 and title == start_title:
+        print("FULL_CYCLE", file=sys.stderr)
+        sys.exit(1)
+
+print("NOT_FOUND", file=sys.stderr)
+sys.exit(1)
+"""
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script, str(hwnd), hint],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        ctypes.windll.user32.AllowSetForegroundWindow(proc.pid)
+        proc.wait(timeout=70)
+        stderr = proc.stderr.read().decode(errors="replace").strip()
+        if stderr:
+            log.warning(f"tab-cycle: {stderr[:2000]}")
+        return proc.returncode == 0
+    except Exception as e:
+        log.warning(f"tab-cycle failed: {e}")
+        return False
+
+
+def close_browser_tab(hint: str) -> str:
+    """
+    Cierra el tab del navegador cuyo título contenga `hint`.
+    0. Busca en la lista MSAA de tabs el título completo que matchee el hint.
+    1. Tab activo visible en título de ventana → PowerShell Ctrl+W.
+    2. Tab de fondo → PowerShell cicla tabs con Ctrl+Tab y cierra.
+
+    IMPORTANTE: nunca hace WM_CLOSE sobre la ventana del navegador, aunque
+    `_youtube_hwnd` esté seteado. Desde que `play_music` reutiliza la ventana
+    del navegador del usuario en vez de abrir una --new-window dedicada,
+    `_youtube_hwnd` apunta al hwnd del navegador entero — cerrarlo mataría
+    TODAS las pestañas del usuario, no solo la de YouTube.
+    """
+    import ctypes, logging
+    user32 = ctypes.windll.user32
+    log = logging.getLogger("ashley.tabs")
+
+    global _youtube_hwnd
+
+    key = hint.lower().strip()
+    log.warning(f"close_browser_tab: hint={hint!r} key={key!r}")
+
+    # Paso 0: Buscar el título completo en la lista MSAA de tabs.
+    # El usuario puede dar un hint parcial ("diagramme") pero el tab cycling
+    # necesita matchear contra el título completo de la ventana. Si MSAA
+    # tiene el título exacto, lo usamos como key mejorada.
+    try:
+        all_tabs = _get_browser_tabs_via_uia(_get_all_browser_hwnds())
+        for tab_title in all_tabs:
+            if key in tab_title.lower():
+                improved_key = tab_title.lower()
+                log.warning(f"close_browser_tab: MSAA found full title: {tab_title!r} → using as key")
+                key = improved_key
+                break
+    except Exception:
+        pass
+
+    # Paso 1: Buscar ventana cuyo título ya contenga el hint (tab activo)
+    found = []
+    CB = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def _cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        if cls.value not in _BROWSER_WIN32_CLASSES:
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        found.append((hwnd, buf.value))
+        return True
+
+    user32.EnumWindows(CB(_cb), 0)
+    log.warning(f"close_browser_tab: found windows: {[(h, t[:50]) for h, t in found]}")
+
+    VK_CONTROL, VK_W = 0x11, 0x57
+
+    if not key or key == "activo":
+        # Cerrar tab activo del navegador en foreground
+        fg = user32.GetForegroundWindow()
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(fg, cls, 256)
+        if cls.value in _BROWSER_WIN32_CLASSES:
+            ok = _send_keys_subprocess(fg, [[VK_CONTROL, VK_W]])
+            return "Pestaña cerrada." if ok else "No pude cerrar la pestaña activa."
+        return "No hay navegador en primer plano."
+
+    def _tab_still_visible(search_key: str) -> bool:
+        """Comprueba si alguna ventana del navegador aún tiene el hint en el título."""
+        still_there = [False]
+        def _chk(hwnd, _):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            cls2 = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls2, 256)
+            if cls2.value not in _BROWSER_WIN32_CLASSES:
+                return True
+            n2 = user32.GetWindowTextLengthW(hwnd)
+            if n2 == 0:
+                return True
+            buf2 = ctypes.create_unicode_buffer(n2 + 1)
+            user32.GetWindowTextW(hwnd, buf2, n2 + 1)
+            if search_key in buf2.value.lower():
+                still_there[0] = True
+                return False
+            return True
+        CB2 = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        user32.EnumWindows(CB2(_chk), 0)
+        return still_there[0]
+
+    # Si el hint aparece en el título de alguna ventana → tab activo, Ctrl+W directo
+    for h, t in found:
+        if key in t.lower():
+            log.warning(f"close_browser_tab: hint in title, Ctrl+W on hwnd={h}")
+            _send_keys_subprocess(h, [[VK_CONTROL, VK_W]])
+            # Opera GX y otros Chromium tardan en actualizar el título de ventana
+            # tras cerrar un tab. Hacemos dos checks con espera progresiva.
+            for _wait in (1.0, 1.5):
+                time.sleep(_wait)
+                if not _tab_still_visible(key):
+                    if "youtube" in key:
+                        _youtube_hwnd = 0
+                    return f"Pestaña '{hint}' cerrada."
+            log.warning(f"close_browser_tab: tab still visible after Ctrl+W (may be slow browser)")
+            # Falló o el browser fue muy lento → continuar al ciclo de tabs
+
+    # Paso 2: Tab de fondo → subprocess cicla tabs en cada ventana de navegador
+    if not found:
+        return f"No encontré ninguna pestaña con '{hint}' abierta."
+
+    for h, t in found:
+        log.warning(f"close_browser_tab: cycling tabs in hwnd={h} '{t[:50]}'")
+        ok = _find_and_close_tab_subprocess(h, key)
+        if ok:
+            for _wait in (1.0, 1.5):
+                time.sleep(_wait)
+                if not _tab_still_visible(key):
+                    if "youtube" in key:
+                        _youtube_hwnd = 0
+                    return f"Pestaña '{hint}' cerrada."
+
+    return f"No pude cerrar la pestaña '{hint}'. Puede que no esté abierta en el navegador o el tab esté en segundo plano y no se pudo acceder."
+
+
+def _navigate_browser_subprocess(url: str, hwnd: int) -> bool:
+    """
+    Navega a `url` en la pestaña de YouTube de la ventana `hwnd`.
+    - Cicla tabs con Ctrl+Tab hasta encontrar el que tenga 'youtube' en el título
+    - NO usa SW_RESTORE para no encoger ventanas maximizadas
+    - URL y HWND van como sys.argv[1/2] — raw string, sin f-string
+    """
+    import sys
+    import ctypes
+
+    script = r"""
+import sys, time, ctypes
+from ctypes import wintypes
+
+url  = sys.argv[1]
+hwnd = int(sys.argv[2])
+
+user32   = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+# Tipos correctos 64-bit
+kernel32.GlobalAlloc.restype     = ctypes.c_void_p
+kernel32.GlobalAlloc.argtypes    = [ctypes.c_uint, ctypes.c_size_t]
+kernel32.GlobalLock.restype      = ctypes.c_void_p
+kernel32.GlobalLock.argtypes     = [ctypes.c_void_p]
+kernel32.GlobalUnlock.restype    = ctypes.c_bool
+kernel32.GlobalUnlock.argtypes   = [ctypes.c_void_p]
+user32.OpenClipboard.argtypes    = [ctypes.c_void_p]
+user32.SetClipboardData.restype  = ctypes.c_void_p
+user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+user32.GetClipboardData.restype  = ctypes.c_void_p
+user32.GetClipboardData.argtypes = [ctypes.c_uint]
+
+if not user32.IsWindow(hwnd):
+    print("ERROR: hwnd invalid", file=sys.stderr)
+    sys.exit(1)
+
+def get_title(h):
+    n = user32.GetWindowTextLengthW(h)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    user32.GetWindowTextW(h, buf, n + 1)
+    return buf.value
+
+# ── Enfocar SIN encoger ───────────────────────────────────────
+fg     = user32.GetForegroundWindow()
+fg_tid = user32.GetWindowThreadProcessId(fg, None)
+my_tid = kernel32.GetCurrentThreadId()
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, True)
+if user32.IsIconic(hwnd):
+    user32.ShowWindow(hwnd, 9)
+user32.BringWindowToTop(hwnd)
+user32.SetForegroundWindow(hwnd)
+if fg_tid and fg_tid != my_tid:
+    user32.AttachThreadInput(my_tid, fg_tid, False)
+time.sleep(0.6)
+
+print("FOCUSED: " + get_title(hwnd), file=sys.stderr)
+
+# ── Teclado via SendInput ─────────────────────────────────────
+INPUT_KEYBOARD  = 1
+KEYEVENTF_KEYUP = 0x0002
+VK_CONTROL = 0x11
+VK_T  = 0x54
+VK_L  = 0x4C
+VK_A  = 0x41
+VK_V  = 0x56
+VK_RETURN = 0x0D
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk",         wintypes.WORD),
+        ("wScan",       wintypes.WORD),
+        ("dwFlags",     wintypes.DWORD),
+        ("time",        wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+class _INPUTunion(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", wintypes.DWORD), ("_input", _INPUTunion)]
+
+def _key(vk, flags=0):
+    inp = INPUT(type=INPUT_KEYBOARD)
+    inp._input.ki.wVk     = vk
+    inp._input.ki.dwFlags = flags
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+    time.sleep(0.05)
+
+def hotkey(*vks):
+    for vk in vks:           _key(vk, 0)
+    for vk in reversed(vks): _key(vk, KEYEVENTF_KEYUP)
+
+def press(vk):
+    _key(vk, 0); _key(vk, KEYEVENTF_KEYUP)
+
+# ── Clipboard puro ctypes ─────────────────────────────────────
+def clip_set(text):
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE  = 0x0002
+    encoded = (text + "\0").encode("utf-16-le")
+    h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+    p = kernel32.GlobalLock(h)
+    ctypes.memmove(p, encoded, len(encoded))
+    kernel32.GlobalUnlock(h)
+    user32.OpenClipboard(0)
+    user32.EmptyClipboard()
+    user32.SetClipboardData(CF_UNICODETEXT, h)
+    user32.CloseClipboard()
+
+def clip_get():
+    CF_UNICODETEXT = 13
+    try:
+        user32.OpenClipboard(0)
+        h = user32.GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            user32.CloseClipboard()
+            return ""
+        p = kernel32.GlobalLock(h)
+        text = ctypes.wstring_at(p) if p else ""
+        kernel32.GlobalUnlock(h)
+        user32.CloseClipboard()
+        return text
+    except Exception:
+        return ""
+
+# ── Abrir tab nuevo + navegar a la URL ───────────────────────
+# Ctrl+T abre tab nuevo en la misma ventana (sin crear ventana nueva)
+# Ctrl+L focaliza la barra de dirección de ese tab limpio
+prev = clip_get()
+
+hotkey(VK_CONTROL, VK_T)   # tab nuevo
+time.sleep(0.5)
+hotkey(VK_CONTROL, VK_L)   # barra de dirección
+time.sleep(0.3)
+clip_set(url)
+time.sleep(0.15)
+hotkey(VK_CONTROL, VK_A)
+hotkey(VK_CONTROL, VK_V)
+time.sleep(0.2)
+press(VK_RETURN)
+time.sleep(0.3)
+
+try:
+    clip_set(prev)
+except Exception:
+    pass
+
+print("OK")
+sys.exit(0)
+"""
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script, url, str(hwnd)],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        ctypes.windll.user32.AllowSetForegroundWindow(proc.pid)
+        proc.wait(timeout=15)
+        stdout = proc.stdout.read().decode(errors="replace").strip()
+        stderr = proc.stderr.read().decode(errors="replace").strip()
+        import logging
+        log2 = logging.getLogger("ashley.music")
+        log2.warning(f"subprocess returncode={proc.returncode}")
+        if stdout: log2.warning(f"subprocess stdout: {stdout}")
+        if stderr: log2.warning(f"subprocess stderr: {stderr[:1200]}")
+        return proc.returncode == 0
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.music").warning(f"subprocess navigate failed: {e}")
+        return False
+
+
+# Mantener por compatibilidad con otros usos
+def _focus_browser_win32() -> bool:
+    return True  # El subproceso hace el focus
+
+def _navigate_browser_to(url: str) -> bool:
+    return _navigate_browser_subprocess(url)
+
+
+# ── Volumen ───────────────────────────────────────────────────────────────────
+
+def _volume_pycaw(action: str, value: Optional[str]) -> str:
+    from ctypes import cast, POINTER
+    from comtypes import CLSCTX_ALL
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+    devices = AudioUtilities.GetSpeakers()
+    iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    vol = cast(iface, POINTER(IAudioEndpointVolume))
+    current = vol.GetMasterVolumeLevelScalar()
+
+    if action == "up":
+        nv = min(1.0, current + 0.10)
+        vol.SetMasterVolumeLevelScalar(nv, None)
+        return f"Volumen subido a {int(nv * 100)}%."
+    elif action == "down":
+        nv = max(0.0, current - 0.10)
+        vol.SetMasterVolumeLevelScalar(nv, None)
+        return f"Volumen bajado a {int(nv * 100)}%."
+    elif action == "mute":
+        muted = vol.GetMute()
+        vol.SetMute(not muted, None)
+        return "Audio silenciado." if not muted else "Audio activado."
+    elif action == "set" and value:
+        lv = max(0.0, min(1.0, int(value) / 100))
+        vol.SetMasterVolumeLevelScalar(lv, None)
+        return f"Volumen establecido al {value}%."
+    return f"Acción de volumen desconocida: '{action}'"
+
+
+def _volume_powershell(action: str) -> str:
+    key_map = {"up": "175", "down": "174", "mute": "173"}
+    k = key_map.get(action, "173")
+    reps = 5 if action in ("up", "down") else 1
+    ps = "$w=New-Object -ComObject WScript.Shell;" + "".join(
+        [f"$w.SendKeys([char]{k});" for _ in range(reps)]
+    )
+    subprocess.run(
+        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+        capture_output=True,
+    )
+    labels = {"up": "Volumen subido.", "down": "Volumen bajado.", "mute": "Audio silenciado/activado."}
+    return labels.get(action, f"Volumen: {action}.")
+
+
+def control_volume(action: str, value: Optional[str] = None) -> str:
+    try:
+        return _volume_pycaw(action, value)
+    except ImportError:
+        return _volume_powershell(action)
+    except Exception as e:
+        return f"Error de volumen: {e}"
+
+
+# ── Control de teclado ────────────────────────────────────────────────────────
+
+def _get_pyautogui():
+    """Importa pyautogui con configuración segura."""
+    import pyautogui
+    pyautogui.PAUSE = 0.05   # Pequeña pausa entre acciones
+    pyautogui.FAILSAFE = True  # Mover ratón a esquina superior-izquierda cancela
+    return pyautogui
+
+
+def focus_window(title_substr: str) -> str:
+    """
+    Activa una ventana cuyo título contenga title_substr.
+    Usa WScript.Shell.AppActivate (sin dependencias extra).
+    """
+    ps = f'(New-Object -ComObject WScript.Shell).AppActivate("{title_substr}")'
+    subprocess.run(
+        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+        capture_output=True,
+    )
+    time.sleep(0.5)  # Dar tiempo a que la ventana tome el foco
+    return f"Ventana '{title_substr}' activada."
+
+
+def type_text(text: str) -> str:
+    """
+    Escribe texto en el control activo usando el portapapeles.
+    Soporta acentos, emojis, Unicode y saltos de línea (\n → newline real).
+    El portapapeles anterior se restaura después.
+    """
+    # Convertir \n literal (que Ashley escribe en el tag) en saltos de línea reales
+    text = text.replace("\\n", "\n").replace("\\t", "\t")
+    try:
+        import pyperclip
+        pya = _get_pyautogui()
+
+        try:
+            previous = pyperclip.paste()
+        except Exception:
+            previous = ""
+
+        pyperclip.copy(text)
+        time.sleep(0.15)
+        pya.hotkey("ctrl", "v")
+        time.sleep(0.1)
+
+        try:
+            pyperclip.copy(previous)
+        except Exception:
+            pass
+
+        preview = text[:80].replace("\n", "↵") + ("…" if len(text) > 80 else "")
+        return f"Texto escrito ({len(text)} caracteres): '{preview}'"
+    except ImportError:
+        return "Falta pyautogui o pyperclip. Instala con: pip install pyautogui pyperclip"
+
+
+def type_in_window(window_title: str, text: str) -> str:
+    """Enfoca una ventana por título y luego escribe el texto."""
+    focus_result = focus_window(window_title)
+    time.sleep(0.4)
+    type_result = type_text(text)
+    return f"{focus_result} → {type_result}"
+
+
+def write_to_app(app_name: str, text: str) -> str:
+    """
+    Abre una app (si no está ya abierta), espera a que esté lista,
+    la enfoca explícitamente y escribe el texto en ella.
+    """
+    # Abrir la app
+    open_result = open_app(app_name)
+    time.sleep(2.0)  # Esperar a que la app abra
+
+    # Intentar enfocar la ventana de la app por nombre (más fiable que confiar en el foco actual)
+    # Usamos el app_name como hint — la mayoría de apps tienen su nombre en el título
+    focus_result = focus_window(app_name)
+    time.sleep(0.4)  # Pequeña pausa tras enfocar
+
+    # Escribir el texto
+    type_result = type_text(text)
+    return f"{open_result} → {type_result}"
+
+
+def press_hotkey(keys: list[str]) -> str:
+    """Ejecuta una combinación de teclas (ej: ctrl+c, alt+f4, ctrl+shift+t)."""
+    try:
+        pya = _get_pyautogui()
+        pya.hotkey(*keys)
+        return f"Atajo '{'+'.join(keys)}' ejecutado."
+    except ImportError:
+        return "Falta pyautogui. Instala con: pip install pyautogui"
+    except Exception as e:
+        return f"Error ejecutando atajo: {e}"
+
+
+def press_key(key: str) -> str:
+    """Presiona una tecla (enter, tab, escape, f5, etc.)."""
+    try:
+        pya = _get_pyautogui()
+        pya.press(key)
+        return f"Tecla '{KEY_LABELS.get(key.lower(), key)}' presionada."
+    except ImportError:
+        return "Falta pyautogui. Instala con: pip install pyautogui"
+    except Exception as e:
+        return f"Error presionando tecla: {e}"
+
+
+# ── Ejecutor central ──────────────────────────────────────────────────────────
+
+def execute_action(action_type: str, params: list[str], browser_opened: bool = False, lang: str = "en") -> dict:
+    """
+    Ejecuta la acción pedida por Ashley.
+    Devuelve: { success: bool, result: str, screenshot: str | None, browser_opened: bool }
+    El parámetro `lang` afecta a los mensajes de resultado visibles al usuario.
+    """
+    try:
+        if action_type == "screenshot":
+            img = take_screenshot()
+            msg = ("Screenshot taken. Here's what's on screen."
+                   if lang == "en"
+                   else "Captura de pantalla tomada. Aquí tienes lo que hay en pantalla.")
+            return {"success": True,
+                    "result": msg,
+                    "screenshot": img, "browser_opened": browser_opened}
+
+        elif action_type == "open_app":
+            return {"success": True, "result": open_app(" ".join(params), lang=lang),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "play_music":
+            msg, new_flag = play_music(" ".join(params), browser_already_open=browser_opened)
+            return {"success": True, "result": msg,
+                    "screenshot": None, "browser_opened": new_flag}
+
+        elif action_type == "search_web":
+            return {"success": True, "result": search_web(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "open_url":
+            return {"success": True, "result": open_url(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "volume":
+            sub = params[0] if params else "up"
+            val = params[1] if len(params) > 1 else None
+            return {"success": True, "result": control_volume(sub, val),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "type_text":
+            return {"success": True, "result": type_text(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "type_in":
+            window = params[0] if params else ""
+            text   = params[1] if len(params) > 1 else ""
+            return {"success": True, "result": type_in_window(window, text),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "write_to_app":
+            app  = params[0] if params else ""
+            text = params[1] if len(params) > 1 else ""
+            return {"success": True, "result": write_to_app(app, text),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "remind":
+            from .reminders import add_reminder
+            dt_iso = params[0] if params else ""
+            text   = params[1] if len(params) > 1 else ""
+            return {"success": True, "result": add_reminder(text, dt_iso),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "add_important":
+            from .reminders import add_important
+            text = params[0] if params else ""
+            return {"success": True, "result": add_important(text),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "done_important":
+            from .reminders import mark_important_done
+            text = params[0] if params else ""
+            return {"success": True, "result": mark_important_done(text),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "save_taste":
+            from .tastes import add_taste
+            categoria = params[0] if params else "otros"
+            valor     = params[1] if len(params) > 1 else ""
+            msg = add_taste(categoria, valor) if valor else "Error: falta el valor."
+            return {"success": True, "result": msg, "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "focus_window":
+            return {"success": True, "result": focus_window(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "hotkey":
+            return {"success": True, "result": press_hotkey(params),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "press_key":
+            return {"success": True, "result": press_key(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "close_window":
+            new_browser = False if "youtube" in " ".join(params).lower() else browser_opened
+            return {"success": True, "result": close_window(params[0] if params else ""),
+                    "screenshot": None, "browser_opened": new_browser}
+
+        elif action_type == "close_tab":
+            hint = params[0] if params else "activo"
+            new_browser = False if "youtube" in hint.lower() else browser_opened
+            return {"success": True, "result": close_browser_tab(hint),
+                    "screenshot": None, "browser_opened": new_browser}
+
+        else:
+            return {"success": False, "result": f"Acción desconocida: '{action_type}'",
+                    "screenshot": None, "browser_opened": browser_opened}
+
+    except Exception as e:
+        return {"success": False, "result": f"Error ejecutando '{action_type}': {e}",
+                "screenshot": None, "browser_opened": browser_opened}
+
+
+# ── Estado del sistema (contexto para Ashley) ────────────────────────────────
+
+# Cache para las pestañas del navegador (evita llamar PowerShell cada mensaje)
+_tabs_cache: dict = {"ts": 0.0, "tabs": []}
+_TABS_CACHE_TTL = 8.0  # segundos
+
+# C# inline para PowerShell — usa MSAA (IAccessible).
+# Opera GX / Chromium: los tabs viven en un ROLE_SYSTEM_PAGETABLIST (role=60)
+# y sus hijos son ROLE_SYSTEM_LISTITEM (role=37) o ROLE_SYSTEM_PAGETAB (role=25).
+# UIA (UIAutomationClient) no funciona porque Chromium lanza RPC_E_SERVERFAULT en
+# FindAll(Descendants) a menos que haya un AT real conectado.
+_MSAA_TABS_CS = r"""using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Threading;
+using Accessibility;
+
+public static class TabFinder {
+    [DllImport("oleacc.dll", PreserveSig=false)]
+    public static extern void AccessibleObjectFromWindow(
+        IntPtr hwnd, uint id, [In] ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IAccessible acc);
+
+    static IAccessible GetRoot(IntPtr hwnd) {
+        var iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
+        IAccessible a;
+        AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, out a);
+        return a;
+    }
+
+    public static List<string> GetTabs(IntPtr hwnd) {
+        // Primera llamada dispara el servidor de accesibilidad de Chromium
+        GetRoot(hwnd);
+        Thread.Sleep(600);
+        // Segunda llamada ya ve el arbol completo
+        IAccessible root = GetRoot(hwnd);
+        var tabs = new List<string>();
+        if (root != null) FindTabList(root, tabs, 0);
+        return tabs;
+    }
+
+    static bool FindTabList(IAccessible obj, List<string> tabs, int depth) {
+        if (depth > 20) return false;
+        try {
+            int role = (int)obj.get_accRole(0);
+            int kids = obj.accChildCount;
+            if (role == 60) { // ROLE_SYSTEM_PAGETABLIST — barra de tabs
+                for (int i = 1; i <= Math.Min(kids, 200); i++) {
+                    try {
+                        object child = obj.get_accChild(i);
+                        IAccessible acc = child as IAccessible;
+                        if (acc != null) {
+                            int cr = (int)acc.get_accRole(0);
+                            if (cr == 25 || cr == 37) { // PAGETAB o LISTITEM
+                                string cn = acc.get_accName(0);
+                                if (!string.IsNullOrEmpty(cn)) tabs.Add(cn);
+                            }
+                        }
+                    } catch {}
+                }
+                return true;
+            }
+            for (int i = 1; i <= Math.Min(kids, 200); i++) {
+                try {
+                    object child = obj.get_accChild(i);
+                    IAccessible acc = child as IAccessible;
+                    if (acc != null && FindTabList(acc, tabs, depth + 1)) return true;
+                } catch {}
+            }
+        } catch {}
+        return false;
+    }
+}"""
+
+
+def _get_all_browser_hwnds() -> list[int]:
+    """Devuelve los HWNDs de todas las ventanas de navegador visibles."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    hwnds = []
+    CB = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        if cls.value in _BROWSER_WIN32_CLASSES:
+            proc = _get_process_name_for_hwnd(hwnd)
+            if proc in _REAL_BROWSER_PROCS:
+                hwnds.append(hwnd)
+        return True
+    user32.EnumWindows(CB(_cb), 0)
+    return hwnds
+
+
+def _get_browser_tabs_via_uia(hwnds: list[int]) -> list[str]:
+    """
+    Enumera TODAS las pestañas de las ventanas del navegador dadas usando MSAA (IAccessible).
+    Compila y ejecuta C# inline via PowerShell. Resultado cacheado 8 segundos.
+    """
+    if not hwnds:
+        return []
+
+    now = time.time()
+    if now - _tabs_cache["ts"] < _TABS_CACHE_TTL:
+        return _tabs_cache["tabs"]
+
+    hwnd_list = ",".join(str(h) for h in hwnds)
+    ps_script = (
+        'Add-Type @"\n'
+        + _MSAA_TABS_CS
+        + '\n"@ -ReferencedAssemblies "Accessibility"\n'
+        '\n'
+        '$hwnds = @(' + hwnd_list + ')\n'
+        'foreach ($h in $hwnds) {\n'
+        '    $tabs = [TabFinder]::GetTabs([IntPtr]::new($h))\n'
+        '    foreach ($t in $tabs) { Write-Output $t }\n'
+        '}\n'
+    )
+
+    import tempfile
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".ps1", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(ps_script)
+
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", tmp_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        tabs = [ln.strip() for ln in result.stdout.strip().splitlines() if ln.strip()]
+        _tabs_cache["ts"] = now
+        _tabs_cache["tabs"] = tabs
+        return tabs
+    except Exception:
+        _tabs_cache["ts"] = now
+        _tabs_cache["tabs"] = []
+        return []
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+# Clases de ventanas a ignorar completamente (sistema / tray / desktop)
+_SKIP_CLASSES = {
+    "Shell_TrayWnd", "DV2ControlHost", "MsgrIMEWindowClass", "SysShadow",
+    "Button", "WorkerW", "Progman", "SHELLDLL_DefView", "SysListView32",
+    "tooltips_class32", "BaseBar", "TaskListThumbnailWnd",
+    "Windows.UI.Core.CoreWindow",
+    # NO filtrar ApplicationFrameWindow — aloja apps UWP como Calculadora, Configuración, etc.
+}
+# Títulos a ignorar (parciales, lowercase)
+_SKIP_TITLE_FRAGMENTS = {
+    "microsoft text input", "program manager", "gdi+ window",
+    "default ime", "msctfime ui", "experiencia de entrada",
+}
+
+
+# Procesos host genéricos que no aportan info útil (mostrar solo título)
+_GENERIC_HOSTS = {"applicationframehost.exe", "systemsettings.exe", "explorer.exe"}
+
+
+def _get_process_name_for_hwnd(hwnd: int) -> str:
+    """Obtiene el nombre del proceso (.exe) dueño de una ventana."""
+    import ctypes
+    from ctypes import wintypes
+    user32   = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return ""
+
+    # PROCESS_QUERY_LIMITED_INFORMATION es suficiente para QueryFullProcessImageNameW
+    # (GetModuleFileNameExW requería PROCESS_VM_READ adicional y fallaba en muchos procesos)
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    hproc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not hproc:
+        return ""
+    try:
+        buf  = ctypes.create_unicode_buffer(260)
+        size = ctypes.c_ulong(260)
+        if kernel32.QueryFullProcessImageNameW(hproc, 0, buf, ctypes.byref(size)):
+            name = os.path.basename(buf.value).lower()
+            if name in _GENERIC_HOSTS:
+                return ""
+            return name
+    except Exception:
+        pass
+    finally:
+        kernel32.CloseHandle(hproc)
+    return ""
+
+
+def get_system_state() -> str:
+    """
+    Snapshot de ventanas visibles y TODAS las pestañas del navegador.
+    Usa UI Automation para enumerar todas las pestañas (no solo la activa).
+    """
+    import ctypes
+    user32 = ctypes.windll.user32
+
+    apps: list[tuple[str, str]] = []          # (título, proceso)
+    browser_hwnds: list[int] = []             # HWNDs de ventanas de browser
+    active_titles: list[str] = []             # Títulos activos (fallback)
+
+    CB = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def _cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        title = buf.value.strip()
+        if len(title) < 2:
+            return True
+
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        cls_name = cls.value
+
+        if cls_name in _SKIP_CLASSES:
+            return True
+        tl = title.lower()
+        if any(f in tl for f in _SKIP_TITLE_FRAGMENTS):
+            return True
+
+        proc = _get_process_name_for_hwnd(hwnd)
+
+        # Solo clasificar como browser si el proceso es un browser REAL.
+        # Apps Electron (Discord, VS Code, Riot) usan Chrome_WidgetWin_1 pero NO son browsers.
+        if cls_name in _BROWSER_WIN32_CLASSES and proc in _REAL_BROWSER_PROCS:
+            browser_hwnds.append(hwnd)
+            active_titles.append(title)  # Título activo como fallback
+        else:
+            apps.append((title, proc))
+        return True
+
+    user32.EnumWindows(CB(_cb), 0)
+
+    # Obtener TODAS las pestañas via UI Automation; si falla, usar solo el título activo
+    browser_tabs = _get_browser_tabs_via_uia(browser_hwnds)
+    if not browser_tabs:
+        browser_tabs = active_titles  # fallback: solo pestaña activa
+
+    lines: list[str] = []
+    if apps:
+        lines.append("Ventanas abiertas (título | proceso):")
+        for title, proc in apps[:25]:
+            if proc:
+                lines.append(f"  - \"{title}\"  [{proc}]")
+            else:
+                lines.append(f"  - \"{title}\"")
+    if browser_tabs:
+        lines.append("Pestañas del navegador:")
+        for t in browser_tabs[:20]:
+            lines.append(f"  - \"{t}\"")
+    if not lines:
+        return "No se detectaron ventanas abiertas."
+    lines.append("")
+    lines.append("Nota: Para cerrar usa close_window con un fragmento del título o nombre del proceso.")
+    lines.append("Para cerrar una pestaña del navegador usa close_tab con un fragmento del título.")
+    return "\n".join(lines)
+
+
+# ── Descripción legible para el diálogo de permisos ──────────────────────────
+
+def describe_action(action_type: str, params: list[str], lang: str = "en") -> str:
+    """Texto markdown que se muestra en el diálogo de confirmación.
+    Acepta lang ('en' | 'es') para traducir. Default: EN."""
+    from .i18n import act_desc, key_labels
+    T = act_desc(lang)
+    KL = key_labels(lang)
+
+    if action_type == "screenshot":
+        return T["screenshot"]
+    elif action_type == "open_app":
+        return T["open_app"].format(p=" ".join(params))
+    elif action_type == "play_music":
+        return T["play_music"].format(p=" ".join(params))
+    elif action_type == "search_web":
+        return T["search_web"].format(p=params[0] if params else "")
+    elif action_type == "open_url":
+        return T["open_url"].format(p=params[0] if params else "")
+    elif action_type == "volume":
+        sub = params[0] if params else ""
+        val = params[1] if len(params) > 1 else ""
+        if sub == "up":   return T["vol_up"]
+        if sub == "down": return T["vol_down"]
+        if sub == "mute": return T["vol_mute"]
+        if sub == "set":  return T["vol_set"].format(p=val)
+        return f"🔊 {sub}"
+    elif action_type == "type_text":
+        text = params[0] if params else ""
+        preview = text[:80] + "…" if len(text) > 80 else text
+        return T["type_text"].format(p=preview)
+    elif action_type == "type_in":
+        window = params[0] if params else ""
+        text   = params[1] if len(params) > 1 else ""
+        preview = text[:80] + "…" if len(text) > 80 else text
+        return T["type_in"].format(win=window, p=preview)
+    elif action_type == "write_to_app":
+        app  = params[0] if params else ""
+        text = params[1] if len(params) > 1 else ""
+        preview = text[:80].replace("\n", "↵") + ("…" if len(text) > 80 else "")
+        return T["write_to_app"].format(app=app, p=preview)
+    elif action_type == "focus_window":
+        return T["focus_window"].format(p=params[0] if params else "")
+    elif action_type == "hotkey":
+        combo = " + ".join(k.upper() for k in params)
+        return T["hotkey"].format(p=combo)
+    elif action_type == "press_key":
+        key = params[0] if params else ""
+        return T["press_key"].format(p=KL.get(key.lower(), key.upper()))
+    elif action_type == "close_window":
+        return T["close_window"].format(p=params[0] if params else "")
+    elif action_type == "close_tab":
+        hint = params[0] if params else ("active" if lang == "en" else "activo")
+        return T["close_tab"].format(p=hint)
+    elif action_type == "remind":
+        dt_iso = params[0] if params else ""
+        text   = params[1] if len(params) > 1 else ""
+        from .reminders import _fmt_dt
+        return T["remind"].format(text=text, date=_fmt_dt(dt_iso))
+    elif action_type == "add_important":
+        return T["add_important"].format(p=params[0] if params else "")
+    elif action_type == "done_important":
+        return T["done_important"].format(p=params[0] if params else "")
+    elif action_type == "save_taste":
+        cat  = params[0] if params else ("other" if lang == "en" else "otros")
+        val  = params[1] if len(params) > 1 else ""
+        return T["save_taste"].format(cat=cat, val=val)
+    return T["generic"].format(action_type=action_type, params=" ".join(params))

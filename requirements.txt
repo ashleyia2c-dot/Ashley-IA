@@ -1,0 +1,8 @@
+
+reflex==0.8.28.post1
+pillow
+pyautogui
+pyperclip
+pycaw
+comtypes
+requests

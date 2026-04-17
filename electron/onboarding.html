@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ashley — Initial setup</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      background: #0a0a0a;
+      color: #e8e8e8;
+      padding: 28px 32px;
+      user-select: none;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .lang-toggle {
+      position: absolute;
+      top: 14px;
+      right: 18px;
+      display: flex;
+      gap: 4px;
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 99px;
+      padding: 3px;
+    }
+    .lang-toggle button {
+      background: transparent;
+      border: none;
+      color: #888;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 99px;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+    }
+    .lang-toggle button.active {
+      background: #ff9aee;
+      color: #0a0a0a;
+    }
+    h1 {
+      margin: 0 0 4px;
+      color: #ff9aee;
+      font-size: 26px;
+      font-weight: 400;
+      letter-spacing: 1px;
+    }
+    .subtitle {
+      color: #888;
+      font-size: 13px;
+      margin-bottom: 22px;
+    }
+    section {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+    section h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: #ff9aee;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .perm-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #ccc;
+    }
+    .perm-list li {
+      padding: 4px 0 4px 18px;
+      position: relative;
+    }
+    .perm-list li::before {
+      content: "▸";
+      color: #ff9aee;
+      position: absolute;
+      left: 0;
+    }
+    .privacy {
+      font-size: 12px;
+      color: #999;
+      line-height: 1.5;
+    }
+    .privacy strong { color: #ddd; }
+    label {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #bbb;
+    }
+    input[type="password"], input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+      font-family: 'Consolas', monospace;
+      user-select: text;
+    }
+    input:focus {
+      outline: none;
+      border-color: #ff9aee;
+    }
+    .hint {
+      font-size: 11px;
+      color: #666;
+      margin-top: 6px;
+    }
+    .hint a { color: #ff9aee; text-decoration: none; cursor: pointer; }
+    .hint a:hover { text-decoration: underline; }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    button.primary {
+      background: #ff9aee;
+      color: #0a0a0a;
+    }
+    button.primary:hover:not(:disabled) {
+      background: #ffb8f5;
+    }
+    button.primary:disabled {
+      background: #333;
+      color: #666;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: transparent;
+      color: #aaa;
+      border: 1px solid #333;
+    }
+    button.secondary:hover { background: #1a1a1a; color: #ddd; }
+    .checkbox-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 12px;
+      font-size: 12px;
+      color: #bbb;
+    }
+    .checkbox-row input { margin-top: 3px; }
+  </style>
+</head>
+<body>
+  <div class="lang-toggle">
+    <button id="btn-en" class="active">EN</button>
+    <button id="btn-es">ES</button>
+  </div>
+
+  <h1 id="title">Welcome to Ashley</h1>
+  <div class="subtitle" id="subtitle">First-run setup</div>
+
+  <section>
+    <h2 id="h-perms">What Ashley can do</h2>
+    <ul class="perm-list" id="perm-list"></ul>
+  </section>
+
+  <section>
+    <h2 id="h-privacy">Privacy</h2>
+    <div class="privacy" id="privacy-text"></div>
+  </section>
+
+  <section>
+    <h2 id="h-key">Your xAI API key</h2>
+    <label for="api-key" id="key-label">Paste your key (starts with <code>xai-</code>):</label>
+    <input type="password" id="api-key" placeholder="xai-..." spellcheck="false" autocomplete="off">
+    <div class="hint" id="key-hint"></div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="accept-terms">
+      <label for="accept-terms" id="terms-label" style="margin:0;"></label>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button class="secondary" id="cancel"></button>
+    <button class="primary" id="submit" disabled></button>
+  </div>
+
+  <script>
+    const STRINGS = {
+      en: {
+        docTitle: "Welcome to Ashley",
+        subtitle: "First-run setup",
+        hPerms: "What Ashley can do",
+        perms: [
+          "Read titles of open windows and browser tabs",
+          "Open and close applications, browser tabs and windows",
+          "Control keyboard and mouse when you ask for specific actions",
+          "Take screenshots when you request them",
+          "Control system volume",
+          "Search information on the internet to answer you"
+        ],
+        hPrivacy: "Privacy",
+        privacy: "Ashley runs <strong>locally</strong> on your machine. Your history, facts and diary are saved in your user folder — <strong>never sent to external servers</strong>.<br><br>The <strong>only external service</strong> Ashley calls is the xAI (Grok) API to generate responses. That requires your own API key.",
+        hKey: "Your xAI API key",
+        keyLabel: "Paste your key (starts with <code>xai-</code>):",
+        keyHint: 'Don\'t have one? Get it at <a id="get-key-link">console.x.ai</a> — it will be encrypted on your device with DPAPI (never leaves your PC).',
+        termsLabel: "I understand what Ashley can do and I authorize the use of my API key to generate responses.",
+        cancel: "Cancel",
+        submit: "Accept and start",
+      },
+      es: {
+        docTitle: "Bienvenido a Ashley",
+        subtitle: "Configuración de primera ejecución",
+        hPerms: "Lo que Ashley puede hacer",
+        perms: [
+          "Leer títulos de ventanas y pestañas abiertas del navegador",
+          "Abrir y cerrar aplicaciones, pestañas del navegador y ventanas",
+          "Controlar teclado y ratón cuando le pides acciones concretas",
+          "Tomar capturas de pantalla si se lo solicitas",
+          "Controlar volumen del sistema",
+          "Buscar información en internet para responderte"
+        ],
+        hPrivacy: "Privacidad",
+        privacy: "Ashley se ejecuta <strong>localmente</strong> en tu equipo. Tu historial, facts y diario se guardan en tu carpeta de usuario — <strong>nunca se envían a servidores externos</strong>.<br><br>El <strong>único servicio externo</strong> al que Ashley llama es la API de xAI (Grok) para generar respuestas. Eso requiere tu propia clave de API.",
+        hKey: "Tu clave de API de xAI",
+        keyLabel: "Pega tu clave (empieza por <code>xai-</code>):",
+        keyHint: '¿No tienes una? Consíguela en <a id="get-key-link">console.x.ai</a> — se guardará cifrada en tu equipo con DPAPI (no viaja a ningún sitio).',
+        termsLabel: "Entiendo lo que Ashley puede hacer y autorizo el uso de mi clave de API para generar respuestas.",
+        cancel: "Cancelar",
+        submit: "Aceptar y arrancar",
+      },
+    };
+
+    let currentLang = "en";
+
+    function apply(lang) {
+      currentLang = lang;
+      const S = STRINGS[lang];
+      document.title = S.docTitle + " — " + (lang === 'en' ? 'Initial setup' : 'Configuración inicial');
+      document.getElementById('title').textContent = S.docTitle;
+      document.getElementById('subtitle').textContent = S.subtitle;
+      document.getElementById('h-perms').textContent = S.hPerms;
+      document.getElementById('h-privacy').textContent = S.hPrivacy;
+      document.getElementById('h-key').textContent = S.hKey;
+      document.getElementById('privacy-text').innerHTML = S.privacy;
+      document.getElementById('key-label').innerHTML = S.keyLabel;
+      document.getElementById('key-hint').innerHTML = S.keyHint;
+      document.getElementById('terms-label').textContent = S.termsLabel;
+      document.getElementById('cancel').textContent = S.cancel;
+      document.getElementById('submit').textContent = S.submit;
+
+      // Repopulate perm list
+      const ul = document.getElementById('perm-list');
+      ul.innerHTML = '';
+      for (const p of S.perms) {
+        const li = document.createElement('li');
+        li.textContent = p;
+        ul.appendChild(li);
+      }
+
+      // Rewire link
+      const link = document.getElementById('get-key-link');
+      if (link) {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          window.open('https://console.x.ai');
+        });
+      }
+
+      // Update toggle active state
+      document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+      document.getElementById('btn-es').classList.toggle('active', lang === 'es');
+
+      document.documentElement.lang = lang;
+    }
+
+    document.getElementById('btn-en').addEventListener('click', () => apply('en'));
+    document.getElementById('btn-es').addEventListener('click', () => apply('es'));
+
+    const keyInput = document.getElementById('api-key');
+    const acceptBox = document.getElementById('accept-terms');
+    const submitBtn = document.getElementById('submit');
+    const cancelBtn = document.getElementById('cancel');
+
+    function validate() {
+      const key = keyInput.value.trim();
+      const looksOk = key.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(key);
+      submitBtn.disabled = !(looksOk && acceptBox.checked);
+    }
+
+    keyInput.addEventListener('input', validate);
+    acceptBox.addEventListener('change', validate);
+
+    submitBtn.addEventListener('click', () => {
+      const key = keyInput.value.trim();
+      if (!key) return;
+      window.ashleyAPI.submit({ apiKey: key, language: currentLang });
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      window.ashleyAPI.cancel();
+    });
+
+    // Initial render: English default
+    apply('en');
+  </script>
+</body>
+</html>

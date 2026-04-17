@@ -1,0 +1,55 @@
+{
+  "name": "ashley",
+  "version": "0.1.0",
+  "description": "Ashley - Personal AI Companion",
+  "main": "main.js",
+  "author": "Mister Squishi",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.ashley.companion",
+    "productName": "Ashley",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "onboarding.html",
+      "package.json",
+      "build-resources/icon.ico"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ashley",
+      "installerIcon": "build-resources/icon.ico",
+      "uninstallerIcon": "build-resources/icon.ico",
+      "uninstallDisplayName": "Ashley",
+      "artifactName": "Ashley-Setup-${version}.${ext}"
+    }
+  }
+}

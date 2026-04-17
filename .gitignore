@@ -1,0 +1,62 @@
+# ───────── Python ─────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.pyc
+.pytest_cache/
+
+# Entorno virtual — enorme, reproducible con requirements.txt
+venv/
+.venv/
+env/
+
+# ───────── Secrets ─────────
+# .env contiene XAI_API_KEY y otras claves — NUNCA subir
+.env
+.env.*
+!.env.example
+
+# ───────── Reflex ─────────
+.web/
+.states/
+*.db
+
+# ───────── Electron / Node ─────────
+node_modules/
+electron/node_modules/
+# dist = .exe compilado (cientos de MB, lo sube GitHub Releases, no el repo)
+electron/dist/
+electron/out/
+# Node.js embebido local (node.exe de ~79 MB). Es una dependencia de dev,
+# no código del proyecto. Se regenera en cada PC con npm install.
+electron/.node/
+
+# ───────── Datos de usuario (DEV local) ─────────
+# En prod viven en %APPDATA%\ashley, pero en dev pueden caer en la raíz.
+historial_ashley.json
+hechos_ashley.json
+diario_ashley.json
+recordatorios_ashley.json
+importantes_ashley.json
+gustos_ashley.json
+discovery_ashley.json
+language.json
+voice.json
+affection_ashley.json
+achievements_ashley.json
+
+# ───────── Assets descargados / externos ─────────
+assets/external/
+uploaded_files/
+_test_screenshot.jpg
+_test_screenshot*.jpg
+
+# ───────── IDEs y temporales ─────────
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ───────── Claude Code ─────────
+.claude/
