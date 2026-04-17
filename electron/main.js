@@ -11,6 +11,7 @@ const path = require('path');
 const http = require('http');
 const net = require('net');
 const fs = require('fs');
+const { setupAutoUpdater, stopAutoUpdater } = require('./updater');
 
 // Command-line switches (deben ejecutarse ANTES de app.whenReady)
 // Ayudan con compatibilidad de MediaRecorder en algunos Windows
@@ -447,7 +448,12 @@ function createMainWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // sandbox:true bloquea require() en preload.js → necesitamos false aquí
+      // porque preload.js usa ipcRenderer. contextIsolation sigue activo así
+      // que el preload NO filtra todo Node al renderer — solo expone lo
+      // explícitamente pasado por contextBridge.exposeInMainWorld().
+      sandbox: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
@@ -527,6 +533,10 @@ app.whenReady().then(async () => {
 
     // 4. Ventana principal
     createMainWindow();
+
+    // 5. Auto-updater: chequea GitHub Releases, descarga en background, notifica a la UI.
+    // Se desactiva automaticamente en dev/no-empaquetado (ver updater.js).
+    setupAutoUpdater(mainWindow, { isDev: DEV_MODE });
   } catch (err) {
     log(`Error arrancando: ${err.message}`);
     if (splashWindow) splashWindow.close();
@@ -539,12 +549,14 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   isShuttingDown = true;
+  stopAutoUpdater();
   killReflex();
   app.quit();
 });
 
 app.on('before-quit', () => {
   isShuttingDown = true;
+  stopAutoUpdater();
   killReflex();
 });
 

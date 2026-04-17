@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -9,7 +9,11 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "electron-builder --win"
+    "build": "electron-builder --win",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -26,15 +30,25 @@
     "files": [
       "main.js",
       "preload.js",
+      "updater.js",
       "onboarding.html",
       "package.json",
       "build-resources/icon.ico"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ashleyia2c-dot",
+        "repo": "Ashley-IA"
+      }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build-resources/icon.ico"

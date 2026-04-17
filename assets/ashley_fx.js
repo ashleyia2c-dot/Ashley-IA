@@ -444,6 +444,80 @@
 
 
   /* ══════════════════════════════════════════
+     AUTO-UPDATER PILL
+     Muestra un pill flotante cuando hay un update descargado.
+     `window.ashleyUpdate` viene de electron/preload.js — sólo existe
+     cuando Ashley corre dentro del wrapper Electron, no en un browser
+     plano. En dev/web-only este bloque es no-op.
+  ══════════════════════════════════════════ */
+  function initUpdateNotifier() {
+    if (!window.ashleyUpdate || typeof window.ashleyUpdate.on !== 'function') {
+      return; // no estamos en Electron, nada que hacer
+    }
+
+    var pill = null;
+    var installing = false;
+
+    function ensurePill() {
+      if (pill) return pill;
+      pill = document.createElement('div');
+      pill.id = 'ashley-update-pill';
+      pill.style.cssText =
+        'position:fixed;bottom:20px;right:20px;z-index:9999;' +
+        'background:linear-gradient(135deg,#ff9aee 0%,#c86dd7 100%);' +
+        'color:#0a0a0a;font-weight:600;font-size:13px;' +
+        'padding:10px 16px;border-radius:20px;cursor:pointer;' +
+        'box-shadow:0 4px 20px rgba(255,154,238,0.4);' +
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+        'transition:all 0.2s ease;user-select:none;' +
+        'display:none;';
+      pill.onmouseover = function () {
+        pill.style.transform = 'translateY(-2px)';
+        pill.style.boxShadow = '0 6px 24px rgba(255,154,238,0.55)';
+      };
+      pill.onmouseout = function () {
+        pill.style.transform = 'translateY(0)';
+        pill.style.boxShadow = '0 4px 20px rgba(255,154,238,0.4)';
+      };
+      pill.onclick = function () {
+        if (installing) return;
+        installing = true;
+        pill.textContent = 'Reiniciando...';
+        pill.style.cursor = 'wait';
+        window.ashleyUpdate.installNow().catch(function (e) {
+          console.error('[ashley-update] install failed:', e);
+          installing = false;
+          pill.textContent = 'Error al instalar';
+        });
+      };
+      document.body.appendChild(pill);
+      return pill;
+    }
+
+    window.ashleyUpdate.on('downloaded', function (info) {
+      var p = ensurePill();
+      var v = (info && info.version) ? (' v' + info.version) : '';
+      p.textContent = '\u2728 Update' + v + ' listo — Click para reiniciar';
+      p.style.display = 'block';
+    });
+
+    window.ashleyUpdate.on('error', function (info) {
+      console.warn('[ashley-update] error:', info && info.message);
+      // No mostramos errores al usuario — son típicamente "no internet" o
+      // "rate limit" y no son actionable. Sólo log para debug.
+    });
+
+    window.ashleyUpdate.on('available', function (info) {
+      console.log('[ashley-update] downloading v' + (info && info.version) + '...');
+    });
+
+    window.ashleyUpdate.on('download-progress', function (p) {
+      console.log('[ashley-update] ' + (p && p.percent) + '%');
+    });
+  }
+
+
+  /* ══════════════════════════════════════════
      BOOT
   ══════════════════════════════════════════ */
   function boot() {
@@ -453,6 +527,7 @@
     initVisibilityReload();
     initAffectionObserver();
     initAchievementObserver();
+    initUpdateNotifier();
   }
 
   if (document.readyState === 'loading') {
