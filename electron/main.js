@@ -166,9 +166,46 @@ function markLaunchSuccessful() {
 }
 
 // ─── Logging ──────────────────────────────────────────────────────────────
+// Logs van a consola (visible via `ashley-electron.bat`) + archivo persistente
+// en %APPDATA%\ashley\logs\main.log para que soporte pueda ver qué pasó
+// incluso después de cerrar la app. Rotación simple: si main.log > 2 MB,
+// lo movemos a main.1.log (y main.1 → main.2, borramos main.3). Así el
+// disco nunca crece sin límite.
+
+const LOG_DIR = path.join(app.getPath('userData'), 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'main.log');
+const LOG_MAX_BYTES = 2 * 1024 * 1024;  // 2 MB
+const LOG_KEEP = 3;                      // main.1, main.2, main.3
+
+try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+
+function rotateLogsIfNeeded() {
+  try {
+    const stat = fs.statSync(LOG_FILE);
+    if (stat.size < LOG_MAX_BYTES) return;
+  } catch {
+    return; // no existe aún
+  }
+  // Rotar: main.(N-1).log → main.N.log, ..., main.log → main.1.log
+  try { fs.unlinkSync(`${LOG_FILE}.${LOG_KEEP}`); } catch {}
+  for (let i = LOG_KEEP - 1; i >= 1; i--) {
+    try { fs.renameSync(`${LOG_FILE}.${i}`, `${LOG_FILE}.${i + 1}`); } catch {}
+  }
+  try { fs.renameSync(LOG_FILE, `${LOG_FILE}.1`); } catch {}
+}
+
+// Rotar al arranque para no leer rot race durante la sesión.
+rotateLogsIfNeeded();
+
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 19);
-  console.log(`[${ts}] ${msg}`);
+  const line = `[${ts}] ${msg}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(LOG_FILE, line + '\n');
+  } catch {
+    // Si falla el write del log nunca queremos romper la app. Ignorar.
+  }
 }
 
 // ─── Detección REAL de puerto en uso ──────────────────────────────────────
@@ -194,7 +231,21 @@ async function findFreePort(startPort, maxTries = 30) {
     const used = await isPortInUse(port);
     if (!used) return port;
   }
-  throw new Error(`No free port in [${startPort}, ${startPort + maxTries})`);
+  // Mensaje actionable para el user — si se encuentra este error,
+  // probablemente Hyper-V está reservando el rango (típico en Windows
+  // con WSL o Docker instalados), o hay muchos zombies acumulados.
+  const err = new Error(
+    `No pude encontrar un puerto libre en el rango [${startPort}, ${startPort + maxTries}).\n\n` +
+    `Probables causas:\n` +
+    `• Hyper-V está reservando este rango (común si tenés WSL o Docker).\n` +
+    `• Procesos zombies de sesiones anteriores siguen vivos.\n\n` +
+    `Qué hacer:\n` +
+    `1. Reiniciá tu PC (soluciona el 95% de los casos).\n` +
+    `2. Si persiste: ejecutá "net stop winnat && net start winnat" en CMD como admin.\n` +
+    `3. Si persiste: abrí un ticket de soporte con este mensaje.`
+  );
+  err.code = 'PORT_EXHAUSTED';
+  throw err;
 }
 
 // ─── Kill de procesos que tienen un puerto en LISTENING ───────────────────
@@ -236,6 +287,20 @@ async function pickReflexPorts() {
 }
 
 // ─── API key: obtener / guardar ───────────────────────────────────────────
+//
+// safeStorage (DPAPI en Windows) usa la cuenta de Windows del user como llave
+// del cifrado. Si el user:
+//   - Cambia de PC pero copia %APPDATA%\ashley con key.bin incluida
+//   - Reinstala Windows
+//   - Renombra su cuenta de usuario
+// La clave YA NO puede descifrarse en esa máquina — decryptString lanza.
+//
+// Antes: devolvíamos null silenciosamente y key.bin quedaba ahí corrupta
+// ocupando espacio + confundiendo logs. Ahora: borramos la key muerta y
+// avisamos al user por qué le volvemos a pedir la API key.
+
+let _apiKeyRecoveryReason = null;  // set si tuvimos que borrar key.bin
+
 function loadStoredApiKey() {
   if (!fs.existsSync(API_KEY_FILE)) return null;
   if (!safeStorage.isEncryptionAvailable()) {
@@ -246,7 +311,16 @@ function loadStoredApiKey() {
     const encrypted = fs.readFileSync(API_KEY_FILE);
     return safeStorage.decryptString(encrypted);
   } catch (err) {
-    log(`Error descifrando API key: ${err.message}`);
+    // key.bin existe pero no podemos descifrarla. Lo más probable:
+    // cambio de cuenta Windows / restore de otra máquina.
+    log(`Error descifrando API key (key.bin corrupta o de otra cuenta): ${err.message}`);
+    try {
+      fs.unlinkSync(API_KEY_FILE);
+      log('key.bin corrupta borrada — se pedirá al user la key de nuevo');
+      _apiKeyRecoveryReason = 'decrypt_failed';
+    } catch (e) {
+      log(`No pude borrar key.bin corrupta: ${e.message}`);
+    }
     return null;
   }
 }
@@ -417,6 +491,26 @@ async function resolveApiKey() {
     log('API key cargada de .env (modo dev)');
     return fromEnv;
   }
+
+  // Si llegamos aquí SIN key, puede ser primera ejecución legítima (no
+  // key.bin) O puede ser que DPAPI no pudo descifrar (cambio de cuenta,
+  // migración de PC). En el segundo caso avisamos al user para que no
+  // se preocupe / sepa qué está pasando — sus datos siguen intactos.
+  if (_apiKeyRecoveryReason === 'decrypt_failed') {
+    dialog.showMessageBoxSync({
+      type: 'info',
+      title: 'Ashley necesita tu clave de xAI de nuevo',
+      message: 'No pude descifrar tu clave guardada.',
+      detail:
+        'Esto pasa si copiaste los datos desde otra PC o cambiaste de ' +
+        'cuenta de Windows — por seguridad, la clave se cifra contra tu ' +
+        'cuenta y no se puede leer desde otra.\n\n' +
+        'Tu historial, afecto y logros están a salvo. Sólo tenés que ' +
+        'volver a pegar tu clave de xAI.',
+      buttons: ['Entendido'],
+    });
+  }
+
   log('No hay API key guardada — lanzando onboarding');
   return await runOnboarding();
 }

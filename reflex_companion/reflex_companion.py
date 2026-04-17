@@ -283,6 +283,17 @@ class State(rx.State):
     # ─────────────────────────────────────────
 
     def on_load(self):
+        # ── Migraciones de schema (PRIMERO, antes de cualquier load) ──
+        # Si la app vio un formato de datos anterior, aquí lo actualizamos.
+        # migrate_if_needed es idempotente — en fresh install o al día, es no-op.
+        try:
+            from .migrations import migrate_if_needed
+            migrate_if_needed()
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("migrations failed: %s", _e)
+            # Seguimos arrancando — datos viejos son mejor que no arrancar.
+
         self.browser_opened = False
         # Cargar idioma persistido (default: EN)
         self.language = i18n.load_language()
