@@ -1267,15 +1267,23 @@ class State(rx.State):
 
                     _vresult = await asyncio.get_running_loop().run_in_executor(None, _run_vision)
 
-                    # Parsear resultado
-                    _vm = re.search(r'\[mood:(\w+)\]', _vresult)
-                    _vmood = _vm.group(1) if _vm else "default"
-                    _vclean = re.sub(r'\[mood:\w+\]', '', _vresult).strip()
-                    _vclean = re.sub(r'\[action:[^\]]+\]', '', _vclean).strip()
+                    # Parsear resultado — usar los extractores centralizados
+                    # para no duplicar regex y aplicar _clean_display_fn como
+                    # red de seguridad final (si no, tags residuales tipo
+                    # [affection:0] terminaban visibles en la burbuja).
+                    _vclean, _vmood = _extract_mood_fn(_vresult)
+                    _vclean, _vaff = _extract_affection_fn(_vclean)
+                    _vclean, _ = _extract_action_fn(_vclean)
+                    _vclean = _clean_display_fn(_vclean)
 
                     if len(_vclean) > 10:
                         ts = now_iso()
                         async with self:
+                            # Aplicar el delta de afecto si Ashley lo marcó
+                            # (ej. emocionada por lo que ve → +1)
+                            if _vaff:
+                                self.affection = max(0, min(100, self.affection + max(-3, min(3, _vaff))))
+                                self._save_affection()
                             self.mood = _vmood
                             self.messages = self.messages + [{
                                 "role": "assistant", "content": _vclean,
