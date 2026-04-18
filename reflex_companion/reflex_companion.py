@@ -37,6 +37,36 @@ from datetime import datetime, timezone
 
 
 # ─────────────────────────────────────────────
+#  Helpers pre-state
+# ─────────────────────────────────────────────
+
+def _license_needed_default() -> bool:
+    """Valor inicial de State.license_needed ANTES de que on_load valide.
+
+    Sin este helper, la página renderiza con `license_needed=True` por un
+    segundo (mientras validamos contra LS por red en on_load), produciendo
+    un flash del gate → chat que se ve poco profesional.
+
+    Con el helper:
+      - Sin flag → False (gate nunca aparece en dev)
+      - Flag ON y hay license.json en disco → False (chat desde el primer
+        pixel; on_load validará contra LS en background y corregirá si el
+        vendedor deshabilitó la key)
+      - Flag ON y no hay license.json → True (gate desde el primer pixel)
+    """
+    if not LICENSE_CHECK_ENABLED:
+        return False
+    try:
+        from . import license as _lic
+        return _lic.load_stored() is None
+    except Exception:
+        # Fail-safe: en caso de error leyendo el disco, mostramos el gate.
+        # Mejor falso positivo (user legítimo mete key otra vez) que dejar
+        # entrar a alguien sin licencia por un bug de I/O.
+        return True
+
+
+# ─────────────────────────────────────────────
 #  Estado
 # ─────────────────────────────────────────────
 
@@ -105,10 +135,10 @@ class State(rx.State):
     _bg_discovery_running: bool = False
 
     # ── License gate ──────────────────────────
-    # Default: gate ON si el feature flag está activo. on_load lo apaga si la
-    # key almacenada valida contra LS. En modo dev (flag OFF) siempre es False
-    # y el componente de gate nunca se renderiza.
-    license_needed: bool = LICENSE_CHECK_ENABLED
+    # Default: calculado en base al disco vía _license_needed_default(), para
+    # evitar el flash gate→chat en usuarios con licencia cacheada.
+    # on_load revalida contra LS y corrige si la key fue revocada server-side.
+    license_needed: bool = _license_needed_default()
     license_error: str = ""
     license_submitting: bool = False
     license_offline_grace: bool = False  # True si arrancamos sin red, mostrar banner
