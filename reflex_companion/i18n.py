@@ -106,6 +106,11 @@ UI = {
         "settings_whisper_ready":   "Built in ✓ — no setup needed",
         "settings_whisper_desc":    "Microphone dictation works 100% offline after the first use. On first click of the 🎤 button, a one-time 75 MB model downloads. After that, everything runs locally — no API costs, no internet required.",
 
+        "settings_usage_heading":   "📊 Usage",
+        "settings_usage_label":     "Messages sent to Ashley",
+        "settings_usage_hint":      "Used to verify refund eligibility (refund available within 14 days and under 40 messages).",
+        "settings_usage_tampered":  "⚠️ Integrity check failed — counter cannot be verified. Reinstall Ashley if you need this value for support.",
+
         "settings_save":            "Save",
         "settings_close":           "Close",
 
@@ -127,6 +132,20 @@ UI = {
         "tier_down_3":  "Ashley closes up a little more...",
         "tier_down_2":  "Ashley is starting to doubt you...",
         "tier_down_1":  "Ashley barely recognizes you...",
+
+        # License gate (shown when LICENSE_CHECK_ENABLED)
+        "license_title":         "Welcome to Ashley",
+        "license_subtitle":      "Paste your license key to get started.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "Activate",
+        "license_activating":    "Activating...",
+        "license_buy":           "I don't have a key yet",
+        "license_lost_key":      "Lost my key — contact support",
+        "license_error_invalid": "That license key doesn't exist or isn't valid.",
+        "license_error_limit":   "You've already activated this license on the maximum number of PCs.",
+        "license_error_network": "Could not reach the license server. Check your internet and try again.",
+        "license_info_test":     "Test-mode license",
+        "license_grace_banner":  "Offline — running on cached license. Reconnect to renew.",
     },
     "es": {
         "brand_subtitle":     "Secretaria personal · Friki",
@@ -197,6 +216,11 @@ UI = {
         "settings_whisper_ready":   "Incluido ✓ — sin configuración",
         "settings_whisper_desc":    "El dictado por micrófono funciona 100% offline tras el primer uso. La primera vez que pulses 🎤 se descarga un modelo de 75 MB (una sola vez). Después, todo corre localmente — sin costes de API, sin necesidad de internet.",
 
+        "settings_usage_heading":   "📊 Uso",
+        "settings_usage_label":     "Mensajes enviados a Ashley",
+        "settings_usage_hint":      "Se usa para verificar elegibilidad de reembolso (14 días y menos de 40 mensajes).",
+        "settings_usage_tampered":  "⚠️ Error de integridad — el contador no se puede verificar. Reinstala Ashley si necesitas este valor para soporte.",
+
         "settings_save":            "Guardar",
         "settings_close":           "Cerrar",
 
@@ -217,6 +241,20 @@ UI = {
         "tier_down_3":  "Ashley se cierra un poco más...",
         "tier_down_2":  "Ashley empieza a dudar de ti...",
         "tier_down_1":  "Ashley casi no te reconoce...",
+
+        # License gate
+        "license_title":         "Bienvenido a Ashley",
+        "license_subtitle":      "Pega tu license key para empezar.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "Activar",
+        "license_activating":    "Activando...",
+        "license_buy":           "No tengo key aún",
+        "license_lost_key":      "Perdí mi key — contactar soporte",
+        "license_error_invalid": "Esa license key no existe o no es válida.",
+        "license_error_limit":   "Ya activaste esta licencia en el número máximo de PCs.",
+        "license_error_network": "No pude conectar con el servidor de licencias. Revisa tu internet e inténtalo de nuevo.",
+        "license_info_test":     "Licencia de prueba",
+        "license_grace_banner":  "Sin conexión — usando licencia cacheada. Reconecta para renovar.",
     },
 }
 

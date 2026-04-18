@@ -514,3 +514,141 @@ def _pill_btn_vision(
         cursor="pointer",
         class_name=rx.cond(active, "pill-on-vision", ""),
     )
+
+
+# ─────────────────────────────────────────────
+#  License gate (se muestra cuando LICENSE_CHECK_ENABLED y no hay licencia)
+# ─────────────────────────────────────────────
+
+def license_gate() -> rx.Component:
+    """Pantalla que bloquea el acceso a Ashley hasta que el user active su key.
+
+    Solo se renderiza cuando State.license_needed == True, que a su vez solo
+    se pone a True si config.LICENSE_CHECK_ENABLED está activado y la key
+    almacenada no valida. En modo dev (flag OFF) este componente no aparece.
+    """
+    State = _get_state()
+    return rx.center(
+        rx.vstack(
+            rx.image(
+                src="/ashley_default.jpg",
+                width="120px",
+                height="120px",
+                border_radius="50%",
+                object_fit="cover",
+                border="3px solid rgba(255,154,238,0.35)",
+                box_shadow="0 0 40px rgba(255,154,238,0.35)",
+            ),
+            rx.heading(
+                State.t["license_title"],
+                size="6",
+                color=COLOR_PRIMARY,
+                text_align="center",
+                weight="light",
+                letter_spacing="2px",
+            ),
+            rx.text(
+                State.t["license_subtitle"],
+                color=COLOR_TEXT_DIM,
+                font_size="14px",
+                text_align="center",
+            ),
+            rx.form(
+                rx.vstack(
+                    rx.input(
+                        placeholder=State.t["license_placeholder"],
+                        id="license_key",
+                        name="license_key",
+                        font_family="'JetBrains Mono', 'Consolas', monospace",
+                        bg="rgba(255,255,255,0.04)",
+                        color="white",
+                        border="1px solid rgba(255,255,255,0.12)",
+                        border_radius="10px",
+                        padding="14px 16px",
+                        font_size="13px",
+                        width="100%",
+                        auto_focus=True,
+                        _focus={
+                            "border": "1px solid rgba(255,154,238,0.55)",
+                            "box_shadow": "0 0 14px rgba(255,154,238,0.2)",
+                            "outline": "none",
+                        },
+                        _placeholder={"color": "#555"},
+                    ),
+                    rx.cond(
+                        State.license_error != "",
+                        rx.box(
+                            rx.text(
+                                State.license_error,
+                                color="#ff8080",
+                                font_size="12px",
+                                text_align="center",
+                            ),
+                            padding="8px 12px",
+                            bg="rgba(255,80,80,0.08)",
+                            border="1px solid rgba(255,80,80,0.25)",
+                            border_radius="8px",
+                            width="100%",
+                        ),
+                        rx.box(),
+                    ),
+                    rx.button(
+                        rx.cond(
+                            State.license_submitting,
+                            State.t["license_activating"],
+                            State.t["license_activate"],
+                        ),
+                        type="submit",
+                        bg=COLOR_PRIMARY,
+                        color="black",
+                        font_weight="bold",
+                        padding="14px",
+                        border_radius="10px",
+                        width="100%",
+                        cursor="pointer",
+                        _hover={"bg": "#ffb8f5", "box_shadow": "0 0 18px rgba(255,154,238,0.5)"},
+                        transition="all 0.2s ease",
+                        disabled=State.license_submitting,
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                on_submit=State.submit_license,
+                reset_on_submit=False,
+                width="100%",
+            ),
+            rx.divider(color_scheme="gray", opacity="0.3"),
+            rx.vstack(
+                rx.link(
+                    State.t["license_buy"],
+                    href="https://ashley-ia.lemonsqueezy.com/checkout/buy/618b7e13-511b-435c-8e7f-d14cedadfd02",
+                    is_external=True,
+                    color=COLOR_PRIMARY,
+                    font_size="12px",
+                    text_decoration="underline",
+                    _hover={"color": "#ffb8f5"},
+                ),
+                rx.link(
+                    State.t["license_lost_key"],
+                    href="mailto:hello@ashley-ia.com",
+                    is_external=True,
+                    color="#777",
+                    font_size="11px",
+                    _hover={"color": "#aaa"},
+                ),
+                spacing="2",
+                align="center",
+            ),
+            spacing="4",
+            align="center",
+            width="420px",
+            padding="44px 40px",
+            bg="rgba(255,255,255,0.025)",
+            border="1px solid rgba(255,255,255,0.07)",
+            border_radius="20px",
+            box_shadow="0 20px 60px rgba(0,0,0,0.5)",
+        ),
+        width="100vw",
+        height="100vh",
+        bg="#0a0a0a",
+    )
