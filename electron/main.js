@@ -355,14 +355,46 @@ function markDisclosureAccepted() {
   fs.writeFileSync(DISCLOSURE_FLAG, new Date().toISOString());
 }
 
+// ─── Idiomas soportados ─────────────────────────────────────────────────────
+// Debe mantenerse alineado con reflex_companion/i18n.py → SUPPORTED.
+const SUPPORTED_LANGS = ['en', 'es', 'fr'];
+const DEFAULT_LANG = 'en';
+
+function normalizeLang(lang) {
+  const raw = (lang || '').toString().trim().toLowerCase().slice(0, 2);
+  return SUPPORTED_LANGS.includes(raw) ? raw : DEFAULT_LANG;
+}
+
 function saveLanguage(lang) {
-  const normalized = (lang === 'es') ? 'es' : 'en';
+  const normalized = normalizeLang(lang);
   try {
     fs.writeFileSync(LANGUAGE_FILE, JSON.stringify({ language: normalized }));
   } catch (err) {
     log(`No pude guardar language.json: ${err.message}`);
   }
 }
+
+// Lectura sincronica del idioma persistido. La usa el splash al arrancar, antes
+// de que Reflex/Python se hayan iniciado. Si el archivo no existe o esta roto,
+// cae al default (EN) — consistente con i18n.load_language() en Python.
+function loadLanguageSync() {
+  try {
+    if (!fs.existsSync(LANGUAGE_FILE)) return DEFAULT_LANG;
+    const raw = fs.readFileSync(LANGUAGE_FILE, 'utf-8');
+    const data = JSON.parse(raw);
+    return normalizeLang(data.language);
+  } catch (err) {
+    log(`No pude leer language.json (${err.message}), usando default`);
+    return DEFAULT_LANG;
+  }
+}
+
+// Strings del splash traducidas. Mantener en sync con la identidad de Ashley.
+const SPLASH_STRINGS = {
+  en: { sub: 'starting...',  status: 'launching backend' },
+  es: { sub: 'iniciando...', status: 'arrancando backend' },
+  fr: { sub: 'démarrage...', status: 'lancement du backend' },
+};
 
 // ─── Hardening: bloquear DevTools, View Source, context menu en produccion
 function hardenWindow(win) {
@@ -407,7 +439,11 @@ function createSplash() {
     center: true, skipTaskbar: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  const splashHTML = `<!DOCTYPE html><html><head><style>
+  // Lee el idioma guardado para que el splash muestre los mismos strings que
+  // el resto de la UI. Default EN (primera ejecucion o archivo inexistente).
+  const lang = loadLanguageSync();
+  const s = SPLASH_STRINGS[lang] || SPLASH_STRINGS[DEFAULT_LANG];
+  const splashHTML = `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8"><style>
     body{margin:0;padding:0;background:#0a0a0a;color:#ff9aee;font-family:'Segoe UI',sans-serif;
       display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;user-select:none}
     h1{margin:0 0 12px;font-size:42px;font-weight:300;letter-spacing:4px}
@@ -417,8 +453,8 @@ function createSplash() {
     @keyframes spin{to{transform:rotate(360deg)}}
     .status{margin-top:20px;font-size:11px;color:#666}
   </style></head><body>
-    <h1>Ashley</h1><div class="sub">iniciando...</div>
-    <div class="spinner"></div><div class="status">arrancando backend</div>
+    <h1>Ashley</h1><div class="sub">${s.sub}</div>
+    <div class="spinner"></div><div class="status">${s.status}</div>
   </body></html>`;
   splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHTML));
   splashWindow.on('closed', () => { splashWindow = null; });

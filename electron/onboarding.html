@@ -168,6 +168,7 @@
   <div class="lang-toggle">
     <button id="btn-en" class="active">EN</button>
     <button id="btn-es">ES</button>
+    <button id="btn-fr">FR</button>
   </div>
 
   <h1 id="title">Welcome to Ashley</h1>
@@ -244,6 +245,27 @@
         cancel: "Cancelar",
         submit: "Aceptar y arrancar",
       },
+      fr: {
+        docTitle: "Bienvenue chez Ashley",
+        subtitle: "Configuration au premier lancement",
+        hPerms: "Ce qu'Ashley peut faire",
+        perms: [
+          "Lire les titres des fenêtres et onglets ouverts du navigateur",
+          "Ouvrir et fermer des applications, onglets et fenêtres",
+          "Contrôler le clavier et la souris quand tu demandes des actions précises",
+          "Prendre des captures d'écran si tu le demandes",
+          "Contrôler le volume système",
+          "Chercher des infos sur Internet pour te répondre"
+        ],
+        hPrivacy: "Confidentialité",
+        privacy: "Ashley s'exécute <strong>localement</strong> sur ta machine. Ton historique, tes faits et ton journal sont sauvegardés dans ton dossier utilisateur — <strong>jamais envoyés à des serveurs externes</strong>.<br><br>Le <strong>seul service externe</strong> qu'Ashley appelle est l'API xAI (Grok) pour générer les réponses. Ça nécessite ta propre clé d'API.",
+        hKey: "Ta clé d'API xAI",
+        keyLabel: "Colle ta clé (commence par <code>xai-</code>) :",
+        keyHint: "Tu n'en as pas ? Récupère-la sur <a id=\"get-key-link\">console.x.ai</a> — elle sera chiffrée sur ton appareil avec DPAPI (elle ne quitte pas ton PC).",
+        termsLabel: "Je comprends ce qu'Ashley peut faire et j'autorise l'utilisation de ma clé d'API pour générer des réponses.",
+        cancel: "Annuler",
+        submit: "Accepter et démarrer",
+      },
     };
 
     let currentLang = "en";
@@ -251,7 +273,8 @@
     function apply(lang) {
       currentLang = lang;
       const S = STRINGS[lang];
-      document.title = S.docTitle + " — " + (lang === 'en' ? 'Initial setup' : 'Configuración inicial');
+      const titleSuffix = { en: 'Initial setup', es: 'Configuración inicial', fr: 'Configuration initiale' };
+      document.title = S.docTitle + " — " + (titleSuffix[lang] || titleSuffix.en);
       document.getElementById('title').textContent = S.docTitle;
       document.getElementById('subtitle').textContent = S.subtitle;
       document.getElementById('h-perms').textContent = S.hPerms;
@@ -285,12 +308,14 @@
       // Update toggle active state
       document.getElementById('btn-en').classList.toggle('active', lang === 'en');
       document.getElementById('btn-es').classList.toggle('active', lang === 'es');
+      document.getElementById('btn-fr').classList.toggle('active', lang === 'fr');
 
       document.documentElement.lang = lang;
     }
 
     document.getElementById('btn-en').addEventListener('click', () => apply('en'));
     document.getElementById('btn-es').addEventListener('click', () => apply('es'));
+    document.getElementById('btn-fr').addEventListener('click', () => apply('fr'));
 
     const keyInput = document.getElementById('api-key');
     const acceptBox = document.getElementById('accept-terms');

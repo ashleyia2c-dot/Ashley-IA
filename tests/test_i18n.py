@@ -53,8 +53,14 @@ class TestNormalizeLang:
     def test_mixed_case(self):
         assert normalize_lang("Es") == "es"
 
+    def test_fr_lowercase(self):
+        assert normalize_lang("fr") == "fr"
+
+    def test_uppercase_FR(self):
+        assert normalize_lang("FR") == "fr"
+
     def test_unsupported_language_returns_default(self):
-        assert normalize_lang("fr") == "en"
+        assert normalize_lang("de") == "en"
 
     def test_none_returns_default(self):
         assert normalize_lang(None) == "en"
@@ -69,10 +75,14 @@ class TestNormalizeLang:
         assert normalize_lang("english") == "en"
 
     def test_long_unsupported(self):
-        assert normalize_lang("french") == "en"
+        assert normalize_lang("german") == "en"
 
     def test_whitespace_around_valid(self):
         assert normalize_lang("  es  ") == "es"
+
+    def test_french_word_resolves_to_fr(self):
+        # "french" → "fr" truncation → supported → fr
+        assert normalize_lang("french") == "fr"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -91,16 +101,24 @@ class TestUi:
         assert isinstance(result, dict)
         assert len(result) > 0
 
-    def test_en_and_es_have_same_keys(self):
+    def test_fr_returns_dict(self):
+        result = ui("fr")
+        assert isinstance(result, dict)
+        assert len(result) > 0
+
+    def test_all_supported_languages_have_same_keys(self):
+        """Todos los idiomas soportados deben tener exactamente las mismas
+        keys — si falta alguna, un user de esa lengua vería texto en blanco."""
         en_keys = set(ui("en").keys())
-        es_keys = set(ui("es").keys())
-        assert en_keys == es_keys, (
-            f"Key mismatch — only in EN: {en_keys - es_keys}, "
-            f"only in ES: {es_keys - en_keys}"
-        )
+        for lang in SUPPORTED:
+            lang_keys = set(ui(lang).keys())
+            assert lang_keys == en_keys, (
+                f"UI key mismatch in '{lang}' — only in EN: {en_keys - lang_keys}, "
+                f"only in {lang}: {lang_keys - en_keys}"
+            )
 
     def test_unsupported_falls_back_to_en(self):
-        result = ui("fr")
+        result = ui("de")
         assert result == ui("en")
 
     def test_contains_expected_keys(self):
@@ -130,13 +148,19 @@ class TestActDesc:
         assert isinstance(result, dict)
         assert len(result) > 0
 
-    def test_en_and_es_have_same_keys(self):
+    def test_all_supported_languages_have_same_keys(self):
         en_keys = set(act_desc("en").keys())
-        es_keys = set(act_desc("es").keys())
-        assert en_keys == es_keys, (
-            f"Key mismatch — only in EN: {en_keys - es_keys}, "
-            f"only in ES: {es_keys - en_keys}"
-        )
+        for lang in SUPPORTED:
+            lang_keys = set(act_desc(lang).keys())
+            assert lang_keys == en_keys, (
+                f"ACT_DESC key mismatch in '{lang}' — only in EN: {en_keys - lang_keys}, "
+                f"only in {lang}: {lang_keys - en_keys}"
+            )
+
+    def test_fr_returns_dict(self):
+        result = act_desc("fr")
+        assert isinstance(result, dict)
+        assert len(result) > 0
 
     def test_unsupported_falls_back_to_en(self):
         assert act_desc("de") == act_desc("en")
@@ -171,10 +195,15 @@ class TestKeyLabels:
         assert isinstance(result, dict)
         assert len(result) > 0
 
-    def test_en_and_es_have_same_keys(self):
+    def test_all_supported_languages_have_same_keys(self):
         en_keys = set(key_labels("en").keys())
-        es_keys = set(key_labels("es").keys())
-        assert en_keys == es_keys
+        for lang in SUPPORTED:
+            lang_keys = set(key_labels(lang).keys())
+            assert lang_keys == en_keys
+
+    def test_fr_returns_dict(self):
+        assert isinstance(key_labels("fr"), dict)
+        assert len(key_labels("fr")) > 0
 
     def test_unsupported_falls_back_to_en(self):
         assert key_labels("zh") == key_labels("en")
@@ -201,13 +230,18 @@ class TestTimeCtx:
         assert isinstance(result, dict)
         assert len(result) > 0
 
-    def test_en_and_es_have_same_keys(self):
+    def test_all_supported_languages_have_same_keys(self):
         en_keys = set(time_ctx("en").keys())
-        es_keys = set(time_ctx("es").keys())
-        assert en_keys == es_keys, (
-            f"Key mismatch — only in EN: {en_keys - es_keys}, "
-            f"only in ES: {es_keys - en_keys}"
-        )
+        for lang in SUPPORTED:
+            lang_keys = set(time_ctx(lang).keys())
+            assert lang_keys == en_keys, (
+                f"TIME_CTX key mismatch in '{lang}' — only in EN: {en_keys - lang_keys}, "
+                f"only in {lang}: {lang_keys - en_keys}"
+            )
+
+    def test_fr_returns_dict(self):
+        assert isinstance(time_ctx("fr"), dict)
+        assert len(time_ctx("fr")) > 0
 
     def test_unsupported_falls_back_to_en(self):
         assert time_ctx("ja") == time_ctx("en")
@@ -256,10 +290,17 @@ class TestLanguagePersistence:
         save_language("ES")
         assert load_language() == "es"
 
-    def test_save_unsupported_defaults_to_en(self, tmp_path, monkeypatch):
+    def test_save_and_load_fr(self, tmp_path, monkeypatch):
+        """El francés debe persistir igual que EN/ES."""
         lang_file = str(tmp_path / "language.json")
         monkeypatch.setattr(i18n, "LANG_FILE", lang_file)
         save_language("fr")
+        assert load_language() == "fr"
+
+    def test_save_unsupported_defaults_to_en(self, tmp_path, monkeypatch):
+        lang_file = str(tmp_path / "language.json")
+        monkeypatch.setattr(i18n, "LANG_FILE", lang_file)
+        save_language("de")  # alemán no soportado
         assert load_language() == "en"
 
     def test_load_missing_file_returns_default(self, tmp_path, monkeypatch):
