@@ -2,15 +2,20 @@
 prompts.py — Dispatcher de idiomas para los prompts de Ashley.
 
 Selecciona la version correcta de build_system_prompt / build_initiative_prompt
-segun el idioma activo. El contenido real vive en prompts_es.py y prompts_en.py.
+segun el idioma activo. El contenido real vive en prompts_es.py, prompts_en.py
+y prompts_fr.py.
 """
 
-from . import prompts_en, prompts_es
+from . import prompts_en, prompts_es, prompts_fr
 
 
 def _impl(lang: str):
     l = (lang or "en").strip().lower()[:2]
-    return prompts_en if l == "en" else prompts_es
+    if l == "fr":
+        return prompts_fr
+    if l == "es":
+        return prompts_es
+    return prompts_en  # default EN
 
 
 def build_system_prompt(

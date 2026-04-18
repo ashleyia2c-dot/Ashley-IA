@@ -207,6 +207,11 @@ class State(rx.State):
     def is_english(self) -> bool:
         return self.language == "en"
 
+    @rx.var
+    def language_label(self) -> str:
+        """Etiqueta del toggle de idioma — código en mayúsculas del idioma actual."""
+        return (self.language or "en").upper()
+
     # Dependencias declaradas explícitamente: Reflex no puede inferirlas
     # porque el import de .achievements ocurre dentro del cuerpo y su
     # analyzer estático falla con módulos locales. Con deps= le decimos
@@ -250,8 +255,16 @@ class State(rx.State):
         return result
 
     def toggle_language(self):
-        """Alterna entre EN y ES y persiste la elección a disco."""
-        new_lang = "es" if self.language == "en" else "en"
+        """Cicla entre los idiomas soportados (EN → ES → FR → EN) y persiste.
+
+        Usamos SUPPORTED como fuente de verdad: si mañana añadimos DE, aparece
+        automáticamente en el ciclo sin tocar este método.
+        """
+        try:
+            idx = i18n.SUPPORTED.index(self.language)
+        except ValueError:
+            idx = -1  # idioma desconocido → siguiente es SUPPORTED[0]
+        new_lang = i18n.SUPPORTED[(idx + 1) % len(i18n.SUPPORTED)]
         self.language = new_lang
         i18n.save_language(new_lang)
 
@@ -1822,9 +1835,9 @@ def index():
                 },
                 title=State.t["settings_tooltip"],
             ),
-            # ── Toggle de idioma (EN ↔ ES) ───────────────────
+            # ── Toggle de idioma (cicla EN → ES → FR → EN) ───────────────────
             rx.button(
-                rx.cond(State.is_english, "EN", "ES"),
+                State.language_label,
                 on_click=State.toggle_language,
                 bg="rgba(255,255,255,0.04)",
                 color=COLOR_PRIMARY,
@@ -1843,7 +1856,7 @@ def index():
                     "border": "1px solid rgba(255,154,238,0.55)",
                     "transform": "scale(1.04)",
                 },
-                title="Switch language / Cambiar idioma",
+                title="Switch language / Cambiar idioma / Changer de langue",
             ),
             spacing="1",
             overflow_x="auto",

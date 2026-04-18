@@ -14,7 +14,7 @@ from .config import _data_path
 
 LANG_FILE = _data_path("language.json")
 VOICE_FILE = _data_path("voice.json")
-SUPPORTED = ("en", "es")
+SUPPORTED = ("en", "es", "fr")
 DEFAULT_LANG = "en"
 
 DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"  # ElevenLabs "Sarah" — multilingüe, neutro
@@ -256,6 +256,115 @@ UI = {
         "license_info_test":     "Licencia de prueba",
         "license_grace_banner":  "Sin conexión — usando licencia cacheada. Reconecta para renovar.",
     },
+    "fr": {
+        "brand_subtitle":     "Secrétaire personnelle · Geek",
+
+        "status_thinking":    "réfléchit...",
+        "status_speaking":    "parle...",
+        "status_online":      "en ligne",
+
+        "input_placeholder":  "Écris ton message...  (Entrée pour envoyer, Maj+Entrée = nouvelle ligne)",
+        "btn_send":           "Envoyer",
+
+        "pill_memories":      "Souvenirs",
+        "pill_initiative":    "Ashley",
+        "pill_actions":       "Actions",
+        "pill_focus":         "Focus",
+        "pill_natural":       "Naturel",
+        "pill_vision":        "Vision",
+
+        "mem_title":          "🧠 Mes souvenirs avec Ashley",
+        "mem_tab_facts":      "✨ Faits",
+        "mem_tab_diary":      "📅 Journal",
+        "mem_tab_history":    "💬 Historique",
+        "mem_tab_tastes":     "💝 Goûts",
+        "mem_tastes_empty":   "Aucun goût enregistré pour l'instant.",
+        "mem_tastes_hint":    "Dis à Ashley ce que tu aimes et elle s'en souviendra.",
+        "mem_close":          "Fermer",
+
+        "act_title":          "Ashley veut agir",
+        "act_intro":          "Ashley propose de réaliser l'action suivante sur ton PC :",
+        "act_question":       "Tu autorises cette action ?",
+        "act_yes":            "✅ Oui, vas-y",
+        "act_no":             "❌ Annuler",
+
+        "lang_label":         "Langue",
+        "lang_en":            "EN",
+        "lang_es":            "ES",
+
+        "mic_tooltip":        "Clique pour dicter à la voix",
+        "tts_on_tooltip":     "Ashley parle — clique pour couper",
+        "tts_off_tooltip":    "Ashley est muette — clique pour activer la voix",
+
+        "settings_tooltip":         "Paramètres",
+        "settings_title":           "Paramètres",
+
+        "settings_required_heading":  "🔑 Obligatoire",
+        "settings_optional_heading":  "✨ Optionnel — Voix premium",
+        "settings_included_heading":  "🎤 Inclus — Entrée vocale",
+
+        "settings_grok_label":      "Clé Grok (xAI)",
+        "settings_grok_configured": "Configurée ✓  (gérée par l'installeur)",
+        "settings_grok_missing":    "Non configurée — Ashley ne peut pas répondre tant que tu ne la mets pas.",
+        "settings_grok_consequence": "Sans ça, Ashley ne peut pas penser ni te répondre.",
+        "settings_grok_hint":       "Configurée pendant l'installation. Pour la changer, réinstalle Ashley.",
+
+        "settings_elevenlabs_label": "Clé ElevenLabs",
+        "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
+        "settings_elevenlabs_hint": "Obtiens ta clé sur elevenlabs.io → Profile → API Keys. Stockée uniquement sur ta machine.",
+        "settings_voice_id_label":  "Voice ID",
+        "settings_voice_id_hint":   "Cherche des voix sur elevenlabs.io → Voice Library et copie le Voice ID.",
+        "settings_elevenlabs_without": "Sans ça :",
+        "settings_elevenlabs_without_desc": "Ashley utilise la voix gratuite du système Windows (robotique mais fonctionnelle).",
+        "settings_elevenlabs_with":   "Avec ça :",
+        "settings_elevenlabs_with_desc":   "Voix anime premium avec de l'émotion réelle et des nuances de personnalité.",
+        "settings_test_voice":      "Tester la voix",
+        "settings_test_text":       "Salut. C'est Ashley, je teste la voix. Tu m'entends bien ?",
+
+        "settings_whisper_label":   "Whisper (voix vers texte)",
+        "settings_whisper_ready":   "Inclus ✓ — aucune configuration",
+        "settings_whisper_desc":    "La dictée au micro marche 100% hors-ligne après la première utilisation. La première fois que tu cliques sur 🎤, un modèle de 75 Mo se télécharge (une seule fois). Ensuite, tout tourne localement — aucun coût d'API, pas besoin d'internet.",
+
+        "settings_usage_heading":   "📊 Utilisation",
+        "settings_usage_label":     "Messages envoyés à Ashley",
+        "settings_usage_hint":      "Sert à vérifier l'éligibilité au remboursement (14 jours et moins de 40 messages).",
+        "settings_usage_tampered":  "⚠️ Erreur d'intégrité — le compteur ne peut pas être vérifié. Réinstalle Ashley si tu as besoin de cette valeur pour le support.",
+
+        "settings_save":            "Enregistrer",
+        "settings_close":           "Fermer",
+
+        "error_grok":         "*soupire* Quelque chose a foiré avec Grok{label} : {err}",
+
+        # Achievements
+        "mem_tab_achievements": "\U0001f3c6 Succès",
+        "ach_unlocked_label":   "SUCCÈS DÉBLOQUÉ !",
+        "ach_locked_desc":      "???",
+        "ach_unlocked_at":      "Débloqué le : {date}",
+
+        # Affection tier messages
+        "tier_up_1":    "Ashley baisse un peu sa garde...",
+        "tier_up_2":    "Ashley commence à se sentir à l'aise avec toi.",
+        "tier_up_3":    "Ashley se sent... bizarre. Son cœur bat plus vite.",
+        "tier_up_4":    "Ashley ne peut plus cacher ce qu'elle ressent.",
+        "tier_down_4":  "Ashley ne se sent plus en sécurité...",
+        "tier_down_3":  "Ashley se referme un peu plus...",
+        "tier_down_2":  "Ashley commence à douter de toi...",
+        "tier_down_1":  "Ashley te reconnaît à peine...",
+
+        # License gate
+        "license_title":         "Bienvenue chez Ashley",
+        "license_subtitle":      "Colle ta license key pour commencer.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "Activer",
+        "license_activating":    "Activation...",
+        "license_buy":           "Je n'ai pas encore de key",
+        "license_lost_key":      "J'ai perdu ma key — contacter le support",
+        "license_error_invalid": "Cette license key n'existe pas ou n'est pas valide.",
+        "license_error_limit":   "Tu as déjà activé cette licence sur le nombre maximum de PCs.",
+        "license_error_network": "Impossible de joindre le serveur de licences. Vérifie ta connexion et réessaie.",
+        "license_info_test":     "Licence de test",
+        "license_grace_banner":  "Hors ligne — licence mise en cache. Reconnecte-toi pour renouveler.",
+    },
 }
 
 
@@ -312,6 +421,30 @@ ACT_DESC = {
         "save_taste":     "💝 Guardar gusto: **[{cat}]** {val}",
         "generic":        "⚙️ {action_type}: {params}",
     },
+    "fr": {
+        "screenshot":     "📸 Prendre une capture plein écran",
+        "open_app":       "📂 Ouvrir l'application : **{p}**",
+        "play_music":     "🎵 Chercher sur YouTube : **{p}**",
+        "search_web":     "🔍 Chercher sur Google : **{p}**",
+        "open_url":       "🌐 Ouvrir dans le navigateur : **{p}**",
+        "vol_up":         "🔊 Monter le volume système (~10%)",
+        "vol_down":       "🔊 Baisser le volume système (~10%)",
+        "vol_mute":       "🔊 Couper / activer le son",
+        "vol_set":        "🔊 Mettre le volume à **{p}%**",
+        "type_text":      "⌨️ Écrire dans la fenêtre active :\n\n*\"{p}\"*",
+        "type_in":        "⌨️ Mettre **{win}** au premier plan et écrire :\n\n*\"{p}\"*",
+        "write_to_app":   "✍️ Ouvrir **{app}** et écrire :\n\n*\"{p}\"*",
+        "focus_window":   "🪟 Mettre au premier plan : **{p}**",
+        "hotkey":         "⌨️ Appuyer sur le raccourci : **{p}**",
+        "press_key":      "⌨️ Appuyer sur la touche : **{p}**",
+        "close_window":   "❌ Fermer la fenêtre / appli : **{p}**",
+        "close_tab":      "🗂️ Fermer l'onglet du navigateur : **{p}**",
+        "remind":         "⏰ Programmer un rappel : **{text}** pour le **{date}**",
+        "add_important":  "📌 Ajouter aux importants : **{p}**",
+        "done_important": "✅ Marquer comme fait : **{p}**",
+        "save_taste":     "💝 Enregistrer ce goût : **[{cat}]** {val}",
+        "generic":        "⚙️ {action_type} : {params}",
+    },
 }
 
 
@@ -327,6 +460,10 @@ KEY_LABELS = {
     "es": {
         "space": "Espacio", "backspace": "Retroceso", "delete": "Suprimir",
         "home": "Inicio", "end": "Fin", "pageup": "Re Pág", "pagedown": "Av Pág",
+    },
+    "fr": {
+        "space": "Espace", "backspace": "Retour arrière", "delete": "Suppr",
+        "home": "Origine", "end": "Fin", "pageup": "Page préc.", "pagedown": "Page suiv.",
     },
 }
 
@@ -392,6 +529,34 @@ TIME_CTX = {
                    "May":"mayo","June":"junio","July":"julio","August":"agosto",
                    "September":"septiembre","October":"octubre","November":"noviembre","December":"diciembre"},
         "date_format": "%A, %d de %B de %Y",
+    },
+    "fr": {
+        "part_dawn":       "petit matin",
+        "part_morning":    "matin",
+        "part_afternoon":  "après-midi",
+        "part_evening":    "soir",
+        "part_night":      "nuit",
+
+        "datetime_line":   "Date et heure actuelles : {fecha}, {hora} ({momento}).",
+        "first_talk":      "C'est la première fois que le patron parle dans cette session.",
+        "active_convo":    "Le patron était là il y a moins de 2 minutes — conversation active.",
+        "short_pause":     "Le patron a mis {min} minutes à répondre — petite pause.",
+        "medium_away":     "Le patron a été absent {min} minutes.",
+        "hours_away":      "Le patron a été absent {h}h {m}min.",
+        "long_away":       "Le patron a été absent {h} heures — longue absence.",
+        "slept_away":      "Le patron a été absent {h} heures. Parti à {when} (nuit/petit matin) — il a probablement dormi. Il est maintenant {momento}.",
+        "very_long_away":  "Le patron a été absent {h} heures (depuis {when}). Très longue absence.",
+
+        "due_reminders_header": "\n⏰ RAPPELS EN RETARD (le patron vient de revenir ou le moment est passé) :",
+        "due_reminders_format": "  - {text} (pour : {when})",
+        "due_reminders_hint":   "Mentionne ces rappels naturellement avec ta personnalité — demande au patron s'il l'a fait, s'il en a besoin, s'il veut le reprogrammer. Pas robotique, sois Ashley.",
+
+        "days": {"Monday":"lundi","Tuesday":"mardi","Wednesday":"mercredi",
+                 "Thursday":"jeudi","Friday":"vendredi","Saturday":"samedi","Sunday":"dimanche"},
+        "months": {"January":"janvier","February":"février","March":"mars","April":"avril",
+                   "May":"mai","June":"juin","July":"juillet","August":"août",
+                   "September":"septembre","October":"octobre","November":"novembre","December":"décembre"},
+        "date_format": "%A %d %B %Y",
     },
 }
 

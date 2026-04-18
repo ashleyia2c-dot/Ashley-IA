@@ -22,10 +22,31 @@ def test_build_system_prompt_spanish():
     assert "TAGS — LEER PRIMERO" in result
 
 
+def test_build_system_prompt_french():
+    """lang='fr' produces the French prompt with 'TAGS — À LIRE EN PREMIER'."""
+    result = build_system_prompt([], [], lang="fr")
+    assert "TAGS — À LIRE EN PREMIER" in result
+    # Content check: the FR-specific term must appear (not a fallback to EN).
+    assert "patron" in result.lower()
+
+
 def test_build_system_prompt_default_is_english():
     """Default lang (no arg) produces English prompt."""
     result = build_system_prompt([], [])
     assert "TAGS — READ FIRST" in result
+
+
+def test_unsupported_lang_falls_back_to_english():
+    """Unknown lang codes fall back to English instead of crashing."""
+    result = build_system_prompt([], [], lang="de")
+    assert "TAGS — READ FIRST" in result
+
+
+def test_build_initiative_prompt_french():
+    """Initiative prompt also has a French version."""
+    result = build_initiative_prompt([], [], lang="fr")
+    assert "Ashley" in result
+    assert "patron" in result.lower()
 
 
 # ── voice_mode ───────────────────────────────────────────────────────────────
@@ -41,6 +62,12 @@ def test_voice_mode_true_spanish():
     """voice_mode=True with lang='es' injects MODO VOZ NATURAL section."""
     result = build_system_prompt([], [], voice_mode=True, lang="es")
     assert "MODO VOZ NATURAL" in result
+
+
+def test_voice_mode_true_french():
+    """voice_mode=True with lang='fr' injects MODE VOIX NATURELLE section."""
+    result = build_system_prompt([], [], voice_mode=True, lang="fr")
+    assert "MODE VOIX NATURELLE" in result
 
 
 def test_voice_mode_false_english():
