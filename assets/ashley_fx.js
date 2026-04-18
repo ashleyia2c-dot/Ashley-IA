@@ -375,7 +375,23 @@
     // Down uses the existing playAffectionDown (already triggered by the observer)
   }
 
+  // Hidratacion: durante los primeros N ms despues de arrancar el observer,
+  // cualquier cambio en el valor de affection es el servidor cargando el
+  // estado real desde disco (la pagina renderiza primero con el default 50
+  // y on_load luego inyecta el valor guardado). Un usuario con affection=64
+  // veria un falso "tier up" 50->64 cada vez que abre la app, cruzando
+  // 2 o 3 tiers de una. Durante la ventana de hidratacion, actualizamos
+  // baseline en silencio sin disparar heart, sonido ni banner.
+  //
+  // 2500 ms cubre el caso comun (hydration llega en <500 ms) con margen
+  // generoso para conexiones lentas, y sigue siendo menor que el tiempo
+  // minimo para que Grok devuelva una respuesta streaming (>3s normalmente),
+  // asi que una interaccion real nunca entra en la ventana.
+  var HYDRATION_WINDOW_MS = 2500;
+  var _observerStartTime = 0;
+
   function initAffectionObserver() {
+    _observerStartTime = Date.now();
     setInterval(function() {
       var bar = document.querySelector('.affection-bar');
       if (!bar) return;
@@ -398,6 +414,14 @@
       }
 
       if (current === _lastAffection) return;
+
+      // Hydration guard: dentro de la ventana inicial, el cambio es la
+      // carga del estado real, no una interaccion real. Silenciamos.
+      if (Date.now() - _observerStartTime < HYDRATION_WINDOW_MS) {
+        _lastAffection = current;
+        _lastTier = _getTier(current);
+        return;
+      }
 
       var delta = current - _lastAffection;
       var newTier = _getTier(current);
