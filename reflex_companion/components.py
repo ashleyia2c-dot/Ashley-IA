@@ -531,7 +531,7 @@ def license_gate() -> rx.Component:
     return rx.center(
         rx.vstack(
             rx.image(
-                src="/ashley_default.jpg",
+                src="/ashley_pfp.jpg",
                 width="120px",
                 height="120px",
                 border_radius="50%",
@@ -564,9 +564,11 @@ def license_gate() -> rx.Component:
                         color="white",
                         border="1px solid rgba(255,255,255,0.12)",
                         border_radius="10px",
-                        padding="14px 16px",
-                        font_size="13px",
+                        padding="14px 12px",
+                        font_size="11px",
+                        letter_spacing="0.5px",
                         width="100%",
+                        text_align="center",
                         auto_focus=True,
                         _focus={
                             "border": "1px solid rgba(255,154,238,0.55)",
@@ -641,8 +643,8 @@ def license_gate() -> rx.Component:
             ),
             spacing="4",
             align="center",
-            width="420px",
-            padding="44px 40px",
+            width="460px",
+            padding="44px 36px",
             bg="rgba(255,255,255,0.025)",
             border="1px solid rgba(255,255,255,0.07)",
             border_radius="20px",
