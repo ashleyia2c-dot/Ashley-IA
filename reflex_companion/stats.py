@@ -111,14 +111,23 @@ def _load_from_registry() -> Optional[dict]:
             count, _ = winreg.QueryValueEx(key, "total_messages")
             first_at, _ = winreg.QueryValueEx(key, "first_message_at")
             sig, _ = winreg.QueryValueEx(key, "sig")
-        # Verificar firma — si alguien tocó el registro, lo detectamos igual
-        payload = {"total_messages": int(count), "first_message_at": first_at or None}
+        # Verificar firma — si alguien tocó el registro, lo detectamos igual.
+        # IMPORTANTE: usamos la misma convención que _save_to_registry — cadena
+        # vacía (no None) cuando first_message_at no está seteado. Si hacemos
+        # `first_at or None` aquí pero el save firmó con "", las firmas no
+        # cuadran y damos falsos positivos de tampering.
+        first_at_str = first_at or ""
+        payload = {"total_messages": int(count), "first_message_at": first_at_str}
         if not _verify(payload, sig):
             _log.warning("registry mirror signature mismatch — treating as tampered")
-            return {"total_user_messages": _POISONED_COUNT, "first_message_at": first_at or None, "_tampered": True}
+            return {
+                "total_user_messages": _POISONED_COUNT,
+                "first_message_at": first_at_str or None,
+                "_tampered": True,
+            }
         return {
             "total_user_messages": int(count),
-            "first_message_at": first_at or None,
+            "first_message_at": first_at_str or None,  # convertimos "" -> None para el caller
             "_tampered": False,
         }
     except FileNotFoundError:
@@ -280,11 +289,42 @@ def is_refund_eligible(stats: Optional[dict] = None, threshold: int = 40) -> boo
     return stats.get("total_user_messages", 0) < threshold
 
 
-def is_tampered_vs_history(total_messages: int, history_length: int, max_history: int = 50) -> bool:
+def is_tampered_vs_history(
+    total_messages: int,
+    history_length: int,
+    max_history: int = 50,
+    counter_started_at: Optional[str] = None,
+    oldest_history_ts: Optional[str] = None,
+) -> bool:
     """Sanity check adicional: si el historial está lleno (capado al max) pero
     el contador dice menos que eso → alguien borró el historial y reseteó
     mal el contador. Señal de tampering aunque las firmas cuadren.
+
+    EXCEPCIÓN (grandfather-in): si el mensaje más viejo del historial es
+    ANTERIOR al primer mensaje registrado por el contador, la discrepancia
+    es legítima — significa que el user tenía historia antes de que la
+    feature de stats existiera. No podemos inventar un contador retroactivo.
+
+    Parámetros:
+      total_messages: contador persistente de mensajes del user.
+      history_length: número de entradas en historial_ashley.json.
+      max_history: límite máximo del historial (50 por default).
+      counter_started_at: ISO ts del primer incremento del contador.
+      oldest_history_ts: ISO ts del mensaje más antiguo del historial.
     """
-    if history_length >= max_history and total_messages < history_length:
-        return True
-    return False
+    if history_length < max_history:
+        return False
+    if total_messages >= history_length:
+        return False
+
+    # Regla de grandfather: el historial tiene entradas de antes de que el
+    # contador existiera → no es tampering, es feature nueva sobre datos viejos.
+    if counter_started_at and oldest_history_ts:
+        try:
+            if oldest_history_ts < counter_started_at:
+                return False
+        except TypeError:
+            # timestamps con tipos raros — ignorar el check, ser conservador.
+            pass
+
+    return True

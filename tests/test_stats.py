@@ -217,7 +217,7 @@ def test_fallback_to_registry_when_file_missing(monkeypatch):
 
 
 def test_history_full_with_low_counter_detected():
-    """Historial a tope + contador bajo → obvio que hay tampering."""
+    """Historial a tope + contador bajo, sin timestamps → presume tampering."""
     assert s.is_tampered_vs_history(total_messages=5, history_length=50) is True
 
 
@@ -229,3 +229,54 @@ def test_history_partial_does_not_trigger():
 def test_history_full_with_matching_counter_ok():
     """Historial a tope + contador alto → normal, usuario activo."""
     assert s.is_tampered_vs_history(total_messages=500, history_length=50) is False
+
+
+# ── Grandfather-in: history que predata al counter ───────────────────────────
+
+
+def test_history_predates_counter_is_not_tampering():
+    """Usuario existente que acaba de recibir la feature del contador.
+
+    Tiene 50 mensajes en su historial desde hace semanas, pero el counter
+    empezó hoy. Esto NO es tampering — es feature nueva sobre datos viejos.
+    """
+    assert s.is_tampered_vs_history(
+        total_messages=3,
+        history_length=50,
+        counter_started_at="2026-04-18T17:00:00+00:00",
+        oldest_history_ts="2026-04-10T09:00:00+00:00",  # 8 días antes
+    ) is False
+
+
+def test_history_newer_than_counter_and_low_is_tampering():
+    """Si el historial es posterior al counter pero el counter es mucho
+    menor, sí es sospechoso: el user debió haber visto el counter subir
+    con cada mensaje."""
+    assert s.is_tampered_vs_history(
+        total_messages=3,
+        history_length=50,
+        counter_started_at="2026-04-10T09:00:00+00:00",
+        oldest_history_ts="2026-04-11T10:00:00+00:00",  # después del counter
+    ) is True
+
+
+def test_grandfather_ignored_when_timestamps_missing():
+    """Sin timestamps no podemos aplicar grandfather — revertimos al check estricto."""
+    assert s.is_tampered_vs_history(
+        total_messages=3, history_length=50,
+        counter_started_at=None, oldest_history_ts=None,
+    ) is True
+
+
+def test_grandfather_ignored_when_only_one_timestamp():
+    """Si falta uno de los dos timestamps, no podemos comparar — check estricto."""
+    assert s.is_tampered_vs_history(
+        total_messages=3, history_length=50,
+        counter_started_at="2026-04-18T00:00:00+00:00",
+        oldest_history_ts=None,
+    ) is True
+    assert s.is_tampered_vs_history(
+        total_messages=3, history_length=50,
+        counter_started_at=None,
+        oldest_history_ts="2026-04-18T00:00:00+00:00",
+    ) is True
