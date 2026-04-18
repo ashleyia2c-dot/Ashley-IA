@@ -16,6 +16,7 @@ from .config import (
     COLOR_BUTTON_OFF, COLOR_BUTTON_OFF_TEXT,
     SHADOW_ASHLEY, SHADOW_USER, SHADOW_BUTTON, SHADOW_AVATAR,
     AVATAR_SIZE, CHAT_WIDTH, DIALOG_WIDTH, CHAT_HEIGHT, MEMORY_HEIGHT,
+    LICENSE_CHECK_ENABLED,
 )
 from .memory import (
     load_json, save_json, now_iso, ensure_ids, ensure_facts,
@@ -102,6 +103,21 @@ class State(rx.State):
 
     # ── Discovery background task ─────────────
     _bg_discovery_running: bool = False
+
+    # ── License gate ──────────────────────────
+    # Default: gate ON si el feature flag está activo. on_load lo apaga si la
+    # key almacenada valida contra LS. En modo dev (flag OFF) siempre es False
+    # y el componente de gate nunca se renderiza.
+    license_needed: bool = LICENSE_CHECK_ENABLED
+    license_error: str = ""
+    license_submitting: bool = False
+    license_offline_grace: bool = False  # True si arrancamos sin red, mostrar banner
+
+    # ── Usage stats (para la política de reembolso "14 días / 40 mensajes") ──
+    # Persistidos en stats_ashley.json con firma HMAC + mirror en Windows Registry.
+    # Ver stats.py para detalles de la protección anti-tampering.
+    stats_total_messages: int = 0
+    stats_tampered: bool = False
 
     # ─────────────────────────────────────────
     #  Computed vars
@@ -278,6 +294,53 @@ class State(rx.State):
         self._persist_voice()
         self.show_settings = False
 
+    # ── License gate ─────────────────────────────────────────
+    def submit_license(self, form_data: dict):
+        """Valida y activa la license key que tecleó el user en el gate.
+
+        Si la activación es OK: persiste, quita el gate y dispara el on_load
+        normal para cargar historial/facts/etc. (que nos saltamos en on_load
+        cuando license_needed=True).
+        Si falla: enseña el error friendly y deja el gate visible.
+        """
+        raw_key = (form_data.get("license_key") or "").strip()
+        if not raw_key:
+            self.license_error = self.t["license_error_invalid"]
+            return
+
+        self.license_submitting = True
+        self.license_error = ""
+        yield  # refresca UI para mostrar spinner
+
+        from . import license as lic
+        try:
+            ok, friendly_msg = lic.activate_and_store(raw_key)
+        except ConnectionError:
+            self.license_submitting = False
+            self.license_error = self.t["license_error_network"]
+            return
+        except Exception as e:
+            import logging
+            logging.getLogger("ashley").error("license activate crashed: %s", e)
+            self.license_submitting = False
+            self.license_error = self.t["license_error_invalid"]
+            return
+
+        if not ok:
+            self.license_submitting = False
+            self.license_error = friendly_msg or self.t["license_error_invalid"]
+            return
+
+        # ¡Activación OK! Desbloqueamos la UI y disparamos el resto del
+        # on_load que nos saltamos antes (cargar historial, achievements,
+        # tastes, diary, etc.).
+        self.license_needed = False
+        self.license_submitting = False
+        self.license_error = ""
+        self.license_offline_grace = False
+        # Cargar todo lo que nos saltamos cuando el gate estaba activo.
+        yield from self.on_load()
+
     # ─────────────────────────────────────────
     #  Carga inicial
     # ─────────────────────────────────────────
@@ -293,6 +356,23 @@ class State(rx.State):
             import logging
             logging.getLogger("ashley").warning("migrations failed: %s", _e)
             # Seguimos arrancando — datos viejos son mejor que no arrancar.
+
+        # ── License gate ──────────────────────────────────────────
+        # Solo si el feature flag está activo. Si valida → license_needed=False
+        # y seguimos cargando normal. Si no valida → license_needed=True y
+        # cortocircuitamos el resto del on_load (no tiene sentido cargar
+        # historial ni warmup de whisper si el user no está autenticado).
+        if LICENSE_CHECK_ENABLED:
+            from . import license as lic
+            ok, reason = lic.ensure_valid_on_startup()
+            self.license_needed = not ok
+            self.license_offline_grace = (reason == "offline_grace")
+            if not ok:
+                # Nada más que hacer — el gate está pintando y el user
+                # tiene que meter su key antes de continuar.
+                return
+        else:
+            self.license_needed = False
 
         self.browser_opened = False
         # Cargar idioma persistido (default: EN)
@@ -329,6 +409,8 @@ class State(rx.State):
         # Load achievements
         from .achievements import load_achievements
         self.achievements_data = load_achievements()
+        # Load usage stats (contador de mensajes + detección de tampering).
+        self._reload_stats_into_state()
         if not self.facts and self.messages:
             self._initial_fact_extraction()
         self._maybe_create_diary_entry()
@@ -580,6 +662,43 @@ class State(rx.State):
 
     def _save_affection(self):
         save_json(AFFECTION_FILE, {"level": self.affection})
+
+    # ─────────────────────────────────────────
+    #  Usage stats (contador de mensajes para refund policy)
+    # ─────────────────────────────────────────
+
+    def _reload_stats_into_state(self):
+        """Carga el contador persistente + flag de tampering al state reactivo."""
+        try:
+            from . import stats as _stats
+            data = _stats.load_stats()
+            # Cross-check adicional: si el historial está lleno pero el contador
+            # dice mucho menos, el user probablemente manipuló algo.
+            if _stats.is_tampered_vs_history(
+                total_messages=data.get("total_user_messages", 0),
+                history_length=len(self.messages),
+                max_history=MAX_HISTORY_MESSAGES,
+            ):
+                data["_tampered"] = True
+            self.stats_total_messages = int(data.get("total_user_messages", 0))
+            self.stats_tampered = bool(data.get("_tampered", False))
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("could not load stats: %s", _e)
+            # Failsafe: nunca dejar que un fallo aquí rompa el arranque.
+            self.stats_total_messages = 0
+            self.stats_tampered = False
+
+    def _increment_message_counter(self):
+        """Incrementa el contador tras cada 'Send' del user y refleja al state."""
+        try:
+            from . import stats as _stats
+            result = _stats.increment_message_counter()
+            self.stats_total_messages = int(result.get("total_user_messages", 0))
+            self.stats_tampered = bool(result.get("_tampered", False))
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("stats increment failed: %s", _e)
 
     # ─────────────────────────────────────────
     #  Achievements
@@ -1085,6 +1204,10 @@ class State(rx.State):
 
         self.messages.append(self._prepare_user_message(user_message))
         self._last_user_message = user_message
+        # Contador persistente firmado (para política de reembolso).
+        # Se mantiene fuera del try/except para que un fallo en stats NO
+        # bloquee el envío del mensaje.
+        self._increment_message_counter()
         self.is_thinking = True
         self.current_response = ""
         yield
@@ -1490,6 +1613,7 @@ from .components import (  # noqa: E402
     message_item, streaming_bubble, thinking_indicator,
     fact_item, diary_item, taste_item, memory_item, achievement_card,
     _ashley_portrait_panel, _pill_btn, _pill_btn_orange, _pill_btn_vision,
+    license_gate,
 )
 
 # ── Estilos globales (extraídos a styles.py) ──
@@ -1818,7 +1942,12 @@ def index():
     # Los dialogs se retornan fuera del box principal pero forman parte
     # del árbol de componentes de la página — se usan open= para mostrarlos.
     # Reflex los monta en el portal del body automáticamente.
-    return rx.fragment(
+    #
+    # Si license_needed está activo (flag ON + sin licencia válida), en vez
+    # de la UI normal pintamos SOLO el gate. El resto del árbol sigue
+    # presente por si el user activa la key: los dialogs ya están montados
+    # y on_submit del gate re-dispara on_load sin necesidad de reload.
+    main_ui = rx.fragment(
         page,
 
         # ── Diálogo de recuerdos ──────────────────────────────
@@ -2082,6 +2211,47 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
+                        #  USAGE — contador firmado (refund eligibility)
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.text(State.t["settings_usage_heading"],
+                                        color="#bbbbbb", font_weight="700", font_size="13px",
+                                        letter_spacing="0.05em"),
+                                rx.hstack(
+                                    rx.text(State.t["settings_usage_label"],
+                                            color="#cccccc", font_size="13px", font_weight="500"),
+                                    rx.spacer(),
+                                    rx.cond(
+                                        State.stats_tampered,
+                                        rx.text("???",
+                                                color="#ff6b6b", font_size="14px",
+                                                font_weight="700", font_family="monospace"),
+                                        rx.text(State.stats_total_messages.to_string(),
+                                                color=COLOR_PRIMARY, font_size="14px",
+                                                font_weight="700", font_family="monospace"),
+                                    ),
+                                    spacing="2", align="center", width="100%",
+                                ),
+                                rx.cond(
+                                    State.stats_tampered,
+                                    rx.text(State.t["settings_usage_tampered"],
+                                            color="#ff8080", font_size="11px",
+                                            line_height="1.5"),
+                                    rx.text(State.t["settings_usage_hint"],
+                                            color="#888", font_size="11px",
+                                            line_height="1.5"),
+                                ),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(255,255,255,0.03)",
+                            border="1px solid rgba(255,255,255,0.08)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
                         #  Botones de acción
                         # ═══════════════════════════════════════════════
                         rx.hstack(
@@ -2134,6 +2304,12 @@ def index():
             ),
             open=State.show_settings,
         ),
+    )
+
+    return rx.cond(
+        State.license_needed,
+        license_gate(),
+        main_ui,
     )
 
 

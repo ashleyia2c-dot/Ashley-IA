@@ -40,6 +40,19 @@ IMPORTANT_FILE = _data_path("importantes_ashley.json")
 TASTES_FILE = _data_path("gustos_ashley.json")
 DISCOVERY_FILE = _data_path("discovery_ashley.json")
 AFFECTION_FILE = _data_path("affection_ashley.json")
+LICENSE_FILE = _data_path("license.json")
+STATS_FILE = _data_path("stats_ashley.json")
+
+# ─────────────────────────────────────────────
+#  Licencia (Lemon Squeezy)
+# ─────────────────────────────────────────────
+# Mientras LICENSE_CHECK_ENABLED=False el gate está completamente desactivado
+# y Ashley arranca sin pedir key. Lo ponemos en True el día del launch.
+# Los IDs son los de nuestro producto en LS (store "Ashley IA").
+
+LICENSE_CHECK_ENABLED = False
+LEMONSQUEEZY_STORE_ID = 348957
+LEMONSQUEEZY_PRODUCT_ID = 984701
 
 # ─────────────────────────────────────────────
 #  Memoria y comportamiento
