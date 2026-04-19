@@ -291,34 +291,47 @@ def is_refund_eligible(stats: Optional[dict] = None, threshold: int = 40) -> boo
 
 def is_tampered_vs_history(
     total_messages: int,
-    history_length: int,
-    max_history: int = 50,
+    user_history_count: int,
     counter_started_at: Optional[str] = None,
     oldest_history_ts: Optional[str] = None,
 ) -> bool:
-    """Sanity check adicional: si el historial está lleno (capado al max) pero
-    el contador dice menos que eso → alguien borró el historial y reseteó
-    mal el contador. Señal de tampering aunque las firmas cuadren.
+    """Sanity check contra el historial de chat.
 
-    EXCEPCIÓN (grandfather-in): si el mensaje más viejo del historial es
-    ANTERIOR al primer mensaje registrado por el contador, la discrepancia
-    es legítima — significa que el user tenía historia antes de que la
-    feature de stats existiera. No podemos inventar un contador retroactivo.
+    El contador `total_messages` nunca decrece y cuenta SOLO mensajes
+    enviados por el usuario. El chat file también contiene mensajes del
+    usuario (más los de Ashley + system_result). Lo normal:
+
+        user_history_count ≤ total_messages
+
+    (el historial está capado a MAX_HISTORY_MESSAGES, así que algunos
+    mensajes del user se van cayendo por antigüedad; el contador los
+    sigue acumulando). Si el chat file tiene MÁS mensajes del user de
+    los que el contador reporta, alguien reseteó/bajó el counter.
+
+    EXCEPCIÓN (grandfather-in): si el mensaje más viejo del chat es
+    ANTERIOR al primer incremento del contador, esos mensajes antiguos
+    nunca pasaron por el contador (la feature se añadió a posteriori).
+    En ese caso la discrepancia es legítima.
 
     Parámetros:
-      total_messages: contador persistente de mensajes del user.
-      history_length: número de entradas en historial_ashley.json.
-      max_history: límite máximo del historial (50 por default).
+      total_messages: contador persistente firmado de mensajes del user.
+      user_history_count: número de entradas con role=='user' en el chat.
       counter_started_at: ISO ts del primer incremento del contador.
-      oldest_history_ts: ISO ts del mensaje más antiguo del historial.
-    """
-    if history_length < max_history:
-        return False
-    if total_messages >= history_length:
-        return False
+      oldest_history_ts: ISO ts del mensaje más antiguo del chat.
 
-    # Regla de grandfather: el historial tiene entradas de antes de que el
-    # contador existiera → no es tampering, es feature nueva sobre datos viejos.
+    Nota: versiones anteriores pasaban `history_length` (entradas
+    totales) aquí, lo cual comparaba peras con manzanas (contador = solo
+    user, history_length = user + assistant + system_result) y producía
+    falsos positivos cada vez que Ashley respondía lo suficiente como
+    para llenar la mitad del file. Ese bug se quedaba oculto hasta que
+    el user veía "???" en Settings tras una sesión larga.
+    """
+    if user_history_count <= total_messages:
+        return False  # contador cubre (o supera) al historial — todo bien
+
+    # El historial tiene MÁS mensajes del user que el contador → raro.
+    # Grandfather-in: si el historial es más viejo que el contador, es
+    # legítimo (feature añadida sobre datos preexistentes).
     if counter_started_at and oldest_history_ts:
         try:
             if oldest_history_ts < counter_started_at:

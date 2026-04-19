@@ -214,69 +214,94 @@ def test_fallback_to_registry_when_file_missing(monkeypatch):
 
 
 # ── is_tampered_vs_history ───────────────────────────────────────────────────
+# Signatura: (total_messages, user_history_count, counter_started_at?, oldest_history_ts?)
+# Nos interesa comparar USER-count con USER-count. El historial incluye también
+# mensajes de Ashley y system_result — esos no entran en este check.
 
 
-def test_history_full_with_low_counter_detected():
-    """Historial a tope + contador bajo, sin timestamps → presume tampering."""
-    assert s.is_tampered_vs_history(total_messages=5, history_length=50) is True
+def test_user_history_exceeds_counter_is_tampered():
+    """El chat tiene 50 mensajes del user pero el contador dice 5 →
+    alguien reseteó el counter sin limpiar el chat."""
+    assert s.is_tampered_vs_history(
+        total_messages=5, user_history_count=50,
+    ) is True
 
 
-def test_history_partial_does_not_trigger():
-    """Historial medio lleno + contador razonable → OK."""
-    assert s.is_tampered_vs_history(total_messages=20, history_length=30) is False
+def test_counter_exceeds_history_is_normal():
+    """El chat está capado al límite, así que naturalmente tiene menos
+    user msgs que el total histórico del counter. Todo normal."""
+    assert s.is_tampered_vs_history(
+        total_messages=500, user_history_count=25,
+    ) is False
 
 
-def test_history_full_with_matching_counter_ok():
-    """Historial a tope + contador alto → normal, usuario activo."""
-    assert s.is_tampered_vs_history(total_messages=500, history_length=50) is False
+def test_counter_equals_history_is_normal():
+    """Exactamente iguales — edge case clean."""
+    assert s.is_tampered_vs_history(
+        total_messages=20, user_history_count=20,
+    ) is False
+
+
+def test_real_world_case_does_not_false_positive():
+    """Reproducción del bug real reportado: contador=26, user_history=16,
+    oldest history posterior al inicio del counter. NO debe ser tampering."""
+    assert s.is_tampered_vs_history(
+        total_messages=26,
+        user_history_count=16,
+        counter_started_at="2026-04-18T17:37:45+00:00",
+        oldest_history_ts="2026-04-18T23:51:27+00:00",  # 6h después
+    ) is False
+
+
+def test_empty_history_is_not_tampered():
+    """Fresh install — chat vacío, contador a 0. No hay nada que detectar."""
+    assert s.is_tampered_vs_history(
+        total_messages=0, user_history_count=0,
+    ) is False
 
 
 # ── Grandfather-in: history que predata al counter ───────────────────────────
 
 
 def test_history_predates_counter_is_not_tampering():
-    """Usuario existente que acaba de recibir la feature del contador.
-
-    Tiene 50 mensajes en su historial desde hace semanas, pero el counter
-    empezó hoy. Esto NO es tampering — es feature nueva sobre datos viejos.
-    """
+    """Usuario existente al que se le acaba de activar la feature del contador.
+    El historial tiene user msgs de antes de que el counter existiera, así
+    que la discrepancia es legítima, no tampering."""
     assert s.is_tampered_vs_history(
         total_messages=3,
-        history_length=50,
+        user_history_count=25,  # más que el counter, pero historial viejo
         counter_started_at="2026-04-18T17:00:00+00:00",
         oldest_history_ts="2026-04-10T09:00:00+00:00",  # 8 días antes
     ) is False
 
 
 def test_history_newer_than_counter_and_low_is_tampering():
-    """Si el historial es posterior al counter pero el counter es mucho
-    menor, sí es sospechoso: el user debió haber visto el counter subir
-    con cada mensaje."""
+    """Historial POSTERIOR al counter + user_history > counter → tampering."""
     assert s.is_tampered_vs_history(
         total_messages=3,
-        history_length=50,
+        user_history_count=25,
         counter_started_at="2026-04-10T09:00:00+00:00",
-        oldest_history_ts="2026-04-11T10:00:00+00:00",  # después del counter
+        oldest_history_ts="2026-04-11T10:00:00+00:00",
     ) is True
 
 
 def test_grandfather_ignored_when_timestamps_missing():
-    """Sin timestamps no podemos aplicar grandfather — revertimos al check estricto."""
+    """Sin timestamps no podemos aplicar grandfather — check estricto."""
     assert s.is_tampered_vs_history(
-        total_messages=3, history_length=50,
+        total_messages=3, user_history_count=25,
         counter_started_at=None, oldest_history_ts=None,
     ) is True
 
 
 def test_grandfather_ignored_when_only_one_timestamp():
-    """Si falta uno de los dos timestamps, no podemos comparar — check estricto."""
+    """Si falta uno de los dos timestamps, no podemos comparar."""
     assert s.is_tampered_vs_history(
-        total_messages=3, history_length=50,
+        total_messages=3, user_history_count=25,
         counter_started_at="2026-04-18T00:00:00+00:00",
         oldest_history_ts=None,
     ) is True
     assert s.is_tampered_vs_history(
-        total_messages=3, history_length=50,
+        total_messages=3, user_history_count=25,
         counter_started_at=None,
         oldest_history_ts="2026-04-18T00:00:00+00:00",
     ) is True
