@@ -18,7 +18,33 @@ const { setupAutoUpdater, stopAutoUpdater } = require('./updater');
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 
 // ─── Configuración general ────────────────────────────────────────────────
+//
+// Resolver la carpeta raíz del "proyecto Reflex" (donde viven venv/,
+// reflex_companion/, .web/, assets/, rxconfig.py). Dos modos:
+//
+//  1. Packaged (instalador NSIS instalado):
+//     electron-builder pone los extraResources en <install>/resources/.
+//     Todo el proyecto completo (venv incluido) vive ahí, así que process.
+//     resourcesPath apunta exactamente a la raíz del proyecto.
+//
+//  2. Dev (ejecutando con ashley-electron.bat o npm start):
+//     El script corre desde la carpeta electron/, así que la raíz del
+//     proyecto es el padre (__dirname/../). Pero si alguien clonó con
+//     otra estructura de carpetas, caemos en los candidates de backup.
 function resolveProjectRoot() {
+  // Caso packaged: todo el stack está en resources/
+  if (app.isPackaged) {
+    const bundled = process.resourcesPath;
+    if (fs.existsSync(path.join(bundled, 'venv', 'Scripts', 'reflex.exe'))) {
+      return bundled;
+    }
+    // Si el installer por alguna razón no tiene el venv, avisamos clarito
+    // en el log para que soporte pueda diagnosticar.
+    log(`WARNING: packaged app but no venv in ${bundled} — installer is broken`);
+    return bundled; // seguimos para que el error posterior sea específico
+  }
+
+  // Caso dev: buscar en ubicaciones típicas
   const candidates = [
     path.resolve(__dirname, '..'),
     path.join(process.env.USERPROFILE || '', 'Desktop', 'reflex-companion'),
