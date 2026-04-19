@@ -44,7 +44,10 @@ const BACKEND_PORT_BASE  = 17800;
 let REFLEX_FRONTEND_PORT = FRONTEND_PORT_BASE;
 let REFLEX_BACKEND_PORT  = BACKEND_PORT_BASE;
 let REFLEX_URL = `http://${REFLEX_HOST}:${REFLEX_FRONTEND_PORT}`;
-const STARTUP_TIMEOUT_MS = 120000;
+// 180 s cubre el peor caso — primera vez que Reflex compila el bundle
+// frontend tras un cambio de components.py. Arranques normales tardan
+// 3-6 s.
+const STARTUP_TIMEOUT_MS = 180000;
 const DEV_MODE = process.argv.includes('--dev');
 
 // ─── Storage seguro del usuario ───────────────────────────────────────────
@@ -576,8 +579,20 @@ function startReflex(apiKey) {
   log(`Arrancando Reflex (intento ${reflexRestartCount + 1}) desde ${PROJECT_ROOT}`);
   log(`Datos en: ${ASHLEY_DATA_DIR}`);
 
+  // reflex run --env prod: sirve assets frontend ya compilados desde .web/
+  // en lugar de correr vite en dev mode con file watchers + hot reload.
+  // Arranque baja de ~22s a ~5s en fria y casi instantaneo si .web/ ya
+  // existe. El backend Python sigue recargando dinamicamente, asi que los
+  // cambios en prompts/State/etc. siguen reflejandose sin rebuild.
+  //
+  // El unico caso que requiere rebuild manual (via `reflex run --env dev`
+  // una vez) son cambios en components.py / styles.py porque esos se
+  // compilan a JSX y viven en .web/. Para el user final esto es irrelevante
+  // (no edita codigo) y para dev la perdida es aceptable (solo cuando tocas
+  // UI directamente).
   reflexProcess = spawn(VENV_REFLEX, [
     'run',
+    '--env', 'prod',
     '--frontend-port', String(REFLEX_FRONTEND_PORT),
     '--backend-port',  String(REFLEX_BACKEND_PORT),
     '--loglevel', 'warning',
