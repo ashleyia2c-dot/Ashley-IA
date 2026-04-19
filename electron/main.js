@@ -729,6 +729,28 @@ function killReflex() {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
+  // AppUserModelId: hace que Windows muestre "Ashley" como sender en las
+  // notificaciones Toast, con el icono del app. Sin esto se ven como
+  // "electron.exe" que es feo y poco profesional. Debe ir ANTES de cualquier
+  // Notification() emitida desde el renderer.
+  try { app.setAppUserModelId('com.ashley-ia.desktop'); } catch {}
+
+  // IPC: el renderer (ashley_fx.js) llama a focus-window cuando el user
+  // hace click en una notificación Windows. Restauramos y focuseamos.
+  ipcMain.on('notif-focus-window', () => {
+    try {
+      if (!mainWindow) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      // Flash por si el foco se lo roba otra app inmediatamente — el user
+      // mira la taskbar y ve el icono parpadeando.
+      try { mainWindow.flashFrame(true); } catch {}
+    } catch (err) {
+      log(`focus-window handler failed: ${err.message}`);
+    }
+  });
+
   // Detección de crash loop: si los últimos N arranques crashearon antes
   // de mostrar la ventana, ofrecemos al user descargar una versión anterior.
   // Protección clave contra "update malo deja a todos los users con app rota".
