@@ -1,0 +1,259 @@
+Ashley — Third-Party Notices
+=============================
+
+Ashley ("the Software") is built using a number of open source components.
+This file lists those components and the terms under which they are
+distributed. You are required to read and accept these notices when you
+use the Software.
+
+The Ashley application code itself is proprietary to Ashley IA and is not
+open source. Only the third-party components listed below are governed by
+the open source licenses included here.
+
+If you believe your work is incorrectly attributed or missing from this
+file, contact ashleyia2c@gmail.com and it will be corrected.
+
+
+================================================================================
+  SPEECH RECOGNITION (Whisper family)
+================================================================================
+
+openai-whisper
+  Copyright (c) 2022 OpenAI
+  License: MIT
+  Upstream: https://github.com/openai/whisper
+
+faster-whisper
+  Copyright (c) 2023 SYSTRAN
+  License: MIT
+  Upstream: https://github.com/SYSTRAN/faster-whisper
+
+CTranslate2
+  Copyright (c) 2018 OpenNMT
+  License: MIT
+  Upstream: https://github.com/OpenNMT/CTranslate2
+
+onnxruntime
+  Copyright (c) Microsoft Corporation
+  License: MIT
+  Upstream: https://github.com/microsoft/onnxruntime
+
+
+================================================================================
+  AI SDK
+================================================================================
+
+xai-sdk
+  Copyright (c) xAI Corp.
+  License: Apache 2.0
+  Upstream: https://github.com/xai-org/xai-sdk-python
+
+  Ashley does not include or bundle the xAI service. The Software calls
+  the xAI API at https://api.x.ai using an API key supplied by the end
+  user. Users are subject to xAI's own Terms of Service located at
+  https://x.ai/legal/terms-of-service when they use that API.
+
+
+================================================================================
+  APPLICATION FRAMEWORK
+================================================================================
+
+Reflex
+  Copyright (c) 2022 Nikhil Rao and Reflex contributors
+  License: Apache 2.0
+  Upstream: https://github.com/reflex-dev/reflex
+
+Electron
+  Copyright (c) 2013-present Electron contributors and OpenJS Foundation
+  License: MIT
+  Upstream: https://github.com/electron/electron
+
+electron-builder
+  Copyright (c) 2015 Loopline Systems
+  License: MIT
+  Upstream: https://github.com/electron-userland/electron-builder
+
+electron-updater
+  Copyright (c) 2015 Loopline Systems
+  License: MIT
+  Upstream: https://github.com/electron-userland/electron-builder
+
+Node.js
+  Copyright Node.js contributors
+  License: MIT (with additional OpenSSL terms)
+  Upstream: https://github.com/nodejs/node
+
+
+================================================================================
+  FRONTEND TOOLCHAIN
+================================================================================
+
+Vite
+  Copyright (c) 2019-present VoidZero Inc. and Vite contributors
+  License: MIT
+
+React and React DOM
+  Copyright (c) Meta Platforms, Inc. and affiliates
+  License: MIT
+
+Tailwind CSS
+  Copyright (c) Tailwind Labs, Inc.
+  License: MIT
+
+React Router
+  Copyright (c) React Training LLC and contributors
+  License: MIT
+
+
+================================================================================
+  PYTHON RUNTIME AND STANDARD LIBRARY
+================================================================================
+
+Python
+  Copyright (c) 2001-2024 Python Software Foundation
+  License: Python Software Foundation License (PSFL)
+  Upstream: https://www.python.org/
+
+The embedded Python interpreter bundled with this installer is
+redistributed under the PSFL, which explicitly permits commercial use
+and redistribution. Full text at
+https://docs.python.org/3/license.html
+
+
+================================================================================
+  PYTHON LIBRARIES
+================================================================================
+
+numpy               Copyright (c) NumPy Developers            BSD-3-Clause
+Pillow              Copyright (c) Jeffrey A. Clark and AlexClarkFoundation  MIT-CMU
+pyautogui           Copyright (c) Al Sweigart                  BSD-3-Clause
+pycaw               Copyright (c) Andre Miras                  MIT
+pyperclip           Copyright (c) Al Sweigart                  BSD-3-Clause
+comtypes            Copyright (c) 2000-2023 Thomas Heller and comtypes contributors  MIT
+pywin32             Copyright (c) Mark Hammond                 PSF License
+httpx               Copyright (c) Encode OSS Ltd.              BSD-3-Clause
+requests            Copyright (c) Kenneth Reitz                Apache 2.0
+python-dotenv       Copyright (c) Saurabh Kumar                BSD-3-Clause
+Starlette           Copyright (c) Encode OSS Ltd.              BSD-3-Clause
+Uvicorn             Copyright (c) Encode OSS Ltd.              BSD-3-Clause
+typer               Copyright (c) Sebastián Ramírez            MIT
+click               Copyright (c) Pallets                      BSD-3-Clause
+rich                Copyright (c) Will McGugan                 MIT
+sympy               Copyright (c) SymPy Development Team       BSD-3-Clause
+tqdm                Copyright (c) tqdm contributors            MPL-2.0 / MIT
+huggingface_hub     Copyright (c) Hugging Face, Inc.           Apache 2.0
+tokenizers          Copyright (c) Hugging Face, Inc.           Apache 2.0
+transformers        Copyright (c) Hugging Face, Inc.           Apache 2.0
+av (PyAV)           Copyright (c) Mike Boers                   BSD-3-Clause
+
+A complete, machine-generated list of every transitive Python dependency
+and its exact version and license is available on request via email to
+ashleyia2c@gmail.com.
+
+
+================================================================================
+  VISUAL ASSETS
+================================================================================
+
+Character portraits of "Ashley" bundled with the Software were generated
+by the end user of this project using xAI's Grok image generation and
+are owned by the project. They are an original character asset for this
+product and are not derivative of any copyrighted fictional character.
+
+
+================================================================================
+  FULL LICENSE TEXTS
+================================================================================
+
+-------------------------------------------------------------------------------
+MIT License
+-------------------------------------------------------------------------------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+-------------------------------------------------------------------------------
+BSD 3-Clause License
+-------------------------------------------------------------------------------
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution.
+
+  3. Neither the name of the copyright holder nor the names of its
+     contributors may be used to endorse or promote products derived from
+     this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+-------------------------------------------------------------------------------
+Apache License 2.0
+-------------------------------------------------------------------------------
+
+Full text at: https://www.apache.org/licenses/LICENSE-2.0
+
+Summary:
+  - Commercial use allowed
+  - Modification allowed
+  - Distribution allowed
+  - Patent use allowed (explicit patent license grant)
+  - Private use allowed
+  - Must include a copy of the license in redistributions (that's what
+    this notice file does)
+  - Must state significant changes if you modify the software
+  - NO warranty, NO liability, NO trademark grant
+
+
+-------------------------------------------------------------------------------
+Python Software Foundation License (PSFL)
+-------------------------------------------------------------------------------
+
+Full text at: https://docs.python.org/3/license.html
+
+Summary:
+  - Commercial use allowed
+  - Modification allowed
+  - Distribution allowed
+  - Must include the PSFL notice when redistributing Python
+
+
+================================================================================
+  CONTACT
+================================================================================
+
+Questions about attribution or licensing: ashleyia2c@gmail.com
+
+Last updated: April 2026

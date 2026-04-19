@@ -37,6 +37,10 @@
     ],
     "extraResources": [
       {
+        "from": "../THIRD-PARTY-NOTICES.txt",
+        "to": "THIRD-PARTY-NOTICES.txt"
+      },
+      {
         "from": "../reflex_companion",
         "to": "reflex_companion",
         "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
