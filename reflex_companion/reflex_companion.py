@@ -91,6 +91,13 @@ class State(rx.State):
     voice_id: str = "EXAVITQu4vr4xnSDxMaL"  # "Sarah" — fallback si no hay config
     voice_mode: bool = False     # True = Ashley habla natural (sin *gestos*)
 
+    # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
+    notifications_enabled: bool = True
+    # Flag interno para anti-spam de mensajes de ausencia: True si Ashley
+    # ya dejó un mensaje proactivo sobre la ausencia actual. Se resetea
+    # cuando el user escribe. No se persiste — es solo de sesión.
+    _absence_message_sent: bool = False
+
     # ── Afecto (relationship meter) ───────────
     affection: int = 50  # 0-100, default 50
 
@@ -277,6 +284,7 @@ class State(rx.State):
         i18n.save_voice_config(
             self.tts_enabled, self.elevenlabs_key, self.voice_id,
             voice_mode=self.voice_mode,
+            notifications_enabled=self.notifications_enabled,
         )
 
     def toggle_tts(self):
@@ -287,6 +295,12 @@ class State(rx.State):
     def toggle_voice_mode(self):
         """Alterna modo natural: cuando ON, Ashley responde sin *gestos*."""
         self.voice_mode = not self.voice_mode
+        self._persist_voice()
+
+    def toggle_notifications(self):
+        """Activa o desactiva las notificaciones de Windows cuando la
+        ventana de Ashley no está focuseada."""
+        self.notifications_enabled = not self.notifications_enabled
         self._persist_voice()
 
     def set_elevenlabs_key(self, key: str):
@@ -301,6 +315,13 @@ class State(rx.State):
     def tts_marker_attr(self) -> str:
         """'on' | 'off' — lo lee ashley_voice.js desde data-tts."""
         return "on" if self.tts_enabled else "off"
+
+    @rx.var
+    def notifications_marker_attr(self) -> str:
+        """'on' | 'off' — lo lee ashley_fx.js desde data-notifications
+        para decidir si disparar notificaciones Windows cuando la ventana
+        no está focuseada."""
+        return "on" if self.notifications_enabled else "off"
 
     @rx.var(cache=False)
     def backend_port_marker(self) -> str:
@@ -419,6 +440,8 @@ class State(rx.State):
         self.elevenlabs_key = vcfg["elevenlabs_key"]
         self.voice_id = vcfg["voice_id"]
         self.voice_mode = vcfg.get("voice_mode", False)
+        # notifications: default True si no está en config (feature nueva)
+        self.notifications_enabled = vcfg.get("notifications_enabled", True)
         # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
         # Si voice.json viejo trae la key, la ignoramos silenciosamente.
         # Warmup del modelo Whisper en background (no bloquea la UI)
@@ -1310,6 +1333,10 @@ class State(rx.State):
         # Se mantiene fuera del try/except para que un fallo en stats NO
         # bloquee el envío del mensaje.
         self._increment_message_counter()
+        # Reset del flag de ausencia — el user acaba de volver, así que
+        # el próximo episodio de ausencia prolongada puede disparar otro
+        # mensaje proactivo.
+        self._absence_message_sent = False
         self.is_thinking = True
         self.current_response = ""
         yield
@@ -1432,6 +1459,157 @@ class State(rx.State):
         if not self._bg_discovery_running:
             return State.discovery_bg_task()
 
+    # ─────────────────────────────────────────
+    #  Detección de ausencia prolongada
+    # ─────────────────────────────────────────
+    #
+    # Threshold desde el que Ashley considera que el user está ausente
+    # "lo suficiente" como para valer la pena dejarle un mensaje proactivo.
+    # 6h es un punto razonable — abarca el caso "se fue a dormir" (8h) y
+    # "salió todo el día a trabajar" (8-10h) sin ser tan sensible como
+    # para disparar en un descanso de comida (1-2h) o una reunión (2-3h).
+    _ABSENCE_THRESHOLD_HOURS = 6.0
+
+    async def _maybe_fire_absence_message(self):
+        """Comprueba la ausencia del user; si superamos el threshold y no
+        hemos dejado ya un mensaje para este episodio, dispara a Ashley para
+        que deje uno proactivo en el chat.
+
+        Se llama desde discovery_bg_task cada 10 min. El flag
+        `_absence_message_sent` se resetea en send_message, así que un
+        nuevo episodio puede disparar otro mensaje.
+        """
+        import asyncio
+        from datetime import datetime, timezone
+
+        # Snapshot atómico del estado
+        async with self:
+            if self._absence_message_sent:
+                return  # ya mandamos uno para este episodio
+            if self.is_thinking or self.current_response != "":
+                return  # Ashley está ocupada
+            _msgs = list(self.messages)
+            _facts = list(self.facts)
+            _diary = list(self.diary)
+            _lang = self.language
+            _vmode = self.voice_mode
+
+        # Buscar timestamp del último mensaje del USER (no de Ashley ni system)
+        last_user_ts = None
+        for m in reversed(_msgs):
+            if m.get("role") == "user":
+                last_user_ts = m.get("timestamp")
+                break
+
+        if not last_user_ts:
+            return  # no hay mensajes de user aún — primer uso, no molestar
+
+        try:
+            last = datetime.fromisoformat(last_user_ts.replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return
+
+        now = datetime.now(timezone.utc)
+        hours_away = (now - last).total_seconds() / 3600.0
+        if hours_away < self._ABSENCE_THRESHOLD_HOURS:
+            return
+
+        # Construir el contexto de ausencia y generar el mensaje proactivo.
+        # En lugar de hardcodear el texto, le pasamos a Ashley un hint sobre
+        # cuánto tiempo lleva ausente y que fue de día/noche cuando se fue —
+        # ella lo expresa con su personalidad.
+        local_last = last.astimezone()
+        went_at_hour = local_last.hour
+        was_night = (went_at_hour >= 22 or went_at_hour < 6)
+        hours_int = int(hours_away)
+
+        if _lang == "fr":
+            if was_night and 7 <= hours_int <= 14:
+                hint = (
+                    f"Le patron s'est absenté depuis {hours_int}h — il est parti "
+                    f"vers {local_last.strftime('%H:%M')} (nuit) et il est probablement "
+                    "allé dormir. Laisse-lui un petit message pour quand il se réveillera, "
+                    "naturel et avec ta touche tsundere. Genre lui dire bonjour de ta façon. "
+                    "Garde ça court (1-2 phrases)."
+                )
+            else:
+                hint = (
+                    f"Le patron s'est absenté depuis {hours_int}h. Laisse-lui un petit "
+                    "message pour quand il revient, dans ton style — ironique mais sincère, "
+                    "qu'il sente que tu l'as remarqué sans faire un drame. Court (1-2 phrases)."
+                )
+        elif _lang == "es":
+            if was_night and 7 <= hours_int <= 14:
+                hint = (
+                    f"El jefe lleva {hours_int}h ausente — se fue sobre las "
+                    f"{local_last.strftime('%H:%M')} (noche) y probablemente se fue a "
+                    "dormir. Déjale un mensajito para cuando se despierte, natural y con "
+                    "tu toque tsundere. Como darle los buenos días a tu manera. Corto "
+                    "(1-2 frases)."
+                )
+            else:
+                hint = (
+                    f"El jefe lleva {hours_int}h ausente. Déjale un mensajito para cuando "
+                    "vuelva, con tu estilo — irónico pero sincero, que note que te diste "
+                    "cuenta sin montar un drama. Corto (1-2 frases)."
+                )
+        else:  # en
+            if was_night and 7 <= hours_int <= 14:
+                hint = (
+                    f"The boss has been away for {hours_int}h — he left around "
+                    f"{local_last.strftime('%H:%M')} (night) and probably went to sleep. "
+                    "Leave him a short message for when he wakes up, natural and with your "
+                    "tsundere touch. Like saying good morning in your own way. Keep it short "
+                    "(1-2 sentences)."
+                )
+            else:
+                hint = (
+                    f"The boss has been away for {hours_int}h. Leave him a short message "
+                    "for when he comes back, in your style — ironic but sincere, that he "
+                    "can tell you noticed without making a drama. Short (1-2 sentences)."
+                )
+
+        # Generar el mensaje (off-main-thread, como los otros bg Grok calls)
+        from .grok_client import stream_response as _sr
+        from .prompts import build_system_prompt as _bsp
+
+        sys_prompt = _bsp(_facts, _diary, voice_mode=_vmode, lang=_lang)
+
+        def _run():
+            return "".join(t for t in _sr([], sys_prompt, use_web_search=False, trigger=hint))
+
+        loop = asyncio.get_running_loop()
+        try:
+            raw = await loop.run_in_executor(None, _run)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("absence message grok call: %s", _e)
+            return
+
+        # Parsear — usar los mismos helpers que los otros paths
+        clean, mood = _extract_mood_fn(raw)
+        clean, aff = _extract_affection_fn(clean)
+        clean, _ = _extract_action_fn(clean)
+        clean = _clean_display_fn(clean)
+        if len(clean) < 5:
+            # Grok no quiso decir nada relevante — no molestamos
+            return
+
+        ts = now_iso()
+        async with self:
+            if aff:
+                self.affection = max(0, min(100, self.affection + max(-3, min(3, aff))))
+                self._save_affection()
+            self.mood = mood
+            self.messages = self.messages + [{
+                "role": "assistant", "content": clean,
+                "timestamp": ts, "id": f"absence-{ts}", "image": "",
+            }]
+            self._absence_message_sent = True
+            self.save_history()
+
     @rx.event(background=True)
     async def discovery_bg_task(self):
         """
@@ -1451,6 +1629,22 @@ class State(rx.State):
         while True:
             await asyncio.sleep(600)  # 10 minutos
             _ticks += 1
+
+            # ── Detección de ausencia prolongada ──────────────────────
+            # Si el user lleva >6h sin escribir, Ashley le deja un mensaje
+            # proactivo tipo "te fuiste a dormir jefe?". Cuando el user vuelva
+            # y escriba algo, _absence_message_sent se resetea y el ciclo
+            # puede volver a dispararse en la siguiente ausencia larga.
+            #
+            # El mensaje va al chat como cualquier otro y, si la ventana está
+            # minimizada, ashley_fx.js dispara una notificación Windows con
+            # la preview. Eso da el efecto "te despiertas y ves que Ashley
+            # te dejó un buenos días".
+            try:
+                await self._maybe_fire_absence_message()
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("absence bg: %s", _e)
 
             # ── Screen Awareness proactiva (Level 3) ──────────────
             # Cada 10 min: si Actions está ON y no estamos busy, tomar
@@ -1846,6 +2040,37 @@ def index():
             _pill_btn_orange("⚡", State.t["pill_actions"], State.toggle_auto_actions, State.auto_actions),
             _pill_btn("⛶", State.t["pill_focus"], State.toggle_focus_mode, State.focus_mode),
             _pill_btn("🗣", State.t["pill_natural"], State.toggle_voice_mode, State.voice_mode),
+            # ── Toggle Notificaciones Windows (cuando la ventana no está focuseada) ──
+            rx.button(
+                rx.cond(State.notifications_enabled, "🔔", "🔕"),
+                on_click=State.toggle_notifications,
+                bg=rx.cond(State.notifications_enabled, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
+                color=rx.cond(State.notifications_enabled, COLOR_PRIMARY, "#6a6a7a"),
+                border=rx.cond(
+                    State.notifications_enabled,
+                    "1px solid rgba(255,154,238,0.5)",
+                    "1px solid rgba(255,255,255,0.07)",
+                ),
+                box_shadow=rx.cond(State.notifications_enabled, SHADOW_BUTTON, "none"),
+                border_radius="99px",
+                padding="0 8px",
+                height="28px",
+                font_size="13px",
+                flex_shrink="0",
+                cursor="pointer",
+                transition="all 0.2s ease",
+                _hover={
+                    "bg": "rgba(255,154,238,0.12)",
+                    "color": COLOR_PRIMARY,
+                    "border": "1px solid rgba(255,154,238,0.35)",
+                    "transform": "scale(1.04)",
+                },
+                title=rx.cond(
+                    State.notifications_enabled,
+                    State.t["notif_on_tooltip"],
+                    State.t["notif_off_tooltip"],
+                ),
+            ),
             # ── Toggle TTS (altavoz de Ashley) ────────────────
             rx.button(
                 rx.cond(State.tts_enabled, "🔊", "🔈"),
@@ -1951,6 +2176,7 @@ def index():
                 "data-voice-id": State.voice_id,
                 "data-test-text": State.t["settings_test_text"],
                 "data-backend-port": State.backend_port_marker,
+                "data-notifications": State.notifications_marker_attr,
             },
         ),
 

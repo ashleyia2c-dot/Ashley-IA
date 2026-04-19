@@ -44,6 +44,9 @@ UI = {
         "pill_actions":       "Actions",
         "pill_focus":         "Focus",
         "pill_natural":       "Natural",
+        "pill_notifications": "Notify",
+        "notif_on_tooltip":   "Background notifications ON — click to mute",
+        "notif_off_tooltip":  "Background notifications OFF — click to enable",
 
         # Memories dialog
         "mem_title":          "🧠 My memories with Ashley",
@@ -161,6 +164,9 @@ UI = {
         "pill_actions":       "Acciones",
         "pill_focus":         "Focus",
         "pill_natural":       "Natural",
+        "pill_notifications": "Avisos",
+        "notif_on_tooltip":   "Notificaciones en segundo plano ACTIVADAS — click para silenciar",
+        "notif_off_tooltip":  "Notificaciones en segundo plano DESACTIVADAS — click para activar",
 
         "mem_title":          "🧠 Mis Recuerdos con Ashley",
         "mem_tab_facts":      "✨ Hechos",
@@ -269,6 +275,9 @@ UI = {
         "pill_actions":       "Actions",
         "pill_focus":         "Focus",
         "pill_natural":       "Naturel",
+        "pill_notifications": "Notifs",
+        "notif_on_tooltip":   "Notifications en arrière-plan ACTIVÉES — clique pour couper",
+        "notif_off_tooltip":  "Notifications en arrière-plan DÉSACTIVÉES — clique pour activer",
 
         "mem_title":          "🧠 Mes souvenirs avec Ashley",
         "mem_tab_facts":      "✨ Faits",
@@ -598,7 +607,9 @@ def save_language(lang: str) -> None:
 
 
 def load_voice_config() -> dict:
-    """Devuelve tts_enabled, elevenlabs_key, openai_key, voice_id, voice_mode, vision_enabled."""
+    """Devuelve tts_enabled, elevenlabs_key, openai_key, voice_id, voice_mode,
+    notifications_enabled. vision_enabled queda en archivos viejos pero se
+    ignora (la feature se unificó bajo auto_actions)."""
     from .memory import load_json
     default = {
         "tts_enabled": False,
@@ -606,7 +617,7 @@ def load_voice_config() -> dict:
         "openai_key": "",
         "voice_id": DEFAULT_VOICE_ID,
         "voice_mode": False,  # True = Ashley habla natural, sin *gestos*
-        "vision_enabled": False,
+        "notifications_enabled": True,  # default ON — es uno de los diferenciadores
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -618,7 +629,7 @@ def load_voice_config() -> dict:
             "openai_key": str(data.get("openai_key", "")),
             "voice_id": str(data.get("voice_id", DEFAULT_VOICE_ID)) or DEFAULT_VOICE_ID,
             "voice_mode": bool(data.get("voice_mode", False)),
-            "vision_enabled": bool(data.get("vision_enabled", False)),
+            "notifications_enabled": bool(data.get("notifications_enabled", True)),
         }
     except Exception:
         return default
@@ -626,7 +637,7 @@ def load_voice_config() -> dict:
 
 def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       openai_key: str = "", voice_mode: bool = False,
-                      vision_enabled: bool = False) -> None:
+                      notifications_enabled: bool = True) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -638,7 +649,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "openai_key": str(openai_key or ""),
             "voice_id": str(voice_id or DEFAULT_VOICE_ID),
             "voice_mode": bool(voice_mode),
-            "vision_enabled": bool(vision_enabled),
+            "notifications_enabled": bool(notifications_enabled),
         })
     except Exception as e:
         import logging

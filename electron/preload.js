@@ -29,6 +29,15 @@ const UPDATE_EVENTS = [
   'download-progress', 'downloaded', 'error',
 ];
 
+// ─── API de notificaciones (usado por ashley_fx.js) ───────────────────────
+// ashley_fx.js dispara notificaciones Windows nativas cuando Ashley escribe
+// y la ventana no está focuseada. Al hacer click en la notif, llama a
+// focusWindow() para traer Ashley al frente. Lo hace el main process porque
+// el renderer no tiene permisos para restaurar la propia ventana.
+contextBridge.exposeInMainWorld('ashleyNotif', {
+  focusWindow: () => ipcRenderer.send('notif-focus-window'),
+});
+
 contextBridge.exposeInMainWorld('ashleyUpdate', {
   // Suscribir un callback a un evento del updater.
   // Devuelve una función para cancelar la suscripción.
