@@ -268,79 +268,59 @@
      WINDOWS NOTIFICATIONS — background messages
   ══════════════════════════════════════════
      Cuando Ashley escribe un mensaje mientras la ventana no está
-     focuseada (minimizada, Alt+Tab a otra app, etc.), disparamos una
-     notificación Windows nativa. Click en la notif → restaura + focusea
-     la ventana de Ashley.
+     focuseada (minimizada, Alt+Tab a otra app, etc.), le pedimos al
+     main process que dispare una notificación Windows nativa. El main
+     usa Electron.Notification (no la Web Notification API del renderer,
+     que falla silenciosa en Electron en bastantes casos).
 
-     Implementación:
-       - Observa el contenedor de mensajes para detectar nuevos .ashley-msg
-       - Skipea los N mensajes iniciales (carga de historial)
-       - Respeta el toggle notifications_enabled (via data-notifications)
-       - Pide permission al cargar la página (one-shot)
-       - Click handler → window.ashleyNotif.focusWindow() (expuesto por preload.js)
+     Flujo:
+       - Observer sobre el contenedor de mensajes para detectar nuevos
+         bubbles de Ashley
+       - Baseline: los mensajes que ya están al cargar NO disparan notif
+       - Si la ventana está visible O el toggle está OFF → skip
+       - Si no → window.ashleyNotif.show({title, body}) → IPC al main
+       - Main crea la notif con icono, y maneja el click para restaurar
+         la ventana
   */
 
-  var _notifInitialMessageCount = -1;  // baseline — se setea una sola vez
-  var _notifPermissionRequested = false;
+  var _notifInitialMessageCount = -1;  // baseline — se setea una vez tras carga
 
   function _notifEnabled() {
     var el = document.getElementById('ashley-voice-state');
-    if (!el) return true;  // default ON si no hay marker
-    return el.getAttribute('data-notifications') !== 'off';
+    if (!el) {
+      console.log('[ashley-notif] no #ashley-voice-state element, defaulting ON');
+      return true;
+    }
+    var attr = el.getAttribute('data-notifications');
+    return attr !== 'off';
   }
 
   function _windowIsVisible() {
-    // Consideramos "visible" si la pestaña no está hidden Y tiene foco.
-    // En Electron: minimizar → document.hidden=true. Alt+Tab a otra app →
-    // hidden=false pero hasFocus=false. Ambos casos disparan notif.
+    // En Electron:
+    //   - minimizar la ventana → document.hidden=true
+    //   - Alt+Tab a otra app → hidden=false pero hasFocus()=false
+    // Ambos casos queremos notificar.
     if (document.hidden) return false;
     if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
     return true;
   }
 
-  function _requestNotifPermission() {
-    if (_notifPermissionRequested) return;
-    _notifPermissionRequested = true;
-    if (typeof Notification === 'undefined') return;
-    if (Notification.permission === 'granted' || Notification.permission === 'denied') return;
-    try {
-      Notification.requestPermission();
-    } catch (e) {
-      console.log('[ashley-notif] permission request failed:', e);
+  function _sendNotif(bodyText) {
+    if (!window.ashleyNotif || typeof window.ashleyNotif.show !== 'function') {
+      console.log('[ashley-notif] window.ashleyNotif.show not available — preload not loaded?');
+      return;
     }
-  }
-
-  function _fireAshleyNotification(bodyText) {
-    if (typeof Notification === 'undefined') return;
-    if (Notification.permission !== 'granted') return;
-    // Preview corta: 1 o 2 frases / 140 chars máx.
+    // Limpiar preview: quitar *gestos* y normalizar espacios.
     var body = (bodyText || '').trim();
-    // Quitar tags de *gestos* para la preview
     body = body.replace(/\*[^*]+\*/g, '').replace(/\s+/g, ' ').trim();
     if (body.length > 140) body = body.slice(0, 137) + '...';
-    if (!body) body = 'Ashley te escribió algo.';
+    if (!body) body = 'Ashley te escribio algo.';
 
     try {
-      var n = new Notification('Ashley', {
-        body: body,
-        icon: '/favicon.ico',
-        tag: 'ashley-new-message',  // reemplaza notifs anteriores
-        silent: false,
-      });
-      n.onclick = function () {
-        try {
-          // Exposed by preload.js para traer la ventana al frente
-          if (window.ashleyNotif && typeof window.ashleyNotif.focusWindow === 'function') {
-            window.ashleyNotif.focusWindow();
-          } else {
-            // Fallback: intentar enfocar desde web (limitado en Electron)
-            window.focus();
-          }
-          n.close();
-        } catch (e) {}
-      };
+      window.ashleyNotif.show({ title: 'Ashley', body: body });
+      console.log('[ashley-notif] sent notif to main:', body.slice(0, 50));
     } catch (e) {
-      console.log('[ashley-notif] failed to show:', e);
+      console.log('[ashley-notif] show() threw:', e);
     }
   }
 
@@ -348,12 +328,12 @@
     var box = document.getElementById('chat_messages');
     if (!box) { setTimeout(initNotificationObserver, 300); return; }
 
-    // Baseline: contar mensajes que ya están al cargar (historial previo)
-    // para no disparar notif por ninguno de ellos.
+    console.log('[ashley-notif] initializing observer');
+
+    // Baseline tras 800ms para que Reflex haya renderizado el historial.
     setTimeout(function () {
       _notifInitialMessageCount = box.querySelectorAll('.ashley-msg').length;
-      // Request permission después del primer render (user gesture friendly)
-      _requestNotifPermission();
+      console.log('[ashley-notif] baseline:', _notifInitialMessageCount, 'existing messages');
     }, 800);
 
     var obs = new MutationObserver(function () {
@@ -361,18 +341,25 @@
       var ashleyMsgs = box.querySelectorAll('.ashley-msg');
       if (ashleyMsgs.length <= _notifInitialMessageCount) return;
 
-      var newOnes = ashleyMsgs.length - _notifInitialMessageCount;
       _notifInitialMessageCount = ashleyMsgs.length;
 
-      // Solo disparar notif si la ventana NO está visible Y el toggle está ON
-      if (_windowIsVisible()) return;
-      if (!_notifEnabled()) return;
+      // Gating
+      var visible = _windowIsVisible();
+      var enabled = _notifEnabled();
+      if (visible) {
+        console.log('[ashley-notif] new msg but window visible, skipping');
+        return;
+      }
+      if (!enabled) {
+        console.log('[ashley-notif] new msg but toggle OFF, skipping');
+        return;
+      }
 
       // Preview del mensaje más reciente
       var latest = ashleyMsgs[ashleyMsgs.length - 1];
       var textNode = latest.querySelector('.msg-content, p, div');
       var body = textNode ? textNode.textContent : latest.textContent;
-      _fireAshleyNotification(body);
+      _sendNotif(body);
     });
     obs.observe(box, { childList: true, subtree: true });
   }

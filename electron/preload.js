@@ -30,11 +30,18 @@ const UPDATE_EVENTS = [
 ];
 
 // ─── API de notificaciones (usado por ashley_fx.js) ───────────────────────
-// ashley_fx.js dispara notificaciones Windows nativas cuando Ashley escribe
-// y la ventana no está focuseada. Al hacer click en la notif, llama a
-// focusWindow() para traer Ashley al frente. Lo hace el main process porque
-// el renderer no tiene permisos para restaurar la propia ventana.
+// ashley_fx.js detecta mensajes nuevos + ventana no focuseada y le pide al
+// main process que dispare una notificación Windows nativa. Lo hacemos desde
+// main (no Web Notification API en el renderer) porque:
+//   - No hay permission flow (la Web API a veces falla silenciosamente en
+//     Electron incluso con "granted")
+//   - AppUserModelId + iconos consistentes
+//   - Los errores se loguean en main.log para debug real
+//
+// show({title, body}) → dispara la notif. Click → focusea la ventana.
+// focusWindow() → también expuesto por si queremos forzarlo desde otro lado.
 contextBridge.exposeInMainWorld('ashleyNotif', {
+  show: (payload) => ipcRenderer.send('notif-show', payload || {}),
   focusWindow: () => ipcRenderer.send('notif-focus-window'),
 });
 
