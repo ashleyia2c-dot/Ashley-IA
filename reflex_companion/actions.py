@@ -239,6 +239,52 @@ def score_shortcut_name(name: str, hint: str) -> int:
     return 0
 
 
+def _search_desktop(hint: str) -> str | None:
+    """Busca shortcuts/exes en el escritorio del usuario que matcheen hint.
+
+    El escritorio es una señal fuerte de intención: si el user puso algo
+    ahí, es porque lo usa a menudo y quiere acceso rápido. Por eso lo
+    chequeamos ANTES que el Menú Inicio en open_app.
+
+    Cubre los tres layouts típicos de escritorio en Windows:
+      - %USERPROFILE%\\Desktop        (perfil normal)
+      - %USERPROFILE%\\OneDrive\\Desktop / Escritorio (con OneDrive sync)
+      - %PUBLIC%\\Desktop              (shortcuts compartidos)
+
+    Acepta .lnk (shortcuts, lo más común), .url (internet shortcuts,
+    para favoritos web pegados al escritorio) y .exe (rara vez, pero
+    algún user arrastra el ejecutable crudo). El ranking usa el mismo
+    score_shortcut_name que Start Menu, así que los desinstaladores y
+    helpers se descartan automáticamente.
+    """
+    import glob
+    username = os.getenv("USERNAME", "")
+    public = os.getenv("PUBLIC", r"C:\Users\Public")
+    search_roots = [
+        rf"C:\Users\{username}\Desktop",
+        rf"C:\Users\{username}\OneDrive\Desktop",
+        rf"C:\Users\{username}\OneDrive\Escritorio",  # Windows en español con OneDrive
+        rf"C:\Users\{username}\OneDrive\Bureau",       # Windows en francés
+        rf"{public}\Desktop",
+    ]
+
+    candidates: list[tuple[int, int, str]] = []
+    for root in search_roots:
+        if not os.path.isdir(root):
+            continue
+        for pattern in ("*.lnk", "*.url", "*.exe"):
+            for f in glob.iglob(os.path.join(root, pattern)):
+                name = os.path.splitext(os.path.basename(f))[0]
+                score = score_shortcut_name(name, hint)
+                if score > 0:
+                    candidates.append((-score, len(name), f))
+
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][2]
+
+
 def _search_start_menu(hint: str) -> str | None:
     """Busca un acceso directo (.lnk) en el menú de inicio que matchee el
     hint. Devuelve la ruta completa al .lnk, None si no hay match.
@@ -330,12 +376,27 @@ def open_app(app_name: str, lang: str = "en") -> str:
     except Exception:
         pass
 
-    # 5. Buscar acceso directo en menú de inicio (cubre apps como LoL, Riot, etc.)
+    # 5. Buscar en el ESCRITORIO del usuario.
+    # Ir aquí ANTES del Menú Inicio es intencional: si el user tiene un
+    # shortcut en el escritorio, significa que lo usa a menudo (curación
+    # manual >>> carpeta automática del installer). Además, muchos usan
+    # el escritorio como su "launcher" personal con cosas que ni siquiera
+    # tienen entrada en el Menú Inicio.
     search_terms = [key, exe, app_name]
     # Expandir alias (ej. "lol" → "league of legends")
     for alias_term in _APP_ALIASES.get(key, []):
         if alias_term not in search_terms:
             search_terms.append(alias_term)
+    for search_term in search_terms:
+        shortcut = _search_desktop(search_term)
+        if shortcut:
+            try:
+                os.startfile(shortcut)
+                return _open_msg(lang, "launched", name=app_name)
+            except Exception:
+                pass
+
+    # 6. Buscar acceso directo en menú de inicio (cubre apps como LoL, Riot, etc.)
     for search_term in search_terms:
         lnk = _search_start_menu(search_term)
         if lnk:
@@ -345,7 +406,7 @@ def open_app(app_name: str, lang: str = "en") -> str:
             except Exception:
                 pass
 
-    # 6. Buscar el .exe en rutas comunes de instalación
+    # 7. Buscar el .exe en rutas comunes de instalación
     username = os.getenv("USERNAME", "")
     common_roots = [
         r"C:\Program Files",
@@ -368,7 +429,7 @@ def open_app(app_name: str, lang: str = "en") -> str:
                 except Exception:
                     pass
 
-    # 7. Último recurso: shell=True
+    # 8. Último recurso: shell=True
     try:
         subprocess.Popen(exe, shell=True)
         return _open_msg(lang, "launched", name=app_name)
