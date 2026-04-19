@@ -731,27 +731,33 @@ class State(rx.State):
         """Carga el contador persistente + flag de tampering al state reactivo.
 
         Además del HMAC + registry mirror de stats.py, hacemos un cross-check
-        contra el historial: si historial_ashley.json está lleno pero el
-        contador dice menos, podría ser manipulación. Con una excepción —
-        si el mensaje más antiguo del historial es anterior a cuando empezó
-        a contar el counter, es legítimo (la feature se añadió a posteriori).
+        contra el historial: si el chat file tiene MÁS mensajes del usuario
+        de los que el contador reporta, hay tampering.
+
+        EXCEPCIÓN (grandfather-in): si el mensaje más viejo del chat es
+        anterior a cuando empezó a contar el counter, la discrepancia es
+        legítima (la feature se añadió a posteriori).
         """
         try:
             from . import stats as _stats
             data = _stats.load_stats()
 
+            # Contamos SOLO los mensajes con role=='user' — el contador también
+            # cuenta solo esos. Comparar totales del historial (user + assistant
+            # + system_result) era el bug original: cualquier conversación
+            # normal daba falsos positivos de tampering porque las respuestas
+            # de Ashley infladan el historial sin sumar al contador.
+            user_msg_count = sum(1 for m in self.messages if m.get("role") == "user")
+
             oldest_ts = None
             if self.messages:
-                # Buscamos el timestamp más antiguo. Normalmente es messages[0]
-                # pero por seguridad miramos todos por si alguno vino reordenado.
                 candidates = [m.get("timestamp") for m in self.messages if m.get("timestamp")]
                 if candidates:
                     oldest_ts = min(candidates)
 
             if _stats.is_tampered_vs_history(
                 total_messages=data.get("total_user_messages", 0),
-                history_length=len(self.messages),
-                max_history=MAX_HISTORY_MESSAGES,
+                user_history_count=user_msg_count,
                 counter_started_at=data.get("first_message_at"),
                 oldest_history_ts=oldest_ts,
             ):
