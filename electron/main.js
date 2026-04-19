@@ -5,7 +5,7 @@
 //  - Datos del usuario aislados en %APPDATA%\Ashley
 //  - Disclosure de permisos en primera ejecucion
 
-const { app, BrowserWindow, Menu, shell, ipcMain, safeStorage, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, safeStorage, dialog, session, Notification } = require('electron');
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -732,22 +732,56 @@ app.whenReady().then(async () => {
   // AppUserModelId: hace que Windows muestre "Ashley" como sender en las
   // notificaciones Toast, con el icono del app. Sin esto se ven como
   // "electron.exe" que es feo y poco profesional. Debe ir ANTES de cualquier
-  // Notification() emitida desde el renderer.
+  // Notification() emitida.
   try { app.setAppUserModelId('com.ashley-ia.desktop'); } catch {}
+  log(`Notifications.isSupported: ${Notification.isSupported ? Notification.isSupported() : 'n/a'}`);
 
-  // IPC: el renderer (ashley_fx.js) llama a focus-window cuando el user
-  // hace click en una notificación Windows. Restauramos y focuseamos.
-  ipcMain.on('notif-focus-window', () => {
+  // IPC: restaurar y focusear la ventana principal (llamado al clickar una
+  // notificación Windows y también como sanity-check desde otros lados).
+  function focusMainWindow() {
     try {
       if (!mainWindow) return;
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
-      // Flash por si el foco se lo roba otra app inmediatamente — el user
-      // mira la taskbar y ve el icono parpadeando.
       try { mainWindow.flashFrame(true); } catch {}
     } catch (err) {
-      log(`focus-window handler failed: ${err.message}`);
+      log(`focus-window failed: ${err.message}`);
+    }
+  }
+  ipcMain.on('notif-focus-window', () => focusMainWindow());
+
+  // IPC: crear una notificación Windows nativa desde el main process.
+  // Usamos Electron.Notification (no la Web Notification API desde el
+  // renderer) porque:
+  //   - No necesita permission flow que falla silenciosamente en Electron
+  //   - Funciona consistente en Windows 10/11 con el AppUserModelId arriba
+  //   - Podemos loguear errores en main.log cuando falla — con el Web API
+  //     no teníamos visibilidad de los fallos
+  ipcMain.on('notif-show', (_event, payload) => {
+    try {
+      if (!Notification.isSupported || !Notification.isSupported()) {
+        log('notif-show: Notifications not supported on this platform');
+        return;
+      }
+      // La ventana puede estar focuseada entre que el renderer comprobó el
+      // estado y nosotros recibimos el IPC — doble chequeo aquí.
+      if (mainWindow && mainWindow.isFocused() && !mainWindow.isMinimized()) {
+        log('notif-show: window is focused, skipping');
+        return;
+      }
+      const title = (payload && payload.title) || 'Ashley';
+      const body = (payload && payload.body) || '';
+      const iconPath = path.join(__dirname, 'build-resources', 'icon.ico');
+      const opts = { title, body };
+      if (fs.existsSync(iconPath)) opts.icon = iconPath;
+      const n = new Notification(opts);
+      n.on('click', () => focusMainWindow());
+      n.on('failed', (err) => log(`notif-show: failed: ${err}`));
+      n.show();
+      log(`notif-show: "${body.slice(0, 60)}"`);
+    } catch (err) {
+      log(`notif-show: crashed: ${err.message}`);
     }
   });
 
