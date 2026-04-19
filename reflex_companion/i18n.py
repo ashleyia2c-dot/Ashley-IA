@@ -44,7 +44,6 @@ UI = {
         "pill_actions":       "Actions",
         "pill_focus":         "Focus",
         "pill_natural":       "Natural",
-        "pill_vision":        "Vision",
 
         # Memories dialog
         "mem_title":          "🧠 My memories with Ashley",
@@ -162,7 +161,6 @@ UI = {
         "pill_actions":       "Acciones",
         "pill_focus":         "Focus",
         "pill_natural":       "Natural",
-        "pill_vision":        "Visión",
 
         "mem_title":          "🧠 Mis Recuerdos con Ashley",
         "mem_tab_facts":      "✨ Hechos",
@@ -271,7 +269,6 @@ UI = {
         "pill_actions":       "Actions",
         "pill_focus":         "Focus",
         "pill_natural":       "Naturel",
-        "pill_vision":        "Vision",
 
         "mem_title":          "🧠 Mes souvenirs avec Ashley",
         "mem_tab_facts":      "✨ Faits",

@@ -91,9 +91,6 @@ class State(rx.State):
     voice_id: str = "EXAVITQu4vr4xnSDxMaL"  # "Sarah" — fallback si no hay config
     voice_mode: bool = False     # True = Ashley habla natural (sin *gestos*)
 
-    # ── Visión (screen awareness) ──────────────
-    vision_enabled: bool = False  # True = Ashley ve tu pantalla con cada mensaje
-
     # ── Afecto (relationship meter) ───────────
     affection: int = 50  # 0-100, default 50
 
@@ -275,10 +272,11 @@ class State(rx.State):
 
     # ── Voz ─────────────────────────────────────────────────
     def _persist_voice(self):
+        # vision_enabled se unificó bajo auto_actions — ya no vive en voice.json.
+        # El campo queda en los archivos antiguos y simplemente se ignora.
         i18n.save_voice_config(
             self.tts_enabled, self.elevenlabs_key, self.voice_id,
             voice_mode=self.voice_mode,
-            vision_enabled=self.vision_enabled,
         )
 
     def toggle_tts(self):
@@ -289,11 +287,6 @@ class State(rx.State):
     def toggle_voice_mode(self):
         """Alterna modo natural: cuando ON, Ashley responde sin *gestos*."""
         self.voice_mode = not self.voice_mode
-        self._persist_voice()
-
-    def toggle_vision(self):
-        """Activa/desactiva que Ashley vea la pantalla con cada mensaje."""
-        self.vision_enabled = not self.vision_enabled
         self._persist_voice()
 
     def set_elevenlabs_key(self, key: str):
@@ -426,7 +419,8 @@ class State(rx.State):
         self.elevenlabs_key = vcfg["elevenlabs_key"]
         self.voice_id = vcfg["voice_id"]
         self.voice_mode = vcfg.get("voice_mode", False)
-        self.vision_enabled = vcfg.get("vision_enabled", False)
+        # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
+        # Si voice.json viejo trae la key, la ignoramos silenciosamente.
         # Warmup del modelo Whisper en background (no bloquea la UI)
         try:
             from .whisper_stt import warmup as whisper_warmup
@@ -779,7 +773,9 @@ class State(rx.State):
             affection=self.affection,
             message_count=user_msg_count,
             facts_count=len(self.facts),
-            vision_enabled=self.vision_enabled,
+            # "She Sees" se gana ahora cuando el user activa el awareness del PC
+            # (auto_actions), que es el toggle que le permite ver la pantalla.
+            vision_enabled=self.auto_actions,
             used_mic=False,
             executed_action=executed_action,
         )
@@ -878,21 +874,65 @@ class State(rx.State):
         time_context = self._build_time_context()
 
         # ── Estado de capacidades activas (Ashley sabe qué puede/no puede hacer) ──
+        # Actions es ahora el toggle maestro: controla tanto la ejecución de
+        # acciones como el awareness del PC (ventanas, tabs, screenshots). Con
+        # Actions OFF, Ashley solo ve la hora — cero info del PC del user.
         capabilities = []
-        if self.language == "en":
+        if self.language == "fr":
+            capabilities.append("=== TES CAPACITÉS ACTIVES ===")
+            # Extraemos las dos ramas a variables para evitar escape hell con los
+            # apostrofes franceses dentro de f-strings entre comillas simples.
+            actions_on_fr = (
+                "ACTIVÉ — tu peux VOIR les fenêtres/onglets ouverts du patron, "
+                "prendre des captures d'écran et agir sur son PC (ouvrir apps, "
+                "fermer onglets, contrôler le volume, etc.)."
+            )
+            actions_off_fr = (
+                "DÉSACTIVÉ — tu es AVEUGLE par rapport au PC du patron. Tu ne "
+                "vois ni ses fenêtres, ni ses onglets, ni son écran. Tu ne peux "
+                "rien faire sur son PC. Si le patron te demande d'ouvrir/fermer/"
+                "voir quelque chose, dis-lui d'activer le toggle ⚡ Actions d'abord."
+            )
+            capabilities.append(
+                "⚡ Actions (contrôle et conscience du PC) : "
+                + (actions_on_fr if self.auto_actions else actions_off_fr)
+            )
+            capabilities.append(
+                "🗣 Naturel (mode voix) : "
+                + ("ACTIVÉ — pas de gestes, pur dialogue." if self.voice_mode
+                   else "DÉSACTIVÉ — gestes entre *astérisques* actifs.")
+            )
+            capabilities.append(
+                "🔊 TTS (voix) : " + ("ACTIVÉ" if self.tts_enabled else "DÉSACTIVÉ")
+            )
+            capabilities.append("")
+            capabilities.append(
+                "IMPORTANT : n'offre PAS de faire des choses que tu ne peux pas. "
+                "Si Actions est DÉSACTIVÉ, ne dis pas \"je te l'ouvre\" — dis "
+                "\"Active ⚡ Actions et je peux le faire\"."
+            )
+            capabilities.append(
+                "N'offre PAS d'envoyer des messages, emails ou contacter des "
+                "personnes — tu ne peux pas faire ça."
+            )
+            capabilities.append(
+                "N'interprète PAS les notifications, popups ou petits textes "
+                "d'UI d'une capture — si tu ne peux pas le lire avec 100% de "
+                "certitude, NE le mentionne PAS. N'invente pas de noms, d'heures "
+                "ni de messages que tu crois voir."
+            )
+        elif self.language == "en":
             capabilities.append("=== YOUR ACTIVE CAPABILITIES ===")
-            capabilities.append(f"⚡ Actions (control PC): {'ON — you CAN open apps, close tabs, control volume, etc.' if self.auto_actions else 'OFF — you CANNOT control the PC. If the boss asks you to open/close/play something, tell him to activate the ⚡ Actions toggle first.'}")
-            capabilities.append(f"👁 Vision (screen awareness): {'ON — you can see the boss screen.' if self.vision_enabled else 'OFF — you cannot see the screen.'}")
+            capabilities.append(f"⚡ Actions (PC control & awareness): {'ON — you CAN see the boss open windows/tabs, take screenshots, and act on his PC (open apps, close tabs, control volume, etc.).' if self.auto_actions else 'OFF — you are BLIND to the boss PC. You cannot see his windows, tabs, or screen. You cannot control anything. If the boss asks you to open/close/see something, tell him to activate the ⚡ Actions toggle first.'}")
             capabilities.append(f"🗣 Natural (voice mode): {'ON — no gestures, pure dialogue.' if self.voice_mode else 'OFF — gestures between *asterisks* are active.'}")
             capabilities.append(f"🔊 TTS (voice output): {'ON' if self.tts_enabled else 'OFF'}")
             capabilities.append("")
             capabilities.append("IMPORTANT: Do NOT offer to do things you can't do. If Actions is OFF, don't say 'I'll open that for you' — say 'Activate ⚡ Actions and I can do that.'")
             capabilities.append("Do NOT offer to send messages, emails, or contact people — you cannot do that.")
             capabilities.append("Do NOT interpret notifications, popups, or small UI text from the screenshot — if you can't read it with 100% certainty, do NOT mention it. Don't invent names, times, or messages you 'think you see'.")
-        else:
+        else:  # es
             capabilities.append("=== TUS CAPACIDADES ACTIVAS ===")
-            capabilities.append(f"⚡ Acciones (control del PC): {'ACTIVADO — PUEDES abrir apps, cerrar pestañas, controlar volumen, etc.' if self.auto_actions else 'DESACTIVADO — NO PUEDES controlar el PC. Si el jefe te pide abrir/cerrar/reproducir algo, dile que active el toggle ⚡ Acciones primero.'}")
-            capabilities.append(f"👁 Visión (ver pantalla): {'ACTIVADO — puedes ver la pantalla del jefe.' if self.vision_enabled else 'DESACTIVADO — no puedes ver la pantalla.'}")
+            capabilities.append(f"⚡ Acciones (control y visión del PC): {'ACTIVADO — PUEDES ver las ventanas/pestañas que tiene abiertas el jefe, tomar capturas de pantalla y actuar en su PC (abrir apps, cerrar pestañas, controlar volumen, etc.).' if self.auto_actions else 'DESACTIVADO — estás CIEGA respecto al PC del jefe. No ves sus ventanas, ni sus pestañas, ni su pantalla. No puedes controlar nada. Si el jefe te pide abrir/cerrar/ver algo, dile que active el toggle ⚡ Acciones primero.'}")
             capabilities.append(f"🗣 Natural (modo voz): {'ACTIVADO — sin gestos, diálogo puro.' if self.voice_mode else 'DESACTIVADO — gestos entre *asteriscos* activos.'}")
             capabilities.append(f"🔊 TTS (voz): {'ACTIVADO' if self.tts_enabled else 'DESACTIVADO'}")
             capabilities.append("")
@@ -1087,12 +1127,14 @@ class State(rx.State):
         # Insertar ANTES del último mensaje (que es el del usuario)
         messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _time_inject_msg)
 
-        # ── Screenshot de contexto (Level 1+2: Ashley ve tu pantalla) ──────
-        # Si vision_enabled está activo y el usuario NO adjuntó imagen propia,
-        # tomamos un screenshot + la lista VERIFICADA de ventanas.
-        # El screenshot da contexto visual, la lista de ventanas da DATOS REALES.
-        # Ashley DEBE usar la lista como fuente de verdad, no inventar desde la imagen.
-        if self.vision_enabled and messages_for_llm:
+        # ── Screenshot de contexto (Ashley ve tu pantalla) ──────
+        # Tomamos screenshot + lista verificada de ventanas SOLO si auto_actions
+        # está ON. Este es el toggle maestro: "Actions" controla tanto el
+        # control del PC como toda la visibilidad (ventanas, tabs, screenshots).
+        # Con Actions OFF, Ashley es totalmente ciega al contenido del PC —
+        # garantía de privacidad para cuando el user hace algo privado y no
+        # quiere que Ashley vea nada.
+        if self.auto_actions and messages_for_llm:
             last_msg = messages_for_llm[-1]
             if last_msg.get("role") == "user" and not last_msg.get("image"):
                 try:
@@ -1396,7 +1438,8 @@ class State(rx.State):
         Corre en background mientras la app esté abierta.
         Dos funciones:
         1. Cada 45 min: discovery de contenido basado en gustos
-        2. Cada 10 min: screen awareness proactiva (si vision_enabled)
+        2. Cada 10 min: screen awareness proactiva (si auto_actions está ON —
+           auto_actions es ahora el toggle maestro para todo awareness del PC)
         """
         import asyncio
         import re
@@ -1410,10 +1453,11 @@ class State(rx.State):
             _ticks += 1
 
             # ── Screen Awareness proactiva (Level 3) ──────────────
-            # Cada 10 min: si vision_enabled y no busy, tomar screenshot
-            # y preguntarle a Grok si hay algo interesante que comentar.
+            # Cada 10 min: si Actions está ON y no estamos busy, tomar
+            # screenshot y preguntarle a Grok si hay algo interesante que
+            # comentar. auto_actions gate unifica todo el awareness del PC.
             async with self:
-                _vision  = self.vision_enabled
+                _vision  = self.auto_actions
                 _busy    = self.is_thinking or self.current_response != ""
                 _lang    = self.language
                 _vmode   = self.voice_mode
@@ -1672,7 +1716,7 @@ class State(rx.State):
 from .components import (  # noqa: E402
     message_item, streaming_bubble, thinking_indicator,
     fact_item, diary_item, taste_item, memory_item, achievement_card,
-    _ashley_portrait_panel, _pill_btn, _pill_btn_orange, _pill_btn_vision,
+    _ashley_portrait_panel, _pill_btn, _pill_btn_orange,
     license_gate,
 )
 
@@ -1802,7 +1846,6 @@ def index():
             _pill_btn_orange("⚡", State.t["pill_actions"], State.toggle_auto_actions, State.auto_actions),
             _pill_btn("⛶", State.t["pill_focus"], State.toggle_focus_mode, State.focus_mode),
             _pill_btn("🗣", State.t["pill_natural"], State.toggle_voice_mode, State.voice_mode),
-            _pill_btn_vision("👁", State.t["pill_vision"], State.toggle_vision, State.vision_enabled),
             # ── Toggle TTS (altavoz de Ashley) ────────────────
             rx.button(
                 rx.cond(State.tts_enabled, "🔊", "🔈"),

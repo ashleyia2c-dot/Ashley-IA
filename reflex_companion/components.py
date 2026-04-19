@@ -478,44 +478,6 @@ def _pill_btn_orange(
     )
 
 
-def _pill_btn_vision(
-    icon: str,
-    label: str,
-    on_click,
-    active,
-) -> rx.Component:
-    """Botón pill toggle — variante vision (rosa + glow pulsante en el icono)."""
-    return rx.button(
-        rx.hstack(
-            rx.text(icon, font_size="12px"),
-            rx.text(label, font_size="11px", font_weight="600"),
-            spacing="1", align="center",
-        ),
-        on_click=on_click,
-        bg=rx.cond(active, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
-        color=rx.cond(active, COLOR_PRIMARY, "#6a6a7a"),
-        border=rx.cond(
-            active,
-            "1px solid rgba(255,154,238,0.5)",
-            "1px solid rgba(255,255,255,0.07)",
-        ),
-        box_shadow=rx.cond(active, SHADOW_BUTTON, "none"),
-        border_radius="99px",
-        padding="0 10px",
-        height="28px",
-        flex_shrink="0",
-        transition="all 0.2s ease",
-        _hover={
-            "bg": "rgba(255,154,238,0.12)",
-            "color": COLOR_PRIMARY,
-            "border": "1px solid rgba(255,154,238,0.35)",
-            "transform": "scale(1.04)",
-        },
-        cursor="pointer",
-        class_name=rx.cond(active, "pill-on-vision", ""),
-    )
-
-
 # ─────────────────────────────────────────────
 #  License gate (se muestra cuando LICENSE_CHECK_ENABLED y no hay licencia)
 # ─────────────────────────────────────────────
