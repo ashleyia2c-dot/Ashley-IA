@@ -476,19 +476,27 @@
     // Down uses the existing playAffectionDown (already triggered by the observer)
   }
 
-  // Hidratacion: durante los primeros N ms despues de arrancar el observer,
-  // cualquier cambio en el valor de affection es el servidor cargando el
-  // estado real desde disco (la pagina renderiza primero con el default 50
-  // y on_load luego inyecta el valor guardado). Un usuario con affection=64
-  // veria un falso "tier up" 50->64 cada vez que abre la app, cruzando
-  // 2 o 3 tiers de una. Durante la ventana de hidratacion, actualizamos
-  // baseline en silencio sin disparar heart, sonido ni banner.
+  // Hidratacion: la pagina renderiza con el default 50 y luego el servidor
+  // inyecta el valor real via WebSocket. Sin defensa, ese salto (ej. 50->72)
+  // disparaba un "tier up" fantasma cada vez que el user abria la app.
   //
-  // 2500 ms cubre el caso comun (hydration llega en <500 ms) con margen
-  // generoso para conexiones lentas, y sigue siendo menor que el tiempo
-  // minimo para que Grok devuelva una respuesta streaming (>3s normalmente),
-  // asi que una interaccion real nunca entra en la ventana.
-  var HYDRATION_WINDOW_MS = 2500;
+  // Dos capas de defensa:
+  //
+  //   1. Ventana temporal (HYDRATION_WINDOW_MS): durante los primeros N ms
+  //      desde que arranca el observer, CUALQUIER cambio se trata como
+  //      hidratacion (actualizamos baseline en silencio).
+  //   2. Delta magnitude: el servidor clampea los deltas de affection a
+  //      maximo ±3 por mensaje en _apply_affection_delta (Python). Entonces
+  //      un salto >3 en un solo poll NUNCA puede ser un cambio real — es
+  //      siempre hidratacion tardia, reload, cross-tab merge o similar.
+  //      Con esta regla no necesitamos depender solo del tiempo y manejamos
+  //      el caso de maquinas lentas donde hydration tarda >2.5s.
+  //
+  // La ventana temporal se queda en 5s (suficiente para cold-start lento
+  // de Reflex) y el clamp a 3 la complementa. Entre los dos cubrimos todos
+  // los casos razonables.
+  var HYDRATION_WINDOW_MS = 5000;
+  var HYDRATION_MAX_REAL_DELTA = 3;  // mantener en sync con Python clamp
   var _observerStartTime = 0;
 
   function initAffectionObserver() {
@@ -516,15 +524,27 @@
 
       if (current === _lastAffection) return;
 
-      // Hydration guard: dentro de la ventana inicial, el cambio es la
-      // carga del estado real, no una interaccion real. Silenciamos.
+      var delta = current - _lastAffection;
+
+      // Hydration guard #1: ventana temporal inicial.
       if (Date.now() - _observerStartTime < HYDRATION_WINDOW_MS) {
         _lastAffection = current;
         _lastTier = _getTier(current);
         return;
       }
 
-      var delta = current - _lastAffection;
+      // Hydration guard #2: magnitud del delta.
+      // El servidor clampea los deltas de affection a +/-3 por mensaje, asi
+      // que cualquier salto mayor que eso no puede ser real. Pasa cuando
+      // hydration llega tarde (>5s), cuando el user recarga la app, o en
+      // cruces entre pestanas. Silenciamos igual.
+      if (Math.abs(delta) > HYDRATION_MAX_REAL_DELTA) {
+        console.log('[ashley-fx] large affection delta ' + _lastAffection + '->' + current + ' (|d|=' + Math.abs(delta) + '), treating as hydration');
+        _lastAffection = current;
+        _lastTier = _getTier(current);
+        return;
+      }
+
       var newTier = _getTier(current);
       var oldTier = _lastTier;
 
