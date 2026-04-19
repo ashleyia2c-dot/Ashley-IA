@@ -738,13 +738,44 @@ app.whenReady().then(async () => {
 
   // IPC: restaurar y focusear la ventana principal (llamado al clickar una
   // notificación Windows y también como sanity-check desde otros lados).
+  //
+  // Windows 10/11 tiene "Focus Stealing Prevention" — un proceso en background
+  // que llama a window.focus() NORMALMENTE se bloquea y solo parpadea el
+  // icono en la taskbar. Para un click DE USUARIO en una notificación, querés
+  // saltarte esa protección (el usuario pidió explícitamente traer la app al
+  // frente). El combo que funciona en Electron:
+  //   1. restore() si minimizada
+  //   2. show() si oculta
+  //   3. setAlwaysOnTop(true) + focus() + setAlwaysOnTop(false)  — pisa la
+  //      protección temporalmente
+  //   4. app.focus({steal:true})  — bandera explícita de Electron para ignorar
+  //      focus stealing; equivalente a decir "sé que soy background, hazlo igual"
   function focusMainWindow() {
     try {
-      if (!mainWindow) return;
+      if (!mainWindow) {
+        log('focus-window: mainWindow is null');
+        return;
+      }
+      if (mainWindow.isDestroyed()) {
+        log('focus-window: mainWindow destroyed');
+        return;
+      }
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
+      // Trick para saltarse Windows Focus Stealing Prevention
+      try {
+        mainWindow.setAlwaysOnTop(true);
+        mainWindow.focus();
+        mainWindow.setAlwaysOnTop(false);
+      } catch (e) {
+        log(`setAlwaysOnTop trick failed: ${e.message}`);
+      }
+      try { app.focus({ steal: true }); } catch (e) {
+        log(`app.focus({steal:true}) failed: ${e.message}`);
+      }
+      // Fallback visual si aun así no se enfocó: parpadear el taskbar
       try { mainWindow.flashFrame(true); } catch {}
+      log('focus-window: restored + focused mainWindow');
     } catch (err) {
       log(`focus-window failed: ${err.message}`);
     }
@@ -776,7 +807,11 @@ app.whenReady().then(async () => {
       const opts = { title, body };
       if (fs.existsSync(iconPath)) opts.icon = iconPath;
       const n = new Notification(opts);
-      n.on('click', () => focusMainWindow());
+      n.on('click', () => {
+        log('notif-click: user clicked the notification');
+        focusMainWindow();
+      });
+      n.on('close', () => log('notif-close: user dismissed'));
       n.on('failed', (err) => log(`notif-show: failed: ${err}`));
       n.show();
       log(`notif-show: "${body.slice(0, 60)}"`);
