@@ -193,25 +193,82 @@ _APP_ALIASES: dict[str, list[str]] = {
 
 # ── Abrir aplicación ──────────────────────────────────────────────────────────
 
-def _search_start_menu(hint: str) -> str | None:
+# Tokens que marcan un shortcut como "NO lanzador principal" y deben
+# descartarse aunque contengan el hint. "unins" cubre el naming de
+# Inno Setup (unins000.exe). El resto es ruido típico de installers.
+_SHORTCUT_REJECT_TOKENS = (
+    "uninstall", "unins000", "unins001", "unins", "remove",
+    "desinstalar", "désinstaller",
+    "readme", "manual", "helper", "crash", "reporter",
+    "redistributable", "config",
+)
+
+
+def score_shortcut_name(name: str, hint: str) -> int:
+    """Puntúa cuánto matchea el nombre de un shortcut vs un hint.
+
+    Devuelve entero: más alto = mejor match. 0 = no debe considerarse
+    (descartado por token de rechazo, o no relacionado con el hint).
+
+    Scoring:
+      100  → nombre exacto = hint (ej. "rimworld.lnk" con hint="rimworld")
+       80  → nombre empieza por hint (ej. "rimworld classic")
+       60  → hint es substring del nombre (ej. "play rimworld now")
+       30  → nombre es substring del hint (ej. name="rim", hint="rimworld")
+        0  → rechazado o sin relación
+
+    Expuesto como función pura para poder testear el ranking sin filesystem.
     """
-    Busca un acceso directo (.lnk) en el menú de inicio cuyo nombre contenga `hint`.
-    Devuelve la ruta completa al .lnk si lo encuentra, None si no.
+    if not name or not hint:
+        return 0
+    name_l = name.lower()
+    hint_l = hint.lower()
+
+    # Descartar desinstaladores, readmes, crash reporters, etc.
+    if any(tok in name_l for tok in _SHORTCUT_REJECT_TOKENS):
+        return 0
+
+    if name_l == hint_l:
+        return 100
+    if name_l.startswith(hint_l):
+        return 80
+    if hint_l in name_l:
+        return 60
+    if name_l in hint_l:
+        return 30
+    return 0
+
+
+def _search_start_menu(hint: str) -> str | None:
+    """Busca un acceso directo (.lnk) en el menú de inicio que matchee el
+    hint. Devuelve la ruta completa al .lnk, None si no hay match.
+
+    IMPORTANTE — ranking: antes devolvíamos el PRIMER match, que causaba
+    que "rimworld" abriera "Uninstall RimWorld.lnk" porque glob lo
+    devolvía antes que "RimWorld.lnk". Ahora puntuamos todos los matches
+    vía score_shortcut_name y elegimos el mejor. Ante empate, el nombre
+    más corto gana (suele ser el launcher principal).
     """
     import glob
-    hint_lower = hint.lower()
-    # Menú de inicio del usuario + todos los usuarios
     username = os.getenv("USERNAME", "")
     search_roots = [
         rf"C:\Users\{username}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs",
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
     ]
+
+    candidates: list[tuple[int, int, str]] = []  # (-score, len_tiebreak, path)
     for root in search_roots:
         for lnk in glob.iglob(os.path.join(root, "**", "*.lnk"), recursive=True):
-            name = os.path.splitext(os.path.basename(lnk))[0].lower()
-            if hint_lower in name or name in hint_lower:
-                return lnk
-    return None
+            name = os.path.splitext(os.path.basename(lnk))[0]
+            score = score_shortcut_name(name, hint)
+            if score > 0:
+                candidates.append((-score, len(name), lnk))
+
+    if not candidates:
+        return None
+    # Orden natural: menor tupla primero → mayor score + menor len
+    candidates.sort()
+    return candidates[0][2]
 
 
 def _open_msg(lang: str, kind: str, **kw) -> str:
