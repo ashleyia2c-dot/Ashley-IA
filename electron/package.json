@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -34,6 +34,49 @@
       "onboarding.html",
       "package.json",
       "build-resources/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../reflex_companion",
+        "to": "reflex_companion",
+        "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
+      },
+      {
+        "from": "../assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../rxconfig.py",
+        "to": "rxconfig.py"
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "requirements.txt"
+      },
+      {
+        "from": "../.web",
+        "to": ".web",
+        "filter": [
+          "**/*",
+          "!node_modules/**",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../venv",
+        "to": "venv",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!Lib/site-packages/pip/**",
+          "!Lib/site-packages/setuptools/**",
+          "!**/tests/**",
+          "!**/test/**"
+        ]
+      }
     ],
     "publish": [
       {
