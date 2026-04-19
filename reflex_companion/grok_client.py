@@ -125,7 +125,7 @@ devuelve el tag exacto. Si el usuario no pidió ninguna acción, devuelve NONE.
 
 Tags disponibles:
 [action:play_music:BUSQUEDA]         — poner/reproducir música en YouTube
-[action:search_web:BUSQUEDA]         — buscar en Google
+[action:search_web:BUSQUEDA]         — ABRIR una pestaña del NAVEGADOR en Google con la búsqueda. SOLO si el usuario pidió explícitamente abrir el navegador/Google ("abre Google con X", "muéstrame los resultados", "abre una pestaña buscando Y"). NUNCA para un simple "busca X" o "dime sobre X" — para eso Ashley tiene búsqueda interna y debe responder en el chat.
 [action:open_url:URL]                — abrir una URL
 [action:open_app:NOMBRE]             — abrir una aplicación o programa
 [action:close_window:HINT]           — cerrar una ventana o aplicación (HINT = fragmento del título)
@@ -145,7 +145,8 @@ Reglas estrictas:
 - Para play_music: extrae el nombre de la canción/artista del mensaje del usuario.
 - Para open_app: usa el nombre exacto de la app que pidió el usuario.
 - Para close_tab/close_window: usa el nombre/fragmento más específico posible del mensaje del usuario.
-- Si el usuario NO pidió ninguna acción del sistema (solo preguntó o conversó): devuelve NONE.
+- Para search_web: SOLO dispararlo si el usuario dijo ABRIR Google/navegador/pestaña explícitamente. "Busca X" NO es search_web — es una petición de información que Ashley resuelve con su búsqueda interna sin tag.
+- Si el usuario NO pidió ninguna acción del sistema (solo preguntó o conversó o pidió información): devuelve NONE.
 - Devuelve ÚNICAMENTE el tag o NONE. Cero texto adicional.
 
 Ejemplos:
@@ -155,7 +156,13 @@ Usuario: "abre steam"                    →  [action:open_app:steam]
 Usuario: "cierra youtube"                →  [action:close_tab:YouTube]
 Usuario: "cierra la pestaña de google"   →  [action:close_tab:Google]
 Usuario: "cierra discord"                →  [action:close_window:discord]
-Usuario: "busca recetas de pasta"        →  [action:search_web:recetas de pasta]
+Usuario: "busca recetas de pasta"        →  NONE  (pide info — Ashley responde con búsqueda interna, sin tag)
+Usuario: "dime qué hay nuevo de RimWorld" →  NONE  (pide info en chat)
+Usuario: "¿sabes algo de la película X?" →  NONE  (pide info en chat)
+Usuario: "abre Google y busca recetas"   →  [action:search_web:recetas de pasta]
+Usuario: "llévame a Google con X"        →  [action:search_web:X]
+Usuario: "abre una pestaña buscando Y"   →  [action:search_web:Y]
+Usuario: "muéstrame los resultados de Z" →  [action:search_web:Z]
 Usuario: "cómo estás?"                   →  NONE
 Usuario: "qué hora es?"                  →  NONE"""
 
