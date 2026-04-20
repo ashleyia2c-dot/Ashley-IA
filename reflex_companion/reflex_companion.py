@@ -1156,6 +1156,52 @@ class State(rx.State):
         # Insertar ANTES del último mensaje (que es el del usuario)
         messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _time_inject_msg)
 
+        # ── Recordatorio de estilo de conexión ────────────────────────────
+        # Los últimos 50 mensajes del historial contienen muchos ejemplos del
+        # "viejo patrón" (menús, inventarios de ventanas, evaluaciones). Los
+        # LLMs imitan lo que ven en el contexto MÁS que lo que dice el system
+        # prompt (in-context learning). Inyectar un recordatorio breve justo
+        # antes del último mensaje del usuario contrarresta esa inercia —
+        # es lo último que Grok lee antes de generar.
+        if self.language == "en":
+            _style_line = (
+                "[CONNECTION MODE — REMEMBER: do NOT end with menus like "
+                "'want me to X or Y?'. Do NOT enumerate open windows. Pick "
+                "ONE specific thing to notice about the BOSS (his mood, his "
+                "activity, a callback to something he mentioned). 1-3 "
+                "sentences max. Friend voice, not product voice. If the past "
+                "messages in this chat showed the 'menu pattern' — that was "
+                "wrong, do NOT copy it.]"
+            )
+        elif self.language == "fr":
+            _style_line = (
+                "[MODE CONNEXION — RAPPEL : ne termine PAS avec des menus "
+                "type 'tu veux que je X ou Y ?'. N'ÉNUMÈRE PAS les fenêtres "
+                "ouvertes. Choisis UNE chose spécifique sur le PATRON (son "
+                "humeur, son activité, un rappel à quelque chose qu'il a "
+                "mentionné). 1-3 phrases max. Voix d'amie, pas voix de "
+                "produit. Si les messages précédents montraient le 'pattern "
+                "menu' — c'était faux, ne le copie PAS.]"
+            )
+        else:
+            _style_line = (
+                "[MODO CONEXIÓN — RECORDATORIO: NO termines con menús tipo "
+                "'¿quieres que X o Y?'. NO enumeres ventanas abiertas. Elige "
+                "UNA cosa específica para notar sobre el JEFE (su ánimo, su "
+                "actividad, un callback a algo que mencionó). 1-3 frases "
+                "máximo. Voz de amiga, no voz de producto. Si los mensajes "
+                "anteriores del chat mostraban el 'patrón menú' — eso estaba "
+                "mal, NO lo copies.]"
+            )
+        _style_inject_msg = {
+            "role": "system_result",
+            "content": _style_line,
+            "timestamp": now_iso(),
+            "id": "_stylinj",
+            "image": "",
+        }
+        messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _style_inject_msg)
+
         # ── Screenshot de contexto (Ashley ve tu pantalla) ──────
         # Tomamos screenshot + lista verificada de ventanas SOLO si auto_actions
         # está ON. Este es el toggle maestro: "Actions" controla tanto el
