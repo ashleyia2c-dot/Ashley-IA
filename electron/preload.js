@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('ashleyNotif', {
   focusWindow: () => ipcRenderer.send('notif-focus-window'),
 });
 
+// ─── API de ventana (pin on top) ──────────────────────────────────────────
+// ashley_fx.js observa el atributo data-pin en #ashley-voice-state y llama a
+// setAlwaysOnTop(true|false) cuando el user alterna el pill 📌 del header.
+contextBridge.exposeInMainWorld('ashleyWindow', {
+  setAlwaysOnTop: (pin) => ipcRenderer.send('window-set-always-on-top', !!pin),
+});
+
 contextBridge.exposeInMainWorld('ashleyUpdate', {
   // Suscribir un callback a un evento del updater.
   // Devuelve una función para cancelar la suscripción.

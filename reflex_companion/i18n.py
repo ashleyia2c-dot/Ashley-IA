@@ -47,6 +47,8 @@ UI = {
         "pill_notifications": "Notify",
         "notif_on_tooltip":   "Background notifications ON — click to mute",
         "notif_off_tooltip":  "Background notifications OFF — click to enable",
+        "pin_on_tooltip":     "Ashley stays on top of other windows — click to unpin",
+        "pin_off_tooltip":    "Pin Ashley on top of other windows",
 
         # Memories dialog
         "mem_title":          "🧠 My memories with Ashley",
@@ -167,6 +169,8 @@ UI = {
         "pill_notifications": "Avisos",
         "notif_on_tooltip":   "Notificaciones en segundo plano ACTIVADAS — click para silenciar",
         "notif_off_tooltip":  "Notificaciones en segundo plano DESACTIVADAS — click para activar",
+        "pin_on_tooltip":     "Ashley se mantiene encima de otras ventanas — click para soltar",
+        "pin_off_tooltip":    "Fijar Ashley encima de otras ventanas",
 
         "mem_title":          "🧠 Mis Recuerdos con Ashley",
         "mem_tab_facts":      "✨ Hechos",
@@ -278,6 +282,8 @@ UI = {
         "pill_notifications": "Notifs",
         "notif_on_tooltip":   "Notifications en arrière-plan ACTIVÉES — clique pour couper",
         "notif_off_tooltip":  "Notifications en arrière-plan DÉSACTIVÉES — clique pour activer",
+        "pin_on_tooltip":     "Ashley reste au-dessus des autres fenêtres — clique pour libérer",
+        "pin_off_tooltip":    "Épingler Ashley au-dessus des autres fenêtres",
 
         "mem_title":          "🧠 Mes souvenirs avec Ashley",
         "mem_tab_facts":      "✨ Faits",

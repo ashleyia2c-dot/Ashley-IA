@@ -823,6 +823,20 @@ app.whenReady().then(async () => {
   }
   ipcMain.on('notif-focus-window', () => focusMainWindow());
 
+  // IPC: pin on top. El renderer llama window.ashleyWindow.setAlwaysOnTop(bool)
+  // desde ashley_fx.js cuando el user cambia el toggle del header. Usamos el
+  // nivel 'floating' que en Windows deja a Ashley encima incluso cuando otras
+  // apps piden focus (como cuando Ashley misma abre el navegador con shell).
+  ipcMain.on('window-set-always-on-top', (_event, pin) => {
+    try {
+      if (!mainWindow) return;
+      mainWindow.setAlwaysOnTop(!!pin, 'floating');
+      log(`always-on-top: ${!!pin}`);
+    } catch (err) {
+      log(`window-set-always-on-top failed: ${err.message}`);
+    }
+  });
+
   // IPC: crear una notificación Windows nativa desde el main process.
   // Usamos Electron.Notification (no la Web Notification API desde el
   // renderer) porque:

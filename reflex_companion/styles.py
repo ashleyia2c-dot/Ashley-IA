@@ -147,10 +147,10 @@ def global_styles():
     border: 1px solid rgba(255,154,238,0.08) !important;
   }}
   .glass-portrait {{
-    background: rgba(12, 7, 22, 0.6) !important;
-    backdrop-filter: blur(22px) !important;
-    -webkit-backdrop-filter: blur(22px) !important;
-    border: 1px solid rgba(255,154,238,0.12) !important;
+    background: rgba(12, 7, 22, 0.28) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+    border: 1px solid rgba(255,154,238,0.14) !important;
   }}
   .glass-header {{
     background: rgba(5, 3, 12, 0.78) !important;

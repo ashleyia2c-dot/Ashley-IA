@@ -60,8 +60,19 @@
     draw();
 
     window.addEventListener('resize', function () {
+      var prevW = W, prevH = H;
       W = canvas.width  = window.innerWidth;
       H = canvas.height = window.innerHeight;
+      // Reescalar posiciones de estrellas al nuevo tamaño para que
+      // cubran toda la pantalla al instante (si no, cambiar a fullscreen
+      // deja todas las estrellas apiñadas en el lado izquierdo hasta que
+      // respawneen por caer abajo, que tarda varios segundos).
+      var scaleX = prevW > 0 ? W / prevW : 1;
+      var scaleY = prevH > 0 ? H / prevH : 1;
+      for (var i = 0; i < stars.length; i++) {
+        stars[i].x *= scaleX;
+        stars[i].y *= scaleY;
+      }
     });
   }
 
@@ -362,6 +373,37 @@
       _sendNotif(body);
     });
     obs.observe(box, { childList: true, subtree: true });
+  }
+
+
+  /* ══════════════════════════════════════════
+     PIN ON TOP — data-pin observer
+  ══════════════════════════════════════════
+     El pill 📌/📍 del header alterna State.pin_on_top en Reflex, que a su vez
+     se refleja en data-pin del marker #ashley-voice-state. Aquí observamos
+     ese atributo y llamamos al IPC del main process para activar/desactivar
+     setAlwaysOnTop en la BrowserWindow. */
+  function initPinOnTopObserver() {
+    if (!window.ashleyWindow || typeof window.ashleyWindow.setAlwaysOnTop !== 'function') {
+      return;  // no estamos en Electron
+    }
+    function findMarker() {
+      return document.getElementById('ashley-voice-state');
+    }
+    function apply() {
+      var el = findMarker();
+      if (!el) return;
+      var on = el.getAttribute('data-pin') === 'on';
+      try { window.ashleyWindow.setAlwaysOnTop(on); } catch (e) {}
+    }
+    function attach() {
+      var el = findMarker();
+      if (!el) { setTimeout(attach, 300); return; }
+      apply();  // estado inicial
+      var obs = new MutationObserver(apply);
+      obs.observe(el, { attributes: true, attributeFilter: ['data-pin'] });
+    }
+    attach();
   }
 
 
@@ -697,6 +739,7 @@
     initTextarea();
     initObservers();
     initNotificationObserver();
+    initPinOnTopObserver();
     initVisibilityReload();
     initAffectionObserver();
     initAchievementObserver();

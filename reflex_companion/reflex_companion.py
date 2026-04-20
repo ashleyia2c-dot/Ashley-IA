@@ -93,6 +93,10 @@ class State(rx.State):
 
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
+    # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
+    # para que cuando Ashley abre una app no se tape a sí misma). Lee el
+    # wrapper Electron via data-pin en #ashley-voice-state.
+    pin_on_top: bool = False
     # Flag interno para anti-spam de mensajes de ausencia: True si Ashley
     # ya dejó un mensaje proactivo sobre la ausencia actual. Se resetea
     # cuando el user escribe. No se persiste — es solo de sesión.
@@ -303,6 +307,12 @@ class State(rx.State):
         self.notifications_enabled = not self.notifications_enabled
         self._persist_voice()
 
+    def toggle_pin_on_top(self):
+        """Alterna always-on-top: cuando ON, la ventana de Ashley se mantiene
+        encima de cualquier otra ventana. El cambio se aplica en el wrapper
+        Electron via MutationObserver sobre data-pin."""
+        self.pin_on_top = not self.pin_on_top
+
     def set_elevenlabs_key(self, key: str):
         self.elevenlabs_key = (key or "").strip()
         self._persist_voice()
@@ -322,6 +332,12 @@ class State(rx.State):
         para decidir si disparar notificaciones Windows cuando la ventana
         no está focuseada."""
         return "on" if self.notifications_enabled else "off"
+
+    @rx.var
+    def pin_marker_attr(self) -> str:
+        """'on' | 'off' — lo lee ashley_fx.js desde data-pin para llamar a
+        window.ashleyWindow.setAlwaysOnTop() en el main process."""
+        return "on" if self.pin_on_top else "off"
 
     @rx.var(cache=False)
     def backend_port_marker(self) -> str:
@@ -2164,6 +2180,37 @@ def index():
             _pill_btn_orange("⚡", State.t["pill_actions"], State.toggle_auto_actions, State.auto_actions),
             _pill_btn("⛶", State.t["pill_focus"], State.toggle_focus_mode, State.focus_mode),
             _pill_btn("🗣", State.t["pill_natural"], State.toggle_voice_mode, State.voice_mode),
+            # ── Toggle Pin on Top (ventana siempre encima) ──
+            rx.button(
+                rx.cond(State.pin_on_top, "📌", "📍"),
+                on_click=State.toggle_pin_on_top,
+                bg=rx.cond(State.pin_on_top, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
+                color=rx.cond(State.pin_on_top, COLOR_PRIMARY, "#6a6a7a"),
+                border=rx.cond(
+                    State.pin_on_top,
+                    "1px solid rgba(255,154,238,0.5)",
+                    "1px solid rgba(255,255,255,0.07)",
+                ),
+                box_shadow=rx.cond(State.pin_on_top, SHADOW_BUTTON, "none"),
+                border_radius="99px",
+                padding="0 8px",
+                height="28px",
+                font_size="13px",
+                flex_shrink="0",
+                cursor="pointer",
+                transition="all 0.2s ease",
+                _hover={
+                    "bg": "rgba(255,154,238,0.12)",
+                    "color": COLOR_PRIMARY,
+                    "border": "1px solid rgba(255,154,238,0.35)",
+                    "transform": "scale(1.04)",
+                },
+                title=rx.cond(
+                    State.pin_on_top,
+                    State.t["pin_on_tooltip"],
+                    State.t["pin_off_tooltip"],
+                ),
+            ),
             # ── Toggle Notificaciones Windows (cuando la ventana no está focuseada) ──
             rx.button(
                 rx.cond(State.notifications_enabled, "🔔", "🔕"),
@@ -2301,6 +2348,7 @@ def index():
                 "data-test-text": State.t["settings_test_text"],
                 "data-backend-port": State.backend_port_marker,
                 "data-notifications": State.notifications_marker_attr,
+                "data-pin": State.pin_marker_attr,
             },
         ),
 
