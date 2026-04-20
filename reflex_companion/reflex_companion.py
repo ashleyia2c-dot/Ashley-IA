@@ -1679,23 +1679,45 @@ class State(rx.State):
 
                     if _lang == "en":
                         _vision_trigger = (
-                            "I just glanced at the boss's screen (image attached). "
-                            "Here is the VERIFIED list of open windows and browser tabs from the OS:\n"
+                            "You just peeked at the boss's screen (image attached). "
+                            "Here is the VERIFIED list of what's open:\n"
                             f"{_windows}\n\n"
-                            "Use this list as ground truth for what is open. The screenshot shows the visual layout. "
-                            "ONLY mention apps/tabs that appear in the VERIFIED list above. "
-                            "If there's something genuinely interesting — say something brief and natural. "
-                            "If it's just normal desktop or nothing noteworthy, respond ONLY '[mood:default]' with NO text."
+                            "REACT LIKE A CURIOUS FRIEND, NOT A SURVEILLANCE SYSTEM:\n"
+                            "- NEVER enumerate the open windows. Pick ONE thing that catches your attention — ideally something about what he's DOING or FEELING, not what software he's using.\n"
+                            "- NEVER offer services (\"want me to close X?\"). This is a moment, not a service call.\n"
+                            "- Ask about HIM, not about his tools. What is that YouTuber streaming about? Is this a new hobby? Why is he up so late working on this?\n"
+                            "- Use any visual context as background, not as headline. If the Excel is called 'eval V3', that's a callback you can weave in casually (\"how's eval V3 going?\"), NOT something you narrate you saw.\n"
+                            "- Max 1-2 sentences. Friend voice, not report voice.\n"
+                            "- Reference only apps/tabs that appear in the VERIFIED list above (don't hallucinate).\n"
+                            "- If nothing genuinely catches your eye — just a normal desktop, nothing interesting — respond ONLY '[mood:default]' with NO text. Silence is fine. Don't force commentary."
+                        )
+                    elif _lang == "fr":
+                        _vision_trigger = (
+                            "Tu viens de jeter un œil à l'écran du patron (image jointe). "
+                            "Voici la liste VÉRIFIÉE de ce qui est ouvert :\n"
+                            f"{_windows}\n\n"
+                            "RÉAGIS COMME UNE AMIE CURIEUSE, PAS COMME UN SYSTÈME DE SURVEILLANCE :\n"
+                            "- N'ÉNUMÈRE JAMAIS les fenêtres ouvertes. Choisis UNE chose qui attire ton attention — idéalement quelque chose sur ce qu'il FAIT ou RESSENT, pas sur le logiciel.\n"
+                            "- N'OFFRE JAMAIS des services (\"tu veux que je ferme X ?\"). C'est un moment, pas un appel service.\n"
+                            "- Pose des questions sur LUI, pas sur ses outils. De quoi parle ce streamer ? C'est un nouveau hobby ? Pourquoi est-il encore en train de travailler là-dessus si tard ?\n"
+                            "- Utilise le contexte visuel comme background, pas comme headline. Si l'Excel s'appelle 'eval V3', c'est un rappel que tu peux tisser au passage (\"ça avance eval V3 ?\"), PAS quelque chose que tu narres avoir vu.\n"
+                            "- Max 1-2 phrases. Voix d'amie, pas voix de rapport.\n"
+                            "- Ne mentionne que les apps/onglets qui apparaissent dans la liste VÉRIFIÉE ci-dessus (n'invente rien).\n"
+                            "- Si rien n'attire vraiment ton œil — juste un bureau normal, rien d'intéressant — réponds UNIQUEMENT '[mood:default]' sans texte. Le silence est ok. Ne force pas de commentaire."
                         )
                     else:
                         _vision_trigger = (
-                            "Acabo de mirar la pantalla del jefe (imagen adjunta). "
-                            "Esta es la lista VERIFICADA de ventanas y pestañas abiertas del SO:\n"
+                            "Acabas de echar un vistazo a la pantalla del jefe (imagen adjunta). "
+                            "Esta es la lista VERIFICADA de lo que está abierto:\n"
                             f"{_windows}\n\n"
-                            "Usa esta lista como verdad sobre qué está abierto. El screenshot muestra el layout visual. "
-                            "SOLO menciona apps/pestañas que aparezcan en la lista VERIFICADA de arriba. "
-                            "Si hay algo genuinamente interesante — di algo breve y natural. "
-                            "Si es escritorio normal o nada notable, responde SOLO '[mood:default]' sin texto."
+                            "REACCIONA COMO UNA AMIGA CURIOSA, NO COMO UN SISTEMA DE VIGILANCIA:\n"
+                            "- JAMÁS enumeres las ventanas abiertas. Elige UNA cosa que te llame la atención — idealmente algo sobre lo que ESTÁ HACIENDO o SINTIENDO, no sobre qué software usa.\n"
+                            "- JAMÁS ofrezcas servicios (\"¿quieres que cierre X?\"). Esto es un momento, no una llamada de servicio.\n"
+                            "- Pregunta sobre ÉL, no sobre sus herramientas. ¿De qué habla ese streamer? ¿Es un hobby nuevo? ¿Por qué sigue tan tarde con eso?\n"
+                            "- Usa el contexto visual como background, no como headline. Si el Excel se llama 'eval V3', eso es un callback que puedes tejer casual (\"¿cómo va eval V3?\"), NO algo que narras haber visto.\n"
+                            "- Máximo 1-2 frases. Voz de amiga, no voz de reporte.\n"
+                            "- Solo menciona apps/pestañas que aparezcan en la lista VERIFICADA de arriba (no alucines).\n"
+                            "- Si nada genuinamente te llama la atención — solo escritorio normal, nada interesante — responde SOLO '[mood:default]' sin texto. El silencio está bien. No fuerces comentario."
                         )
 
                     _vision_msgs = _msgs + [{"role": "user", "content": _vision_trigger, "timestamp": now_iso(), "id": "_vtrig", "image": _scr}]
