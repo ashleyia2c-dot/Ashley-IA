@@ -1372,9 +1372,59 @@ class State(rx.State):
         return msg
 
     def send_message(self, form_data: dict):
+        # Envoltorio externo que NUNCA deja escapar excepciones a Reflex
+        # (si sale una, Reflex muestra el toast rojo de "contact the admin"
+        # que asusta al user y no dice nada útil). Preferimos loguear y
+        # continuar con la UI intacta.
+        try:
+            yield from self._send_message_impl(form_data)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").exception("send_message crashed: %s", _e)
+            # Reset de flags de UI para que el user pueda reintentar
+            self.is_thinking = False
+            self.current_response = ""
+            yield
+
+    def _send_message_impl(self, form_data: dict):
         user_message = form_data.get("message", "").strip()
+
+        # ── Caso especial: input vacío ───────────────────────────────────
+        # Si el user pulsa Send con el cuadro de texto vacío y sin imagen
+        # adjunta, hay dos interpretaciones posibles:
+        #
+        #   A) El último mensaje del chat es del USER (p.ej. porque borró
+        #      la respuesta previa de Ashley). Queremos REENVIAR ese mensaje
+        #      — es lo natural y lo que el user espera ("re-trigger").
+        #
+        #   B) El último mensaje es de Ashley (o no hay historial). No hay
+        #      nada que reenviar — silencio. Si el user quiere que Ashley
+        #      hable sola tiene el pill ✨ Ashley en la barra superior.
+        #
+        # Antes este caso devolvía vacío y Reflex a veces mostraba un error
+        # genérico. Ahora lo manejamos explícito.
         if not user_message and not self.pending_image:
+            if self.is_thinking or self.current_response != "":
+                return
+            if self.messages and self.messages[-1].get("role") == "user":
+                # Caso A: retry del último mensaje del user.
+                retry_msg = self.messages[-1].get("content", "").strip()
+                if not retry_msg:
+                    return
+                self._last_user_message = retry_msg
+                self.is_thinking = True
+                self.current_response = ""
+                yield
+                try:
+                    yield from self._stream_grok(retry_msg)
+                    yield from self._finalize_response(self._last_response)
+                except Exception as e:
+                    self._handle_grok_error(e, "send_retry")
+                yield
+                return
+            # Caso B: silencio. No hay nada razonable que hacer.
             return
+
         # Guardia anti-doble-disparo: ignorar si ya estamos procesando
         if self.is_thinking or self.current_response != "":
             return
