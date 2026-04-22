@@ -416,6 +416,34 @@ def global_styles():
     font-style: italic;
   }}
 
+  /* ── Radix Select popup (Settings dialog) ──────────────
+     El dropdown de Radix Select se monta vía Portal. Por defecto le
+     pone z-index: auto, lo que hace que quede DEBAJO de contenedores
+     hermanos con stacking context (p.ej. el box del TTS provider con
+     su bg/border propios). Forzamos z-index altísimo y un fondo sólido
+     para que el popup sea siempre legible encima de todo. */
+  [data-radix-popper-content-wrapper] {{
+    z-index: 10050 !important;
+  }}
+  [data-radix-select-content],
+  [data-radix-popover-content] {{
+    background: #15121d !important;
+    border: 1px solid rgba(255,154,238,0.35) !important;
+    box-shadow: 0 10px 36px rgba(0,0,0,0.75),
+                0 0 0 1px rgba(255,154,238,0.08) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }}
+  [data-radix-select-item],
+  [data-radix-select-item][data-state="checked"] {{
+    color: #eee !important;
+  }}
+  [data-radix-select-item][data-highlighted] {{
+    background: rgba(255,154,238,0.12) !important;
+    color: #ff9aee !important;
+    outline: none !important;
+  }}
+
   /* ── Achievement gallery ──────────────────────────── */
   .achievement-grid {{
     display: grid;

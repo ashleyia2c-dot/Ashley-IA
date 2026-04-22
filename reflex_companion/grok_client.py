@@ -150,13 +150,13 @@ def _with_retry(fn, *args, max_attempts: int = 3, base_delay: float = 1.0, **kwa
 
 def grok_call(system_text: str, user_text: str) -> str:
     """Llamada simple al LLM activo, sin streaming. Con retries automáticos.
-    Dispatcha a xAI directo o a OpenRouter según la config del user.
+    Dispatcha a xAI directo, OpenRouter u Ollama según la config del user.
     Nombre 'grok_call' se mantiene por backward compat histórica."""
-    from .llm_provider import is_openrouter, openrouter_simple
+    from .llm_provider import is_openai_compat, openai_compat_simple
 
     def _once():
-        if is_openrouter():
-            return openrouter_simple(system_text, user_text, creative=True)
+        if is_openai_compat():
+            return openai_compat_simple(system_text, user_text, creative=True)
         # Path xAI directo (legacy)
         from xai_sdk import Client
         from xai_sdk.chat import system, user as xai_user
@@ -240,12 +240,12 @@ Usuario: "qué hora es?"                  →  NONE"""
     user_text = f"Mensaje del usuario: {user_message}\n\nRespuesta de Ashley: {ashley_response}"
 
     def _once():
-        from .llm_provider import is_openrouter, openrouter_complete
-        if is_openrouter():
-            # En OpenRouter siempre usamos el MISMO modelo del user (no un
-            # modelo "fast" separado). Queremos output determinista para
-            # detectar tags, sin penalties.
-            raw = openrouter_complete(
+        from .llm_provider import is_openai_compat, openai_compat_complete
+        if is_openai_compat():
+            # En OpenRouter/Ollama siempre usamos el MISMO modelo del user
+            # (no un modelo 'fast' separado). Queremos output determinista
+            # para detectar tags, sin penalties.
+            raw = openai_compat_complete(
                 messages=[{"role": "user", "content": user_text, "image": ""}],
                 system_prompt=system_text,
                 creative=False,
@@ -292,17 +292,17 @@ def stream_response(
     propagamos la excepción — no podemos rebobinar tokens que ya vio el
     user en la UI.
     """
-    from .llm_provider import is_openrouter, openrouter_stream
+    from .llm_provider import is_openai_compat, openai_compat_stream
 
-    # Si el user usa OpenRouter → path OpenAI-compatible. Sin web_search
-    # (no soportado en ese path) y sin el formato xai_sdk.
-    if is_openrouter():
-        # Retry de apertura manejado implícitamente por openrouter_stream
+    # Si el user usa OpenRouter/Ollama → path OpenAI-compatible. Sin
+    # web_search (no soportado en ese path) y sin el formato xai_sdk.
+    if is_openai_compat():
+        # Retry de apertura manejado implícitamente por openai_compat_stream
         # (aunque si falla mid-stream también propaga, igual que xAI).
         try:
-            yield from openrouter_stream(messages, system_prompt, trigger=trigger)
+            yield from openai_compat_stream(messages, system_prompt, trigger=trigger)
         except Exception as e:
-            _log.warning("openrouter_stream failed, propagating: %s", e)
+            _log.warning("openai_compat_stream failed, propagating: %s", e)
             raise
         return
 

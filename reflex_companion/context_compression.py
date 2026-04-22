@@ -115,9 +115,9 @@ def _call_fast_summarizer(dialogue_text: str, language: str) -> str:
     user_text = f"Dialogue to summarize:\n\n{dialogue_text}\n\nRecap in {lang_name}:"
 
     try:
-        from .llm_provider import is_openrouter, openrouter_complete
-        if is_openrouter():
-            text = openrouter_complete(
+        from .llm_provider import is_openai_compat, openai_compat_complete
+        if is_openai_compat():
+            text = openai_compat_complete(
                 messages=[{"role": "user", "content": user_text, "image": ""}],
                 system_prompt=system_text,
                 creative=True,

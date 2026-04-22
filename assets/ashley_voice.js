@@ -24,6 +24,10 @@
     ttsEnabled: false,
     elevenKey: '',
     voiceId: ELEVEN_DEFAULT_VOICE,
+    // v0.12: voice provider — 'webspeech' (default) | 'elevenlabs' | 'kokoro' | 'voicevox'
+    // Everything except webspeech is handled server-side via /api/tts;
+    // webspeech is handled in-browser via SpeechSynthesis.
+    voiceProvider: 'webspeech',
     backendPort: '',            // resolved from DOM marker; empty = error
 
     mediaStream: null,
@@ -438,20 +442,27 @@
       }
     },
 
-    async _speakElevenLabs(text) {
+    // v0.12: generic backend TTS — Python route /api/tts dispatches to
+    // ElevenLabs / Kokoro / VoiceVox based on voice_provider in voice.json.
+    // JS doesn't know which one, just gets audio bytes back (or 204 = no
+    // content, which means we should fall back to Web Speech).
+    async _speakBackendTTS(text) {
       if (!this.backendPort) {
         this._alert('Backend port not configured. Restart Ashley.');
         return;
       }
-      // Llamamos al proxy local (Python → ElevenLabs). Evita CORS y la key
-      // no viaja por el browser (está en voice.json del usuario).
       const url = `http://127.0.0.1:${this.backendPort}/api/tts`;
       try {
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, provider: this.voiceProvider }),
         });
+        // 204 = backend says "webspeech provider, you handle it"
+        if (resp.status === 204) {
+          this._speakWebSpeech(text);
+          return;
+        }
         if (!resp.ok) {
           let errMsg = 'HTTP ' + resp.status;
           try {
@@ -460,12 +471,12 @@
             if (j.detail) errMsg += ' — ' + j.detail;
           } catch {}
           err('TTS proxy error:', errMsg);
-          this._alertElevenOnce(errMsg);
+          this._alertTTSOnce(errMsg);
           this._speakWebSpeech(text);
           return;
         }
         const blob = await resp.blob();
-        log('ElevenLabs audio received:', blob.size, 'bytes');
+        log('Backend TTS audio received:', blob.size, 'bytes, type:', blob.type);
         const obj = URL.createObjectURL(blob);
         this.stopSpeaking();
         const audio = new Audio(obj);
@@ -477,22 +488,22 @@
         };
       } catch (e) {
         err('TTS fetch error:', e);
-        this._alertElevenOnce('Network: ' + (e.message || e));
+        this._alertTTSOnce('Network: ' + (e.message || e));
         this._speakWebSpeech(text);
       }
     },
 
-    _elevenErrorShown: false,
-    _lastElevenError: '',
-    _alertElevenOnce(msg) {
+    _lastTTSError: '',
+    _alertTTSOnce(msg) {
       // Solo alertamos una vez por error distinto (no spamear)
-      if (msg === this._lastElevenError) return;
-      this._lastElevenError = msg;
+      if (msg === this._lastTTSError) return;
+      this._lastTTSError = msg;
+      const providerName = (this.voiceProvider || 'TTS').toString();
       this._alert(this._i18n(
-        'ElevenLabs failed:\n\n' + msg + '\n\nFalling back to the free Windows voice. ' +
-        'Check your API key and Voice ID in Settings.',
-        'ElevenLabs falló:\n\n' + msg + '\n\nUsando la voz gratuita de Windows. ' +
-        'Revisa tu clave y Voice ID en Ajustes.'
+        providerName + ' failed:\n\n' + msg + '\n\nFalling back to the free Windows voice. ' +
+        'Check Settings or make sure the local server is running.',
+        providerName + ' falló:\n\n' + msg + '\n\nUsando la voz gratuita de Windows. ' +
+        'Revisa Ajustes o verifica que el servidor local esté corriendo.'
       ));
     },
 
@@ -506,8 +517,14 @@
     _doSpeak(text) {
       const clean = this._cleanForSpeech(text);
       if (!clean) return;
-      if (this.elevenKey && this.elevenKey.length > 10) this._speakElevenLabs(clean);
-      else this._speakWebSpeech(clean);
+      // Routing basado en voice_provider — todas las opciones no-webspeech
+      // pasan por /api/tts (el backend dispatcha al provider real).
+      const p = (this.voiceProvider || 'webspeech').toLowerCase();
+      if (p === 'webspeech') {
+        this._speakWebSpeech(clean);
+      } else {
+        this._speakBackendTTS(clean);
+      }
     },
 
     stopSpeaking() {
@@ -564,6 +581,9 @@
       this.ttsEnabled = (el.getAttribute('data-tts') || 'off') === 'on';
       this.elevenKey = el.getAttribute('data-el-key') || '';
       this.voiceId = el.getAttribute('data-voice-id') || ELEVEN_DEFAULT_VOICE;
+      // v0.12: which backend voices Ashley? Defaults to webspeech if missing.
+      const provider = (el.getAttribute('data-voice-provider') || '').toLowerCase();
+      this.voiceProvider = provider || 'webspeech';
       this.backendPort = el.getAttribute('data-backend-port') || '';
       if (!this.backendPort) {
         warn('No backend port found in DOM marker — STT/TTS will fail');

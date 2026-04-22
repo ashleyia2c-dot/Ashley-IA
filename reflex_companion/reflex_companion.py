@@ -93,12 +93,24 @@ class State(rx.State):
     voice_mode: bool = False     # True = Ashley habla natural (sin *gestos*)
 
     # ── LLM Provider (multi-provider) ──────────
-    # llm_provider = "xai" (default, legacy) | "openrouter"
+    # llm_provider = "xai" | "openrouter" | "ollama"
     # openrouter_key = la API key de OpenRouter si se usa ese provider
     # llm_model = modelo específico (vacío = default del provider)
+    # ollama_local_models = lista refrescada en vivo de los modelos que
+    # el user tiene descargados con Ollama (dinámico, no persiste).
     llm_provider: str = "xai"
     openrouter_key: str = ""
     llm_model: str = ""
+    ollama_available: bool = False
+    ollama_local_models: list[str] = []
+
+    # ── TTS Provider (multi-backend, v0.12) ────
+    # voice_provider = "webspeech" | "elevenlabs" | "kokoro" | "voicevox"
+    voice_provider: str = "webspeech"
+    kokoro_url: str = "http://localhost:8880"
+    kokoro_voice: str = "af_bella"
+    voicevox_url: str = "http://localhost:50021"
+    voicevox_speaker: str = "1"
 
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
@@ -301,6 +313,11 @@ class State(rx.State):
             llm_provider=self.llm_provider,
             openrouter_key=self.openrouter_key,
             llm_model=self.llm_model,
+            voice_provider=self.voice_provider,
+            kokoro_url=self.kokoro_url,
+            kokoro_voice=self.kokoro_voice,
+            voicevox_url=self.voicevox_url,
+            voicevox_speaker=self.voicevox_speaker,
         )
 
     def toggle_tts(self):
@@ -338,15 +355,18 @@ class State(rx.State):
     # ─────────────────────────────────────────
 
     def set_llm_provider(self, provider: str):
-        """'xai' | 'openrouter'. Cambia qué servicio usa Ashley."""
+        """'xai' | 'openrouter' | 'ollama'. Cambia qué servicio usa Ashley."""
         p = (provider or "xai").strip().lower()
-        if p not in ("xai", "openrouter"):
+        if p not in ("xai", "openrouter", "ollama"):
             p = "xai"
         self.llm_provider = p
         # Al cambiar de provider, resetear el modelo para que use el default
         # del nuevo provider — evita intentar usar un modelo de xAI contra
         # OpenRouter o viceversa.
         self.llm_model = ""
+        # Si switchean a Ollama, detectar disponibilidad y listar modelos.
+        if p == "ollama":
+            self.refresh_ollama_status()
         self._persist_voice()
 
     def set_openrouter_key(self, key: str):
@@ -358,19 +378,92 @@ class State(rx.State):
         self.llm_model = (model or "").strip()
         self._persist_voice()
 
+    def refresh_ollama_status(self):
+        """Pingea Ollama y actualiza ollama_available + ollama_local_models.
+        Se llama al abrir Settings, al cambiar a Ollama, y con el botón
+        'Refrescar' del UI."""
+        from .llm_provider import is_ollama_available, list_ollama_models
+        try:
+            self.ollama_available = is_ollama_available(timeout=0.8)
+            self.ollama_local_models = list_ollama_models() if self.ollama_available else []
+        except Exception:
+            self.ollama_available = False
+            self.ollama_local_models = []
+
+    # ─────────────────────────────────────────
+    #  TTS Provider handlers (multi-backend v0.12)
+    # ─────────────────────────────────────────
+
+    def set_voice_provider(self, provider: str):
+        """'webspeech' | 'elevenlabs' | 'kokoro' | 'voicevox'."""
+        p = (provider or "webspeech").strip().lower()
+        if p not in ("webspeech", "elevenlabs", "kokoro", "voicevox"):
+            p = "webspeech"
+        self.voice_provider = p
+        self._persist_voice()
+
+    def set_kokoro_url(self, url: str):
+        self.kokoro_url = (url or "").strip() or "http://localhost:8880"
+        self._persist_voice()
+
+    def set_kokoro_voice(self, voice: str):
+        self.kokoro_voice = (voice or "").strip() or "af_bella"
+        self._persist_voice()
+
+    def set_voicevox_url(self, url: str):
+        self.voicevox_url = (url or "").strip() or "http://localhost:50021"
+        self._persist_voice()
+
+    def set_voicevox_speaker(self, speaker: str):
+        self.voicevox_speaker = (speaker or "").strip() or "1"
+        self._persist_voice()
+
     @rx.var
     def llm_model_display(self) -> str:
-        """Modelo actual para mostrar en UI (muestra default si está vacío)."""
-        from .llm_provider import XAI_MODELS, OPENROUTER_MODELS
+        """Modelo actual para el Select.
+
+        OJO: tiene que devolver el ID EXACTO de un item del Select para
+        que Radix lo marque como seleccionado. Antes devolvíamos "X (default)"
+        y eso hacía que el select se viera vacío aunque hubiera un modelo
+        activo por defecto.
+        """
+        from .llm_provider import XAI_MODELS, OPENROUTER_MODELS, OLLAMA_DEFAULT_MODEL
         if self.llm_model:
             return self.llm_model
         if self.llm_provider == "openrouter":
-            return OPENROUTER_MODELS[0][0] + " (default)"
-        return XAI_MODELS[0][0] + " (default)"
+            return OPENROUTER_MODELS[0][0]
+        if self.llm_provider == "ollama":
+            return OLLAMA_DEFAULT_MODEL
+        return XAI_MODELS[0][0]
 
     @rx.var
     def is_openrouter_provider(self) -> bool:
         return self.llm_provider == "openrouter"
+
+    @rx.var
+    def is_ollama_provider(self) -> bool:
+        return self.llm_provider == "ollama"
+
+    @rx.var
+    def is_xai_provider(self) -> bool:
+        return self.llm_provider == "xai"
+
+    @rx.var
+    def is_voice_kokoro(self) -> bool:
+        return self.voice_provider == "kokoro"
+
+    @rx.var
+    def is_voice_voicevox(self) -> bool:
+        return self.voice_provider == "voicevox"
+
+    @rx.var
+    def is_voice_elevenlabs(self) -> bool:
+        return self.voice_provider == "elevenlabs"
+
+    @rx.var
+    def voice_provider_marker(self) -> str:
+        """Leído por ashley_voice.js via data-voice-provider para routing."""
+        return self.voice_provider or "webspeech"
 
     @rx.var
     def tts_marker_attr(self) -> str:
@@ -408,6 +501,10 @@ class State(rx.State):
     # ── Settings dialog ─────────────────────────────────────
     def toggle_settings(self):
         self.show_settings = not self.show_settings
+        # Al abrir Settings, refrescamos el estado de Ollama (detección +
+        # lista de modelos locales). No bloquea — el ping es de 800ms máx.
+        if self.show_settings and self.llm_provider == "ollama":
+            self.refresh_ollama_status()
 
     def save_voice_settings(self, form_data: dict):
         """Guarda cambios desde el modal de settings."""
@@ -513,6 +610,17 @@ class State(rx.State):
         self.llm_provider = vcfg.get("llm_provider", "xai") or "xai"
         self.openrouter_key = vcfg.get("openrouter_key", "") or ""
         self.llm_model = vcfg.get("llm_model", "") or ""
+        # TTS provider config (v0.12 — default webspeech por retrocompat,
+        # excepto si el user tenía elevenlabs_key — load_voice_config lo
+        # detecta y migra a 'elevenlabs' para no romper su setup).
+        self.voice_provider = vcfg.get("voice_provider", "webspeech") or "webspeech"
+        self.kokoro_url = vcfg.get("kokoro_url", "http://localhost:8880") or "http://localhost:8880"
+        self.kokoro_voice = vcfg.get("kokoro_voice", "af_bella") or "af_bella"
+        self.voicevox_url = vcfg.get("voicevox_url", "http://localhost:50021") or "http://localhost:50021"
+        self.voicevox_speaker = vcfg.get("voicevox_speaker", "1") or "1"
+        # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
+        if self.llm_provider == "ollama":
+            self.refresh_ollama_status()
         # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
         # Si voice.json viejo trae la key, la ignoramos silenciosamente.
         # Warmup del modelo Whisper en background (no bloquea la UI)
@@ -2543,6 +2651,8 @@ def index():
                 "data-backend-port": State.backend_port_marker,
                 "data-notifications": State.notifications_marker_attr,
                 "data-pin": State.pin_marker_attr,
+                # v0.12: voice_provider controls which TTS backend JS uses
+                "data-voice-provider": State.voice_provider_marker,
             },
         ),
 
@@ -2805,7 +2915,7 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
-                        #  LLM PROVIDER — Elige xAI o OpenRouter (multi-model)
+                        #  LLM PROVIDER — xAI / OpenRouter / Ollama
                         # ═══════════════════════════════════════════════
                         rx.box(
                             rx.vstack(
@@ -2815,23 +2925,29 @@ def index():
                                 rx.text(State.t["settings_provider_label"],
                                         color="#ddd", font_size="13px", font_weight="500"),
 
-                                # Radio selector: xAI vs OpenRouter
+                                # Radio selector: xAI / OpenRouter / Ollama
                                 rx.radio(
-                                    ["xai", "openrouter"],
+                                    ["xai", "openrouter", "ollama"],
                                     value=State.llm_provider,
                                     on_change=State.set_llm_provider,
                                     direction="column",
                                     size="2",
                                 ),
+                                # Descripción de la opción seleccionada
                                 rx.cond(
                                     State.is_openrouter_provider,
                                     rx.text(State.t["settings_provider_openrouter"],
                                             color="#9acaff", font_size="11px", font_style="italic"),
-                                    rx.text(State.t["settings_provider_xai"],
-                                            color="#ccc", font_size="11px", font_style="italic"),
+                                    rx.cond(
+                                        State.is_ollama_provider,
+                                        rx.text(State.t["settings_provider_ollama"],
+                                                color="#88ff99", font_size="11px", font_style="italic"),
+                                        rx.text(State.t["settings_provider_xai"],
+                                                color="#ccc", font_size="11px", font_style="italic"),
+                                    ),
                                 ),
 
-                                # Si OpenRouter: pedir la key + model picker
+                                # ─── Sub-panel: OpenRouter ───────────────
                                 rx.cond(
                                     State.is_openrouter_provider,
                                     rx.vstack(
@@ -2869,6 +2985,63 @@ def index():
                                                 color="#888", font_size="10px", line_height="1.4"),
                                         spacing="1", align="stretch", width="100%",
                                     ),
+                                    rx.box(),
+                                ),
+
+                                # ─── Sub-panel: Ollama ───────────────────
+                                rx.cond(
+                                    State.is_ollama_provider,
+                                    rx.vstack(
+                                        # Estado: detectado o no
+                                        rx.cond(
+                                            State.ollama_available,
+                                            rx.text(State.t["settings_ollama_detected"],
+                                                    color="#88ff99", font_size="11px",
+                                                    font_weight="600", margin_top="8px"),
+                                            rx.vstack(
+                                                rx.text(State.t["settings_ollama_missing"],
+                                                        color="#ff9999", font_size="11px",
+                                                        font_weight="600", margin_top="8px"),
+                                                rx.text(State.t["settings_ollama_install"],
+                                                        color="#aaa", font_size="10px", line_height="1.4"),
+                                                spacing="1", align="stretch",
+                                            ),
+                                        ),
+                                        # Botón de refresh
+                                        rx.button(
+                                            State.t["settings_ollama_refresh"],
+                                            on_click=State.refresh_ollama_status,
+                                            size="1",
+                                            variant="soft",
+                                            color_scheme="green",
+                                            margin_top="4px",
+                                        ),
+                                        # Model picker: la lista dinámica de modelos locales
+                                        rx.text(State.t["settings_model_label"],
+                                                color="#ddd", font_size="12px", font_weight="500",
+                                                margin_top="8px"),
+                                        rx.cond(
+                                            State.ollama_local_models.length() > 0,
+                                            rx.select(
+                                                State.ollama_local_models,
+                                                value=State.llm_model_display,
+                                                on_change=State.set_llm_model,
+                                                size="2",
+                                                width="100%",
+                                            ),
+                                            rx.text(State.t["settings_ollama_no_models"],
+                                                    color="#ff9999", font_size="11px", line_height="1.4"),
+                                        ),
+                                        rx.text(State.t["settings_model_hint"],
+                                                color="#888", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
+                                    ),
+                                    rx.box(),
+                                ),
+
+                                # ─── Sub-panel: xAI (default) ────────────
+                                rx.cond(
+                                    State.is_xai_provider,
                                     rx.vstack(
                                         rx.text(State.t["settings_model_label"],
                                                 color="#ddd", font_size="12px", font_weight="500",
@@ -2884,6 +3057,7 @@ def index():
                                                 color="#888", font_size="10px", line_height="1.4"),
                                         spacing="1", align="stretch", width="100%",
                                     ),
+                                    rx.box(),
                                 ),
                                 spacing="2", align="stretch",
                             ),
@@ -2895,70 +3069,171 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
-                        #  OPTIONAL — ElevenLabs (Premium Voice)
+                        #  VOICE PROVIDER — WebSpeech / ElevenLabs / Kokoro / VoiceVox
                         # ═══════════════════════════════════════════════
                         rx.box(
                             rx.vstack(
-                                rx.text(State.t["settings_optional_heading"],
+                                rx.text(State.t["settings_tts_heading"],
                                         color="#ffa500", font_weight="700", font_size="14px",
                                         letter_spacing="0.05em"),
+                                rx.text(State.t["settings_tts_label"],
+                                        color="#ddd", font_size="13px", font_weight="500"),
 
-                                # Consecuencias: sin / con
-                                rx.vstack(
-                                    rx.hstack(
-                                        rx.text(State.t["settings_elevenlabs_without"],
-                                                color="#888", font_size="11px", font_weight="600", min_width="60px"),
-                                        rx.text(State.t["settings_elevenlabs_without_desc"],
-                                                color="#aaa", font_size="11px", line_height="1.4"),
-                                        spacing="2", align="start",
+                                # Radio selector de voice provider
+                                rx.radio(
+                                    ["webspeech", "elevenlabs", "kokoro", "voicevox"],
+                                    value=State.voice_provider,
+                                    on_change=State.set_voice_provider,
+                                    direction="column",
+                                    size="2",
+                                ),
+
+                                # Hint contextual según el provider elegido
+                                rx.match(
+                                    State.voice_provider,
+                                    ("elevenlabs", rx.text(State.t["settings_tts_elevenlabs"],
+                                                           color="#ffa500", font_size="11px",
+                                                           font_style="italic")),
+                                    ("kokoro", rx.text(State.t["settings_tts_kokoro"],
+                                                       color="#88ff99", font_size="11px",
+                                                       font_style="italic")),
+                                    ("voicevox", rx.text(State.t["settings_tts_voicevox"],
+                                                         color="#ff88cc", font_size="11px",
+                                                         font_style="italic")),
+                                    rx.text(State.t["settings_tts_webspeech"],
+                                            color="#aaa", font_size="11px", font_style="italic"),
+                                ),
+
+                                # ─── Sub-panel: ElevenLabs ────────────────
+                                rx.cond(
+                                    State.is_voice_elevenlabs,
+                                    rx.vstack(
+                                        rx.text(State.t["settings_elevenlabs_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="6px"),
+                                        rx.input(
+                                            name="elevenlabs_key",
+                                            type="password",
+                                            default_value=State.elevenlabs_key,
+                                            placeholder=State.t["settings_elevenlabs_placeholder"],
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_elevenlabs_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        rx.text(State.t["settings_voice_id_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="4px"),
+                                        rx.input(
+                                            name="voice_id",
+                                            type="text",
+                                            default_value=State.voice_id,
+                                            placeholder="EXAVITQu4vr4xnSDxMaL",
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_voice_id_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
                                     ),
-                                    rx.hstack(
-                                        rx.text(State.t["settings_elevenlabs_with"],
-                                                color="#ffa500", font_size="11px", font_weight="600", min_width="60px"),
-                                        rx.text(State.t["settings_elevenlabs_with_desc"],
-                                                color="#ddd", font_size="11px", line_height="1.4"),
-                                        spacing="2", align="start",
+                                    rx.box(),
+                                ),
+
+                                # ─── Sub-panel: Kokoro ────────────────────
+                                rx.cond(
+                                    State.is_voice_kokoro,
+                                    rx.vstack(
+                                        rx.text(State.t["settings_kokoro_url_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="6px"),
+                                        rx.input(
+                                            value=State.kokoro_url,
+                                            on_change=State.set_kokoro_url,
+                                            placeholder="http://localhost:8880",
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_kokoro_url_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        rx.text(State.t["settings_kokoro_voice_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="4px"),
+                                        rx.input(
+                                            value=State.kokoro_voice,
+                                            on_change=State.set_kokoro_voice,
+                                            placeholder="af_bella",
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_kokoro_voice_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
                                     ),
-                                    spacing="1", align="stretch", padding_y="2px",
+                                    rx.box(),
                                 ),
 
-                                rx.text(State.t["settings_elevenlabs_label"],
-                                        color="#ccc", font_size="12px", font_weight="500", margin_top="6px"),
-                                rx.input(
-                                    name="elevenlabs_key",
-                                    type="password",
-                                    default_value=State.elevenlabs_key,
-                                    placeholder=State.t["settings_elevenlabs_placeholder"],
-                                    width="100%",
-                                    bg="#0a0a0a",
-                                    border="1px solid #333",
-                                    color="white",
-                                    padding="8px 10px",
-                                    border_radius="6px",
-                                    font_family="Consolas, monospace",
-                                    font_size="11px",
+                                # ─── Sub-panel: VoiceVox ──────────────────
+                                rx.cond(
+                                    State.is_voice_voicevox,
+                                    rx.vstack(
+                                        rx.text(State.t["settings_voicevox_url_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="6px"),
+                                        rx.input(
+                                            value=State.voicevox_url,
+                                            on_change=State.set_voicevox_url,
+                                            placeholder="http://localhost:50021",
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_voicevox_url_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        rx.text(State.t["settings_voicevox_speaker_label"],
+                                                color="#ccc", font_size="12px", font_weight="500", margin_top="4px"),
+                                        rx.input(
+                                            value=State.voicevox_speaker,
+                                            on_change=State.set_voicevox_speaker,
+                                            placeholder="1",
+                                            width="100%",
+                                            bg="#0a0a0a",
+                                            border="1px solid #333",
+                                            color="white",
+                                            padding="8px 10px",
+                                            border_radius="6px",
+                                            font_family="Consolas, monospace",
+                                            font_size="11px",
+                                        ),
+                                        rx.text(State.t["settings_voicevox_speaker_hint"],
+                                                color="#666", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
+                                    ),
+                                    rx.box(),
                                 ),
-                                rx.text(State.t["settings_elevenlabs_hint"],
-                                        color="#666", font_size="10px", line_height="1.4"),
-
-                                rx.text(State.t["settings_voice_id_label"],
-                                        color="#ccc", font_size="12px", font_weight="500", margin_top="4px"),
-                                rx.input(
-                                    name="voice_id",
-                                    type="text",
-                                    default_value=State.voice_id,
-                                    placeholder="EXAVITQu4vr4xnSDxMaL",
-                                    width="100%",
-                                    bg="#0a0a0a",
-                                    border="1px solid #333",
-                                    color="white",
-                                    padding="8px 10px",
-                                    border_radius="6px",
-                                    font_family="Consolas, monospace",
-                                    font_size="11px",
-                                ),
-                                rx.text(State.t["settings_voice_id_hint"],
-                                        color="#666", font_size="10px", line_height="1.4"),
 
                                 spacing="2", align="stretch",
                             ),

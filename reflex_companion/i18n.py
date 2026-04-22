@@ -97,11 +97,33 @@ UI = {
         "settings_provider_label":  "Which service powers Ashley",
         "settings_provider_xai":    "xAI (Grok) — default, fastest setup",
         "settings_provider_openrouter": "OpenRouter — unlocks Claude, DeepSeek, GPT, Gemini...",
+        "settings_provider_ollama": "Ollama — 100% free & local, runs on your PC (no API key)",
         "settings_openrouter_key_label": "OpenRouter API key",
         "settings_openrouter_key_placeholder": "sk-or-...",
         "settings_openrouter_key_hint": "Get it at openrouter.ai → Settings → Keys. One key unlocks many models.",
         "settings_model_label":     "Model",
         "settings_model_hint":      "Different models have different personality, speed, and price. Pick one that fits your budget.",
+        "settings_ollama_detected": "Ollama detected ✓ — pick a model you've downloaded below",
+        "settings_ollama_missing":  "Ollama not detected — install it first to use this option",
+        "settings_ollama_install":  "Download Ollama from ollama.com (free), then run 'ollama pull llama3.2'",
+        "settings_ollama_refresh":  "🔄 Refresh local models",
+        "settings_ollama_no_models": "No models found — run 'ollama pull llama3.2' in terminal first",
+
+        # TTS Provider (new — multi-backend voice)
+        "settings_tts_heading":     "🎙️ Voice Provider (TTS)",
+        "settings_tts_label":       "Which engine voices Ashley",
+        "settings_tts_webspeech":   "Windows voice — free, robotic but instant",
+        "settings_tts_elevenlabs":  "ElevenLabs — premium, anime-quality (paid API)",
+        "settings_tts_kokoro":      "Kokoro — free, local, near-ElevenLabs quality (requires local server)",
+        "settings_tts_voicevox":    "VoiceVox — free, anime character voices (Japanese-focused)",
+        "settings_kokoro_url_label": "Kokoro server URL",
+        "settings_kokoro_url_hint": "Install Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) and run it locally.",
+        "settings_kokoro_voice_label": "Kokoro voice",
+        "settings_kokoro_voice_hint": "Common voices: af_bella, af_nicole, am_adam, bf_emma. See Kokoro docs.",
+        "settings_voicevox_url_label": "VoiceVox Engine URL",
+        "settings_voicevox_url_hint": "Install VoiceVox from voicevox.hiroshiba.jp and run the engine.",
+        "settings_voicevox_speaker_label": "VoiceVox speaker ID",
+        "settings_voicevox_speaker_hint": "Numeric ID (e.g. 1, 2, 3). See the VoiceVox Engine for full list.",
 
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
@@ -223,11 +245,33 @@ UI = {
         "settings_provider_label":  "Qué servicio mueve a Ashley",
         "settings_provider_xai":    "xAI (Grok) — default, setup instantáneo",
         "settings_provider_openrouter": "OpenRouter — desbloquea Claude, DeepSeek, GPT, Gemini...",
+        "settings_provider_ollama": "Ollama — 100% gratis y local, corre en tu PC (sin API key)",
         "settings_openrouter_key_label": "Clave de OpenRouter",
         "settings_openrouter_key_placeholder": "sk-or-...",
         "settings_openrouter_key_hint": "Sácala en openrouter.ai → Settings → Keys. Una sola clave abre muchos modelos.",
         "settings_model_label":     "Modelo",
         "settings_model_hint":      "Cada modelo tiene distinta personalidad, velocidad y precio. Elige el que te encaje.",
+        "settings_ollama_detected": "Ollama detectado ✓ — elige un modelo de los que tengas bajados",
+        "settings_ollama_missing":  "Ollama no detectado — instálalo primero para usar esta opción",
+        "settings_ollama_install":  "Descarga Ollama en ollama.com (gratis), luego ejecuta 'ollama pull llama3.2'",
+        "settings_ollama_refresh":  "🔄 Refrescar modelos locales",
+        "settings_ollama_no_models": "No hay modelos — ejecuta 'ollama pull llama3.2' en la terminal",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ Proveedor de voz (TTS)",
+        "settings_tts_label":       "Qué motor le pone voz a Ashley",
+        "settings_tts_webspeech":   "Voz de Windows — gratis, robótica pero instantánea",
+        "settings_tts_elevenlabs":  "ElevenLabs — premium, calidad anime (API de pago)",
+        "settings_tts_kokoro":      "Kokoro — gratis, local, calidad casi-ElevenLabs (requiere servidor local)",
+        "settings_tts_voicevox":    "VoiceVox — gratis, voces de personajes anime (enfocado al japonés)",
+        "settings_kokoro_url_label": "URL del servidor Kokoro",
+        "settings_kokoro_url_hint": "Instala Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) y lánzalo localmente.",
+        "settings_kokoro_voice_label": "Voz de Kokoro",
+        "settings_kokoro_voice_hint": "Voces comunes: af_bella, af_nicole, am_adam, bf_emma. Ver docs de Kokoro.",
+        "settings_voicevox_url_label": "URL del motor VoiceVox",
+        "settings_voicevox_url_hint": "Instala VoiceVox desde voicevox.hiroshiba.jp y arranca el motor.",
+        "settings_voicevox_speaker_label": "ID del speaker VoiceVox",
+        "settings_voicevox_speaker_hint": "ID numérico (p.ej. 1, 2, 3). Consulta el motor para la lista completa.",
 
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
@@ -346,11 +390,33 @@ UI = {
         "settings_provider_label":  "Quel service alimente Ashley",
         "settings_provider_xai":    "xAI (Grok) — défaut, setup instantané",
         "settings_provider_openrouter": "OpenRouter — débloque Claude, DeepSeek, GPT, Gemini...",
+        "settings_provider_ollama": "Ollama — 100% gratuit et local, tourne sur ton PC (sans clé API)",
         "settings_openrouter_key_label": "Clé OpenRouter",
         "settings_openrouter_key_placeholder": "sk-or-...",
         "settings_openrouter_key_hint": "Obtiens-la sur openrouter.ai → Settings → Keys. Une seule clé, plein de modèles.",
         "settings_model_label":     "Modèle",
         "settings_model_hint":      "Chaque modèle a sa personnalité, sa vitesse et son prix. Choisis celui qui te convient.",
+        "settings_ollama_detected": "Ollama détecté ✓ — choisis un modèle que tu as déjà téléchargé",
+        "settings_ollama_missing":  "Ollama non détecté — installe-le d'abord pour utiliser cette option",
+        "settings_ollama_install":  "Télécharge Ollama sur ollama.com (gratuit), puis lance 'ollama pull llama3.2'",
+        "settings_ollama_refresh":  "🔄 Rafraîchir les modèles locaux",
+        "settings_ollama_no_models": "Aucun modèle — lance 'ollama pull llama3.2' dans le terminal",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ Fournisseur voix (TTS)",
+        "settings_tts_label":       "Quel moteur donne sa voix à Ashley",
+        "settings_tts_webspeech":   "Voix de Windows — gratuit, robotique mais instantané",
+        "settings_tts_elevenlabs":  "ElevenLabs — premium, qualité anime (API payante)",
+        "settings_tts_kokoro":      "Kokoro — gratuit, local, qualité quasi-ElevenLabs (serveur local requis)",
+        "settings_tts_voicevox":    "VoiceVox — gratuit, voix de personnages anime (orienté japonais)",
+        "settings_kokoro_url_label": "URL du serveur Kokoro",
+        "settings_kokoro_url_hint": "Installe Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) et lance-le localement.",
+        "settings_kokoro_voice_label": "Voix Kokoro",
+        "settings_kokoro_voice_hint": "Voix courantes : af_bella, af_nicole, am_adam, bf_emma. Voir docs Kokoro.",
+        "settings_voicevox_url_label": "URL du moteur VoiceVox",
+        "settings_voicevox_url_hint": "Installe VoiceVox depuis voicevox.hiroshiba.jp et lance le moteur.",
+        "settings_voicevox_speaker_label": "ID du speaker VoiceVox",
+        "settings_voicevox_speaker_hint": "ID numérique (ex. 1, 2, 3). Voir le moteur VoiceVox pour la liste complète.",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
@@ -644,16 +710,23 @@ def save_language(lang: str) -> None:
 
 
 def load_voice_config() -> dict:
-    """Devuelve tts_enabled, elevenlabs_key, openai_key, voice_id, voice_mode,
-    notifications_enabled, llm_provider, openrouter_key, llm_model.
+    """Devuelve toda la config de voz + LLM del user.
 
     vision_enabled queda en archivos viejos pero se ignora (la feature se
     unificó bajo auto_actions).
 
-    NUEVOS CAMPOS (Ashley ahora soporta multi-provider LLM):
-      - llm_provider: "xai" (default, legacy) | "openrouter"
+    CAMPOS LLM (multi-provider, desde v0.11):
+      - llm_provider: "xai" | "openrouter" | "ollama"
       - openrouter_key: API key para OpenRouter (si provider=openrouter)
       - llm_model: modelo específico a usar (vacío = default del provider)
+
+    CAMPOS TTS (multi-backend, desde v0.12):
+      - voice_provider: "webspeech" (Windows free) | "elevenlabs" (premium)
+        | "kokoro" (local 100% free) | "voicevox" (anime/Japanese-focused)
+      - kokoro_url: URL del Kokoro-FastAPI local (user lo arranca aparte)
+      - kokoro_voice: ID de voz de Kokoro (p.ej. 'af_bella')
+      - voicevox_url: URL del VoiceVox Engine local
+      - voicevox_speaker: ID numérico del speaker de VoiceVox
     """
     from .memory import load_json
     default = {
@@ -662,15 +735,26 @@ def load_voice_config() -> dict:
         "openai_key": "",
         "voice_id": DEFAULT_VOICE_ID,
         "voice_mode": False,  # True = Ashley habla natural, sin *gestos*
-        "notifications_enabled": True,  # default ON — es uno de los diferenciadores
-        "llm_provider": "xai",  # default legacy — los users actuales siguen igual
+        "notifications_enabled": True,  # default ON — diferenciador clave
+        "llm_provider": "xai",
         "openrouter_key": "",
-        "llm_model": "",  # vacío = que el cliente elija default según provider
+        "llm_model": "",
+        # TTS multi-backend
+        "voice_provider": "webspeech",
+        "kokoro_url": "http://localhost:8880",
+        "kokoro_voice": "af_bella",
+        "voicevox_url": "http://localhost:50021",
+        "voicevox_speaker": "1",  # speaker ID como string para uniformar con inputs
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
         return default
     try:
+        # Back-compat: si el user tenía elevenlabs_key rellena y no existe
+        # voice_provider, lo inicializamos a "elevenlabs" para no romper su
+        # experiencia. Si no tenía key, queda en "webspeech".
+        legacy_has_eleven = bool(data.get("elevenlabs_key"))
+        default_voice_provider = "elevenlabs" if legacy_has_eleven else "webspeech"
         return {
             "tts_enabled": bool(data.get("tts_enabled", False)),
             "elevenlabs_key": str(data.get("elevenlabs_key", "")),
@@ -681,6 +765,11 @@ def load_voice_config() -> dict:
             "llm_provider": str(data.get("llm_provider", "xai")) or "xai",
             "openrouter_key": str(data.get("openrouter_key", "")),
             "llm_model": str(data.get("llm_model", "")),
+            "voice_provider": str(data.get("voice_provider", default_voice_provider)) or default_voice_provider,
+            "kokoro_url": str(data.get("kokoro_url", "http://localhost:8880")) or "http://localhost:8880",
+            "kokoro_voice": str(data.get("kokoro_voice", "af_bella")) or "af_bella",
+            "voicevox_url": str(data.get("voicevox_url", "http://localhost:50021")) or "http://localhost:50021",
+            "voicevox_speaker": str(data.get("voicevox_speaker", "1")) or "1",
         }
     except Exception:
         return default
@@ -691,7 +780,12 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       notifications_enabled: bool = True,
                       llm_provider: str = "xai",
                       openrouter_key: str = "",
-                      llm_model: str = "") -> None:
+                      llm_model: str = "",
+                      voice_provider: str = "webspeech",
+                      kokoro_url: str = "http://localhost:8880",
+                      kokoro_voice: str = "af_bella",
+                      voicevox_url: str = "http://localhost:50021",
+                      voicevox_speaker: str = "1") -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -707,6 +801,11 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "llm_provider": str(llm_provider or "xai"),
             "openrouter_key": str(openrouter_key or ""),
             "llm_model": str(llm_model or ""),
+            "voice_provider": str(voice_provider or "webspeech"),
+            "kokoro_url": str(kokoro_url or "http://localhost:8880"),
+            "kokoro_voice": str(kokoro_voice or "af_bella"),
+            "voicevox_url": str(voicevox_url or "http://localhost:50021"),
+            "voicevox_speaker": str(voicevox_speaker or "1"),
         })
     except Exception as e:
         import logging

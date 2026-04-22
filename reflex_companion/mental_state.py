@@ -377,9 +377,9 @@ def regenerate_preoccupation(
 
     try:
         # Dispatch según proveedor activo.
-        from .llm_provider import is_openrouter, openrouter_complete
-        if is_openrouter():
-            raw = openrouter_complete(
+        from .llm_provider import is_openai_compat, openai_compat_complete
+        if is_openai_compat():
+            raw = openai_compat_complete(
                 messages=[{"role": "user", "content": user_prompt, "image": ""}],
                 system_prompt=_PREOCCUPATION_SYSTEM.replace("{language}", reason_lang),
                 creative=True,
