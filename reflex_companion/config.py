@@ -8,6 +8,14 @@ XAI_API_KEY = os.getenv("XAI_API_KEY")
 #  Modelo
 # ─────────────────────────────────────────────
 
+# grok-4-1-fast-reasoning: modelo principal de Ashley. 2M contexto,
+# $0.20/$0.50 per 1M, reasoning antes de generar → mejor matiz en
+# respuestas complejas.
+# OJO: la familia grok-4-1-fast (reasoning o non-reasoning) NO soporta
+# frequency_penalty ni presence_penalty. La variante non-reasoning NO
+# aporta nada aquí: mismo problema con penalties + peor en reasoning.
+# Si en el futuro queremos penalties de forma nativa en el chat principal,
+# hay que cambiar a la familia grok-3 (grok-3-fast soporta penalties).
 GROK_MODEL = "grok-4-1-fast-reasoning"
 
 # ─────────────────────────────────────────────
@@ -42,6 +50,7 @@ DISCOVERY_FILE = _data_path("discovery_ashley.json")
 AFFECTION_FILE = _data_path("affection_ashley.json")
 LICENSE_FILE = _data_path("license.json")
 STATS_FILE = _data_path("stats_ashley.json")
+MENTAL_STATE_FILE = _data_path("mental_state_ashley.json")
 
 # ─────────────────────────────────────────────
 #  Licencia (Lemon Squeezy)

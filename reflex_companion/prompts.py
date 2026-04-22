@@ -30,6 +30,9 @@ def build_system_prompt(
     voice_mode: bool = False,
     affection: int = 50,
     lang: str = "en",
+    recap_warning: str | None = None,
+    mental_state_block: str | None = None,
+    topic_directive: str | None = None,
 ) -> str:
     return _impl(lang).build_system_prompt(
         facts=facts,
@@ -42,6 +45,9 @@ def build_system_prompt(
         tastes=tastes,
         voice_mode=voice_mode,
         affection=affection,
+        recap_warning=recap_warning,
+        mental_state_block=mental_state_block,
+        topic_directive=topic_directive,
     )
 
 

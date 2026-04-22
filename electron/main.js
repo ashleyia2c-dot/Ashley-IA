@@ -301,8 +301,55 @@ function killProcessesOnPort(port) {
   });
 }
 
+// ─── Sweep de zombies de Ashley (anti-crash-leftovers) ────────────────────
+//
+// killProcessesOnPort solo mata lo que está escuchando en los puertos base.
+// Pero si la sesión anterior usó puertos dinámicos (17311, 17812...) porque
+// los base estaban ocupados, Y LUEGO crasheó duro (BSOD, Task Manager kill,
+// apagón), esos procesos viven en puertos no-base y este check los pierde.
+//
+// Esta función es más agresiva: busca CUALQUIER proceso cuya línea de
+// comando contenga la ruta del proyecto Y sea python/node/bun/reflex.
+// Eso es una firma inequívoca de zombies de Ashley — procesos con ese
+// pedigree solo los lanza Reflex de este proyecto.
+//
+// Se ejecuta al arranque ANTES de pickReflexPorts, así garantizamos que
+// cada nueva sesión empieza con el PC limpio independientemente de cómo
+// terminó la anterior.
+function killStrayAshleyProcesses() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(0);
+    // PowerShell escape: backslashes dobles y comillas simples duplicadas.
+    const safePath = PROJECT_ROOT.replace(/\\/g, '\\\\').replace(/'/g, "''");
+    const psScript = [
+      "Get-CimInstance Win32_Process",
+      "| Where-Object { ($_.Name -match '^(python|node|bun|reflex)') -and ($_.CommandLine -like '*" + safePath + "*') }",
+      "| Where-Object { $_.ProcessId -ne " + process.pid + " }",
+      "| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $_.ProcessId } catch {} }",
+    ].join(' ');
+    exec(
+      `powershell -NoProfile -NonInteractive -Command "${psScript}"`,
+      { windowsHide: true, timeout: 8000 },
+      (err, stdout) => {
+        if (err) {
+          log(`killStrayAshleyProcesses err: ${err.message}`);
+          return resolve(0);
+        }
+        const killed = (stdout || '').trim().split(/\s+/).filter(Boolean);
+        if (killed.length) {
+          log(`Zombies de sesión previa exterminados: PIDs ${killed.join(', ')}`);
+        }
+        resolve(killed.length);
+      }
+    );
+  });
+}
+
 async function pickReflexPorts() {
-  // Primero intenta limpiar cualquier zombie en los puertos base
+  // Primero sweep amplio: mata cualquier proceso Ashley de una sesión anterior
+  // que haya sobrevivido a un crash (fuera del puerto base).
+  await killStrayAshleyProcesses();
+  // Luego limpia específicamente los puertos base (por si acaso)
   await killProcessesOnPort(FRONTEND_PORT_BASE);
   await killProcessesOnPort(BACKEND_PORT_BASE);
   // Pequeña espera para que Windows libere los sockets
@@ -753,17 +800,30 @@ function createMainWindow() {
 }
 
 // ─── Matar Reflex y arbol de procesos ─────────────────────────────────────
+//
+// Doble pasada para máxima robustez:
+//   1. taskkill /T /F sobre el PID conocido — mata el árbol directo.
+//   2. killStrayAshleyProcesses() — sweep por línea de comando que cacha
+//      procesos re-parenteados que taskkill /T se pierde (pasa en dev mode
+//      con hot reload: Reflex spawn varios workers que se desvinculan).
+//
+// Así garantizamos cero zombies incluso si Reflex spawn procesos que
+// perdieron a su padre por el camino.
 function killReflex() {
-  if (!reflexProcess || reflexProcess.killed) return;
-  const pid = reflexProcess.pid;
-  log(`Matando Reflex (pid=${pid}) y su árbol de procesos`);
-  if (process.platform === 'win32') {
-    exec(`taskkill /pid ${pid} /T /F`, (err) => {
-      if (err) log(`taskkill err: ${err.message}`);
-    });
-  } else {
-    try { reflexProcess.kill('SIGTERM'); } catch {}
+  const pid = reflexProcess && !reflexProcess.killed ? reflexProcess.pid : null;
+  if (pid) {
+    log(`Matando Reflex (pid=${pid}) y su árbol de procesos`);
+    if (process.platform === 'win32') {
+      exec(`taskkill /pid ${pid} /T /F`, { windowsHide: true }, (err) => {
+        if (err) log(`taskkill err: ${err.message}`);
+      });
+    } else {
+      try { reflexProcess.kill('SIGTERM'); } catch {}
+    }
   }
+  // Sweep amplio: cualquier python/node/bun de este proyecto que haya
+  // quedado suelto. Fire-and-forget (no await — el proceso está cerrando).
+  try { killStrayAshleyProcesses(); } catch {}
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────

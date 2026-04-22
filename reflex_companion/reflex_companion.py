@@ -24,6 +24,7 @@ from .memory import (
     extract_facts, generate_diary_entry,
 )
 from .prompts import build_system_prompt, build_initiative_prompt
+from .llm_provider import XAI_MODELS, OPENROUTER_MODELS
 from .parsing import (
     clean_display as _clean_display_fn,
     extract_mood as _extract_mood_fn,
@@ -90,6 +91,14 @@ class State(rx.State):
     elevenlabs_key: str = ""     # para TTS premium (opcional)
     voice_id: str = "EXAVITQu4vr4xnSDxMaL"  # "Sarah" — fallback si no hay config
     voice_mode: bool = False     # True = Ashley habla natural (sin *gestos*)
+
+    # ── LLM Provider (multi-provider) ──────────
+    # llm_provider = "xai" (default, legacy) | "openrouter"
+    # openrouter_key = la API key de OpenRouter si se usa ese provider
+    # llm_model = modelo específico (vacío = default del provider)
+    llm_provider: str = "xai"
+    openrouter_key: str = ""
+    llm_model: str = ""
 
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
@@ -289,6 +298,9 @@ class State(rx.State):
             self.tts_enabled, self.elevenlabs_key, self.voice_id,
             voice_mode=self.voice_mode,
             notifications_enabled=self.notifications_enabled,
+            llm_provider=self.llm_provider,
+            openrouter_key=self.openrouter_key,
+            llm_model=self.llm_model,
         )
 
     def toggle_tts(self):
@@ -320,6 +332,45 @@ class State(rx.State):
     def set_voice_id(self, voice_id: str):
         self.voice_id = (voice_id or "").strip() or "EXAVITQu4vr4xnSDxMaL"
         self._persist_voice()
+
+    # ─────────────────────────────────────────
+    #  LLM Provider handlers (multi-provider)
+    # ─────────────────────────────────────────
+
+    def set_llm_provider(self, provider: str):
+        """'xai' | 'openrouter'. Cambia qué servicio usa Ashley."""
+        p = (provider or "xai").strip().lower()
+        if p not in ("xai", "openrouter"):
+            p = "xai"
+        self.llm_provider = p
+        # Al cambiar de provider, resetear el modelo para que use el default
+        # del nuevo provider — evita intentar usar un modelo de xAI contra
+        # OpenRouter o viceversa.
+        self.llm_model = ""
+        self._persist_voice()
+
+    def set_openrouter_key(self, key: str):
+        self.openrouter_key = (key or "").strip()
+        self._persist_voice()
+
+    def set_llm_model(self, model: str):
+        """Modelo específico (debe corresponderse al provider activo)."""
+        self.llm_model = (model or "").strip()
+        self._persist_voice()
+
+    @rx.var
+    def llm_model_display(self) -> str:
+        """Modelo actual para mostrar en UI (muestra default si está vacío)."""
+        from .llm_provider import XAI_MODELS, OPENROUTER_MODELS
+        if self.llm_model:
+            return self.llm_model
+        if self.llm_provider == "openrouter":
+            return OPENROUTER_MODELS[0][0] + " (default)"
+        return XAI_MODELS[0][0] + " (default)"
+
+    @rx.var
+    def is_openrouter_provider(self) -> bool:
+        return self.llm_provider == "openrouter"
 
     @rx.var
     def tts_marker_attr(self) -> str:
@@ -458,6 +509,10 @@ class State(rx.State):
         self.voice_mode = vcfg.get("voice_mode", False)
         # notifications: default True si no está en config (feature nueva)
         self.notifications_enabled = vcfg.get("notifications_enabled", True)
+        # LLM provider config (feature nueva — default xai por retrocompat)
+        self.llm_provider = vcfg.get("llm_provider", "xai") or "xai"
+        self.openrouter_key = vcfg.get("openrouter_key", "") or ""
+        self.llm_model = vcfg.get("llm_model", "") or ""
         # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
         # Si voice.json viejo trae la key, la ignoramos silenciosamente.
         # Warmup del modelo Whisper en background (no bloquea la UI)
@@ -1024,6 +1079,19 @@ class State(rx.State):
             import logging
             logging.getLogger("ashley").warning("loading tastes: %s", _e)
 
+        # Directiva de compartir-tema: si el user acaba de compartir algo
+        # sustancial (≥30 chars), se inyecta un bloque de alta prioridad
+        # forzando a Ashley a tomar postura propia con razón. Mecanismo
+        # runtime — vence a la inercia del eco-elaborado.
+        topic_directive = None
+        if user_message:
+            try:
+                from .topic_share import compute_directive_if_needed
+                topic_directive = compute_directive_if_needed(user_message, self.language)
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("topic_share detection failed: %s", _e)
+
         return {
             "time_context": time_context,
             "system_state": system_state,
@@ -1034,7 +1102,120 @@ class State(rx.State):
             "voice_mode": self.voice_mode,
             "affection": self.affection,
             "lang": self.language,
+            "recap_warning": self._detect_recap_warning(),
+            "mental_state_block": self._compute_mental_state_block(user_message),
+            "topic_directive": topic_directive,
         }
+
+    def _detect_recap_warning(self) -> str | None:
+        """
+        Detecta si Ashley lleva repitiendo el mismo tema en sus últimos
+        mensajes (patrón recap-tic) y devuelve un bloque de aviso para
+        inyectar al prompt. None si no detecta el patrón.
+
+        Es un mecanismo runtime que vence al in-context learning del
+        historial — sin esto, una vez que Ashley empieza a repetir un
+        tema lo reproduce en todos los mensajes aunque el prompt lo
+        prohíba. La instrucción dinámica con las palabras concretas
+        pisa la inercia.
+        """
+        try:
+            from .recap_detector import detect_recap_topics, format_recap_warning
+            msgs = [
+                {"role": m.get("role"), "content": m.get("content") or ""}
+                for m in self.messages
+            ]
+            repeated = detect_recap_topics(msgs)
+            if not repeated:
+                return None
+            return format_recap_warning(repeated, self.language)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("recap detector failed: %s", _e)
+            return None
+
+    def _minutes_since_previous_user_msg(self) -> float | None:
+        """Devuelve cuántos minutos han pasado entre el mensaje del user
+        actual (el último en self.messages) y el anterior del user.
+        None si no hay mensaje anterior o timestamps inválidos.
+        """
+        if len(self.messages) < 2:
+            return None
+        try:
+            current_ts = self.messages[-1].get("timestamp")
+            if not current_ts:
+                return None
+            cur = datetime.fromisoformat(current_ts)
+            for m in reversed(self.messages[:-1]):
+                if m.get("role") == "user":
+                    prev_ts = m.get("timestamp")
+                    if not prev_ts:
+                        return None
+                    prev = datetime.fromisoformat(prev_ts)
+                    return max(0.0, (cur - prev).total_seconds() / 60.0)
+            return None
+        except Exception:
+            return None
+
+    def _compute_mental_state_block(self, user_message: str) -> str | None:
+        """Actualiza el estado mental persistente de Ashley y devuelve el
+        bloque de prompt a inyectar.
+
+        Si se llama con user_message no vacío → update completo (events,
+        mood, maybe regen preoccupation, tick initiative counter).
+        Si se llama sin user_message (initiative/discovery) → solo lee +
+        regenera preoccupation si está vieja, sin tocar mood ni counter.
+
+        Fail-safe: cualquier error devuelve None y se loguea. Nunca
+        bloquea el flujo principal.
+        """
+        try:
+            from . import mental_state as _ms
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("mental_state import failed: %s", _e)
+            return None
+
+        try:
+            state = _ms.load_state()
+            minutes_since = self._minutes_since_previous_user_msg() if user_message else None
+            initiative_due = False
+
+            if user_message:
+                # Reconciliación de gap largo (drift del mood hacia neutral)
+                if minutes_since is not None and minutes_since >= _ms.LONG_GAP_MINUTES:
+                    _ms.drift_mood_on_gap(state, minutes_since)
+
+                # Eventos del user → delta de mood
+                events = _ms.classify_user_event(user_message, minutes_since)
+                _ms.apply_events_to_mood(state, events)
+
+                # Regenerar preoccupation si está vieja o hay gap
+                if _ms.should_regenerate_preoccupation(state) or (
+                    minutes_since is not None and minutes_since >= _ms.LONG_GAP_MINUTES
+                ):
+                    gap_ctx = _ms.compute_gap_context(minutes_since, self.language)
+                    _ms.regenerate_preoccupation(
+                        state, self.messages, self.facts, self.language, gap_ctx
+                    )
+
+                # Contador de iniciativa
+                initiative_due = _ms.tick_initiative_counter(state)
+            else:
+                # Read-only path: solo asegurar que la preoccupation no esté
+                # ancestral. No tocar mood ni counter.
+                if _ms.should_regenerate_preoccupation(state):
+                    _ms.regenerate_preoccupation(
+                        state, self.messages, self.facts, self.language, None
+                    )
+
+            state["last_update"] = datetime.now().isoformat()
+            _ms.save_state(state)
+            return _ms.format_mental_state_block(state, self.language, initiative_due)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("mental state compute failed: %s", _e)
+            return None
 
     def _build_time_context(self) -> str:
         """
@@ -1169,6 +1350,19 @@ class State(rx.State):
             "image": "",
         }
         messages_for_llm = list(self.messages)
+
+        # ── Compresión de historial contra in-context repetition ─────────
+        # Cuando el historial crece, los últimos N mensajes de Ashley forman
+        # un patrón que Grok copia (dice "SQL" porque se dijo "SQL"). Al
+        # resumir lo antiguo en UN mensaje de sistema y mantener solo lo
+        # reciente raw, cortamos la inercia. Cache interno en disco.
+        try:
+            from .context_compression import compress_history
+            messages_for_llm = compress_history(messages_for_llm, self.language)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("context compression failed: %s", _e)
+
         # Insertar ANTES del último mensaje (que es el del usuario)
         messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _time_inject_msg)
 
@@ -1797,8 +1991,8 @@ class State(rx.State):
                             "REACT LIKE A CURIOUS FRIEND, NOT A SURVEILLANCE SYSTEM:\n"
                             "- NEVER enumerate the open windows. Pick ONE thing that catches your attention — ideally something about what he's DOING or FEELING, not what software he's using.\n"
                             "- NEVER offer services (\"want me to close X?\"). This is a moment, not a service call.\n"
-                            "- Ask about HIM, not about his tools. What is that YouTuber streaming about? Is this a new hobby? Why is he up so late working on this?\n"
-                            "- Use any visual context as background, not as headline. If the Excel is called 'eval V3', that's a callback you can weave in casually (\"how's eval V3 going?\"), NOT something you narrate you saw.\n"
+                            "- Ask about HIM, not about his tools. One genuine question, optional.\n"
+                            "- Use any visual context as BACKGROUND, not as HEADLINE. Specific file names, titles, or content on screen can optionally appear as a casual callback — never as a narration of what you saw.\n"
                             "- Max 1-2 sentences. Friend voice, not report voice.\n"
                             "- Reference only apps/tabs that appear in the VERIFIED list above (don't hallucinate).\n"
                             "- If nothing genuinely catches your eye — just a normal desktop, nothing interesting — respond ONLY '[mood:default]' with NO text. Silence is fine. Don't force commentary."
@@ -1811,8 +2005,8 @@ class State(rx.State):
                             "RÉAGIS COMME UNE AMIE CURIEUSE, PAS COMME UN SYSTÈME DE SURVEILLANCE :\n"
                             "- N'ÉNUMÈRE JAMAIS les fenêtres ouvertes. Choisis UNE chose qui attire ton attention — idéalement quelque chose sur ce qu'il FAIT ou RESSENT, pas sur le logiciel.\n"
                             "- N'OFFRE JAMAIS des services (\"tu veux que je ferme X ?\"). C'est un moment, pas un appel service.\n"
-                            "- Pose des questions sur LUI, pas sur ses outils. De quoi parle ce streamer ? C'est un nouveau hobby ? Pourquoi est-il encore en train de travailler là-dessus si tard ?\n"
-                            "- Utilise le contexte visuel comme background, pas comme headline. Si l'Excel s'appelle 'eval V3', c'est un rappel que tu peux tisser au passage (\"ça avance eval V3 ?\"), PAS quelque chose que tu narres avoir vu.\n"
+                            "- Pose des questions sur LUI, pas sur ses outils. Une question sincère unique, optionnelle.\n"
+                            "- Utilise le contexte visuel comme BACKGROUND, pas comme HEADLINE. Des noms de fichiers, titres ou contenus spécifiques à l'écran peuvent éventuellement apparaître en rappel discret — jamais comme narration de ce que tu as vu.\n"
                             "- Max 1-2 phrases. Voix d'amie, pas voix de rapport.\n"
                             "- Ne mentionne que les apps/onglets qui apparaissent dans la liste VÉRIFIÉE ci-dessus (n'invente rien).\n"
                             "- Si rien n'attire vraiment ton œil — juste un bureau normal, rien d'intéressant — réponds UNIQUEMENT '[mood:default]' sans texte. Le silence est ok. Ne force pas de commentaire."
@@ -1825,8 +2019,8 @@ class State(rx.State):
                             "REACCIONA COMO UNA AMIGA CURIOSA, NO COMO UN SISTEMA DE VIGILANCIA:\n"
                             "- JAMÁS enumeres las ventanas abiertas. Elige UNA cosa que te llame la atención — idealmente algo sobre lo que ESTÁ HACIENDO o SINTIENDO, no sobre qué software usa.\n"
                             "- JAMÁS ofrezcas servicios (\"¿quieres que cierre X?\"). Esto es un momento, no una llamada de servicio.\n"
-                            "- Pregunta sobre ÉL, no sobre sus herramientas. ¿De qué habla ese streamer? ¿Es un hobby nuevo? ¿Por qué sigue tan tarde con eso?\n"
-                            "- Usa el contexto visual como background, no como headline. Si el Excel se llama 'eval V3', eso es un callback que puedes tejer casual (\"¿cómo va eval V3?\"), NO algo que narras haber visto.\n"
+                            "- Pregunta sobre ÉL, no sobre sus herramientas. Una pregunta sincera única, opcional.\n"
+                            "- Usa el contexto visual como BACKGROUND, no como HEADLINE. Nombres de archivos, títulos o contenidos específicos en pantalla pueden aparecer opcionalmente como callback casual — nunca como narración de lo que viste.\n"
                             "- Máximo 1-2 frases. Voz de amiga, no voz de reporte.\n"
                             "- Solo menciona apps/pestañas que aparezcan en la lista VERIFICADA de arriba (no alucines).\n"
                             "- Si nada genuinamente te llama la atención — solo escritorio normal, nada interesante — responde SOLO '[mood:default]' sin texto. El silencio está bien. No fuerces comentario."
@@ -2606,6 +2800,96 @@ def index():
                             padding="14px 16px",
                             bg="rgba(255,154,238,0.05)",
                             border="1px solid rgba(255,154,238,0.2)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
+                        #  LLM PROVIDER — Elige xAI o OpenRouter (multi-model)
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.text(State.t["settings_provider_heading"],
+                                        color="#9acaff", font_weight="700", font_size="14px",
+                                        letter_spacing="0.05em"),
+                                rx.text(State.t["settings_provider_label"],
+                                        color="#ddd", font_size="13px", font_weight="500"),
+
+                                # Radio selector: xAI vs OpenRouter
+                                rx.radio(
+                                    ["xai", "openrouter"],
+                                    value=State.llm_provider,
+                                    on_change=State.set_llm_provider,
+                                    direction="column",
+                                    size="2",
+                                ),
+                                rx.cond(
+                                    State.is_openrouter_provider,
+                                    rx.text(State.t["settings_provider_openrouter"],
+                                            color="#9acaff", font_size="11px", font_style="italic"),
+                                    rx.text(State.t["settings_provider_xai"],
+                                            color="#ccc", font_size="11px", font_style="italic"),
+                                ),
+
+                                # Si OpenRouter: pedir la key + model picker
+                                rx.cond(
+                                    State.is_openrouter_provider,
+                                    rx.vstack(
+                                        rx.text(State.t["settings_openrouter_key_label"],
+                                                color="#ddd", font_size="12px", font_weight="500",
+                                                margin_top="8px"),
+                                        rx.input(
+                                            placeholder=State.t["settings_openrouter_key_placeholder"],
+                                            value=State.openrouter_key,
+                                            on_change=State.set_openrouter_key,
+                                            type="password",
+                                            bg="rgba(255,255,255,0.04)",
+                                            color="white",
+                                            border="1px solid rgba(255,255,255,0.12)",
+                                            border_radius="8px",
+                                            padding="8px 10px",
+                                            font_size="12px",
+                                            width="100%",
+                                            font_family="'JetBrains Mono', 'Consolas', monospace",
+                                        ),
+                                        rx.text(State.t["settings_openrouter_key_hint"],
+                                                color="#888", font_size="10px", line_height="1.4"),
+
+                                        rx.text(State.t["settings_model_label"],
+                                                color="#ddd", font_size="12px", font_weight="500",
+                                                margin_top="8px"),
+                                        rx.select(
+                                            [m[0] for m in OPENROUTER_MODELS],
+                                            value=State.llm_model_display,
+                                            on_change=State.set_llm_model,
+                                            size="2",
+                                            width="100%",
+                                        ),
+                                        rx.text(State.t["settings_model_hint"],
+                                                color="#888", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
+                                    ),
+                                    rx.vstack(
+                                        rx.text(State.t["settings_model_label"],
+                                                color="#ddd", font_size="12px", font_weight="500",
+                                                margin_top="8px"),
+                                        rx.select(
+                                            [m[0] for m in XAI_MODELS],
+                                            value=State.llm_model_display,
+                                            on_change=State.set_llm_model,
+                                            size="2",
+                                            width="100%",
+                                        ),
+                                        rx.text(State.t["settings_model_hint"],
+                                                color="#888", font_size="10px", line_height="1.4"),
+                                        spacing="1", align="stretch", width="100%",
+                                    ),
+                                ),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(154,202,255,0.05)",
+                            border="1px solid rgba(154,202,255,0.2)",
                             border_radius="10px",
                             width="100%",
                         ),

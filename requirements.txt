@@ -6,3 +6,4 @@ pyperclip
 pycaw
 comtypes
 requests
+openai>=1.50.0

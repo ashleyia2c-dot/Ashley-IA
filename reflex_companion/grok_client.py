@@ -24,6 +24,71 @@ _log = logging.getLogger("ashley.grok")
 
 
 # ─────────────────────────────────────────────
+#  Sampling params por defecto
+# ─────────────────────────────────────────────
+#
+# frequency_penalty y presence_penalty son el mecanismo estándar de la
+# industria contra la repetición de tokens/temas. La API de xAI los
+# acepta (son compatibles con la spec OpenAI).
+#
+#   frequency_penalty (0–2): penaliza tokens proporcionalmente a cuántas
+#     veces aparecen en el contexto. Más alto = menos repetición literal.
+#   presence_penalty  (0–2): penalización binaria si un token apareció.
+#     Más alto = empuja a introducir conceptos nuevos.
+#
+# Valores conservadores recomendados por OpenAI: frequency 0.5, presence 0.3.
+# Los usamos en llamadas conversacionales/creativas (stream_response,
+# grok_call, y la preoccupation del mental_state). NO los usamos en
+# detect_intended_action — esa función quiere tag determinista, sin
+# variabilidad.
+CHAT_FREQUENCY_PENALTY = 0.5
+CHAT_PRESENCE_PENALTY = 0.3
+
+
+def _model_supports_penalties(model_name: str) -> bool:
+    """Modelos de xAI que NO aceptan frequency_penalty / presence_penalty.
+    Si pasamos estos params a estos modelos → 400 INVALID_ARGUMENT.
+
+    Basado en doc de xAI + errores empíricos observados:
+      • Todos los *-reasoning (grok-4-1-fast-reasoning, grok-4.20-*-reasoning):
+        reasoning mode no acepta penalties.
+      • TODA la familia grok-4-1-fast (reasoning o non-reasoning):
+        el 'fast' family de 4.1 elimina penalty support para optimizar
+        latencia. Así lo confirmó el servidor con un 400 en runtime aun
+        con la variante non-reasoning.
+
+    Soportan (según testeo):
+      • grok-3, grok-3-fast, grok-3-mini y sus -mini variants
+      • grok-4 estándar (no fast)
+      • grok-4.20-*-non-reasoning (probablemente — no testeado)
+
+    Ante duda, preferimos falso (no enviar penalties) — un falso negativo
+    solo nos cuesta un poco de diversidad léxica; un falso positivo
+    rompe el request entero con un 400.
+    """
+    name = (model_name or "").lower()
+    # Reasoning mode nunca soporta — ojo con "non-reasoning" que contiene "reasoning"
+    if name.endswith("-reasoning") and not name.endswith("non-reasoning"):
+        return False
+    # La familia grok-4-1-fast rechaza penalties incluso en non-reasoning
+    if name.startswith("grok-4-1-fast") or name.startswith("grok-4.1-fast"):
+        return False
+    return True
+
+
+def _chat_create(client, **kwargs):
+    """Wrapper sobre client.chat.create que añade los penalties de
+    conversación por defecto — SOLO si el modelo los soporta. Si el
+    modelo es tipo 'reasoning', se omiten silenciosamente.
+    """
+    model_name = kwargs.get("model") or ""
+    if _model_supports_penalties(model_name):
+        kwargs.setdefault("frequency_penalty", CHAT_FREQUENCY_PENALTY)
+        kwargs.setdefault("presence_penalty", CHAT_PRESENCE_PENALTY)
+    return client.chat.create(**kwargs)
+
+
+# ─────────────────────────────────────────────
 #  Retry helper
 # ─────────────────────────────────────────────
 
@@ -84,13 +149,19 @@ def _with_retry(fn, *args, max_attempts: int = 3, base_delay: float = 1.0, **kwa
 # ─────────────────────────────────────────────
 
 def grok_call(system_text: str, user_text: str) -> str:
-    """Llamada simple a Grok, sin streaming. Con retries automáticos."""
-    from xai_sdk import Client
-    from xai_sdk.chat import system, user as xai_user
+    """Llamada simple al LLM activo, sin streaming. Con retries automáticos.
+    Dispatcha a xAI directo o a OpenRouter según la config del user.
+    Nombre 'grok_call' se mantiene por backward compat histórica."""
+    from .llm_provider import is_openrouter, openrouter_simple
 
     def _once():
+        if is_openrouter():
+            return openrouter_simple(system_text, user_text, creative=True)
+        # Path xAI directo (legacy)
+        from xai_sdk import Client
+        from xai_sdk.chat import system, user as xai_user
         client = Client(api_key=XAI_API_KEY)
-        chat = client.chat.create(model=GROK_MODEL)
+        chat = _chat_create(client, model=GROK_MODEL)
         chat.append(system(system_text))
         chat.append(xai_user(user_text))
         result = chat.sample()
@@ -169,12 +240,23 @@ Usuario: "qué hora es?"                  →  NONE"""
     user_text = f"Mensaje del usuario: {user_message}\n\nRespuesta de Ashley: {ashley_response}"
 
     def _once():
-        client = Client(api_key=XAI_API_KEY)
-        chat = client.chat.create(model=_FAST_MODEL)
-        chat.append(system(system_text))
-        chat.append(xai_user(user_text))
-        result = chat.sample()
-        raw = (result.content if hasattr(result, "content") else str(result)).strip()
+        from .llm_provider import is_openrouter, openrouter_complete
+        if is_openrouter():
+            # En OpenRouter siempre usamos el MISMO modelo del user (no un
+            # modelo "fast" separado). Queremos output determinista para
+            # detectar tags, sin penalties.
+            raw = openrouter_complete(
+                messages=[{"role": "user", "content": user_text, "image": ""}],
+                system_prompt=system_text,
+                creative=False,
+            ).strip()
+        else:
+            client = Client(api_key=XAI_API_KEY)
+            chat = client.chat.create(model=_FAST_MODEL)
+            chat.append(system(system_text))
+            chat.append(xai_user(user_text))
+            result = chat.sample()
+            raw = (result.content if hasattr(result, "content") else str(result)).strip()
         if raw.startswith("[action:") and raw.endswith("]"):
             return raw
         return None
@@ -210,6 +292,21 @@ def stream_response(
     propagamos la excepción — no podemos rebobinar tokens que ya vio el
     user en la UI.
     """
+    from .llm_provider import is_openrouter, openrouter_stream
+
+    # Si el user usa OpenRouter → path OpenAI-compatible. Sin web_search
+    # (no soportado en ese path) y sin el formato xai_sdk.
+    if is_openrouter():
+        # Retry de apertura manejado implícitamente por openrouter_stream
+        # (aunque si falla mid-stream también propaga, igual que xAI).
+        try:
+            yield from openrouter_stream(messages, system_prompt, trigger=trigger)
+        except Exception as e:
+            _log.warning("openrouter_stream failed, propagating: %s", e)
+            raise
+        return
+
+    # Path xAI directo (legacy)
     from xai_sdk import Client
     from xai_sdk.chat import system, user as xai_user, assistant, image as xai_image
     from xai_sdk.tools import web_search
@@ -218,7 +315,11 @@ def stream_response(
         """Prepara el chat y devuelve el iterador de chunks de Grok."""
         tools = [web_search()] if use_web_search else []
         client = Client(api_key=XAI_API_KEY)
-        chat = client.chat.create(model=GROK_MODEL, tools=tools if tools else None)
+        chat = _chat_create(
+            client,
+            model=GROK_MODEL,
+            tools=tools if tools else None,
+        )
         chat.append(system(system_prompt))
         for msg in messages:
             if msg["role"] == "user":

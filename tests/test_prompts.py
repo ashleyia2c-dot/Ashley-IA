@@ -104,20 +104,20 @@ def test_system_state_injected_english():
     """system_state parameter text appears in the English prompt."""
     result = build_system_prompt([], [], system_state="Open windows: Notepad", lang="en")
     assert "Open windows: Notepad" in result
-    assert "SYSTEM STATE" in result
+    assert "WHAT YOU CAN SEE OVER HIS SHOULDER" in result
 
 
 def test_system_state_injected_spanish():
     """system_state parameter text appears in the Spanish prompt."""
     result = build_system_prompt([], [], system_state="Ventanas abiertas: Bloc de notas", lang="es")
     assert "Ventanas abiertas: Bloc de notas" in result
-    assert "ESTADO DEL SISTEMA" in result
+    assert "LO QUE ALCANZAS A VER DE SU LADO" in result
 
 
 def test_system_state_absent_when_none():
-    """When system_state is None, no SYSTEM STATE section header appears."""
+    """When system_state is None, no peripheral-awareness header appears."""
     result = build_system_prompt([], [], system_state=None, lang="en")
-    assert "=== SYSTEM STATE (updated now) ===" not in result
+    assert "WHAT YOU CAN SEE OVER HIS SHOULDER" not in result
 
 
 # ── time_context injection ───────────────────────────────────────────────────

@@ -56,15 +56,29 @@ _ASHLEY_FAKE_HINTS = (
 # ─────────────────────────────────────────────
 
 def clean_display(text: str) -> str:
-    """Elimina tags [mood:...], [action:...] y [affection:...] del texto para mostrarlo al usuario."""
+    """Elimina tags [mood:...], [action:...] y [affection:...] del texto para mostrarlo al usuario.
+
+    Defensivo contra None, ints, objetos — si algún path llama con valor
+    no-string, no crasheamos (silently coerce). None → "".
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:
+            return ""
     # Elimina tags completos en cualquier posición (case insensitive por seguridad)
     text = re.sub(r'\[(?:mood|action|affection):[^\]]*\]', '', text, flags=re.IGNORECASE)
     # Elimina tag parcial al final (durante streaming)
     text = re.sub(r'\[(?:mood|action|affection)[^\]]*$', '', text, flags=re.IGNORECASE)
     # Captura variantes extra: a veces el LLM añade espacios o mayúsculas
     text = re.sub(r'\[\s*affection\s*:\s*[^\]]*\]', '', text, flags=re.IGNORECASE)
-    # Elimina "undefined" suelto (renderizado roto de Reflex)
-    text = re.sub(r'\bundefined\b', '', text)
+    # Elimina "undefined" suelto (renderizado roto de Reflex) — cubre casos
+    # con variaciones de capitalización y también cuando aparece pegado a
+    # puntuación sin whitespace (ej. "frase.undefined").
+    text = re.sub(r'(?:\s|^)undefined(?:\s|$|[\.\!\?\,\;])', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bundefined\b', '', text, flags=re.IGNORECASE)
     # Elimina líneas vacías consecutivas que quedan tras limpiar tags
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()

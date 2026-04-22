@@ -92,6 +92,17 @@ UI = {
         "settings_grok_consequence": "Without this, Ashley can't think or respond to you.",
         "settings_grok_hint":       "This is set up during installation. To change it, reinstall Ashley.",
 
+        # LLM Provider (new — multi-provider support)
+        "settings_provider_heading": "🧠 LLM Provider",
+        "settings_provider_label":  "Which service powers Ashley",
+        "settings_provider_xai":    "xAI (Grok) — default, fastest setup",
+        "settings_provider_openrouter": "OpenRouter — unlocks Claude, DeepSeek, GPT, Gemini...",
+        "settings_openrouter_key_label": "OpenRouter API key",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "Get it at openrouter.ai → Settings → Keys. One key unlocks many models.",
+        "settings_model_label":     "Model",
+        "settings_model_hint":      "Different models have different personality, speed, and price. Pick one that fits your budget.",
+
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
         "settings_elevenlabs_placeholder": "sk_... (leave empty to use free voice)",
@@ -208,6 +219,16 @@ UI = {
         "settings_grok_consequence": "Sin esto, Ashley no puede pensar ni responderte.",
         "settings_grok_hint":       "Se configura durante la instalación. Para cambiarla, reinstala Ashley.",
 
+        "settings_provider_heading": "🧠 Proveedor de IA",
+        "settings_provider_label":  "Qué servicio mueve a Ashley",
+        "settings_provider_xai":    "xAI (Grok) — default, setup instantáneo",
+        "settings_provider_openrouter": "OpenRouter — desbloquea Claude, DeepSeek, GPT, Gemini...",
+        "settings_openrouter_key_label": "Clave de OpenRouter",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "Sácala en openrouter.ai → Settings → Keys. Una sola clave abre muchos modelos.",
+        "settings_model_label":     "Modelo",
+        "settings_model_hint":      "Cada modelo tiene distinta personalidad, velocidad y precio. Elige el que te encaje.",
+
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
         "settings_elevenlabs_hint": "Consigue tu clave en elevenlabs.io → Profile → API Keys. Se guarda solo en tu equipo.",
@@ -320,6 +341,16 @@ UI = {
         "settings_grok_missing":    "Non configurée — Ashley ne peut pas répondre tant que tu ne la mets pas.",
         "settings_grok_consequence": "Sans ça, Ashley ne peut pas penser ni te répondre.",
         "settings_grok_hint":       "Configurée pendant l'installation. Pour la changer, réinstalle Ashley.",
+
+        "settings_provider_heading": "🧠 Fournisseur IA",
+        "settings_provider_label":  "Quel service alimente Ashley",
+        "settings_provider_xai":    "xAI (Grok) — défaut, setup instantané",
+        "settings_provider_openrouter": "OpenRouter — débloque Claude, DeepSeek, GPT, Gemini...",
+        "settings_openrouter_key_label": "Clé OpenRouter",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "Obtiens-la sur openrouter.ai → Settings → Keys. Une seule clé, plein de modèles.",
+        "settings_model_label":     "Modèle",
+        "settings_model_hint":      "Chaque modèle a sa personnalité, sa vitesse et son prix. Choisis celui qui te convient.",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
@@ -614,8 +645,16 @@ def save_language(lang: str) -> None:
 
 def load_voice_config() -> dict:
     """Devuelve tts_enabled, elevenlabs_key, openai_key, voice_id, voice_mode,
-    notifications_enabled. vision_enabled queda en archivos viejos pero se
-    ignora (la feature se unificó bajo auto_actions)."""
+    notifications_enabled, llm_provider, openrouter_key, llm_model.
+
+    vision_enabled queda en archivos viejos pero se ignora (la feature se
+    unificó bajo auto_actions).
+
+    NUEVOS CAMPOS (Ashley ahora soporta multi-provider LLM):
+      - llm_provider: "xai" (default, legacy) | "openrouter"
+      - openrouter_key: API key para OpenRouter (si provider=openrouter)
+      - llm_model: modelo específico a usar (vacío = default del provider)
+    """
     from .memory import load_json
     default = {
         "tts_enabled": False,
@@ -624,6 +663,9 @@ def load_voice_config() -> dict:
         "voice_id": DEFAULT_VOICE_ID,
         "voice_mode": False,  # True = Ashley habla natural, sin *gestos*
         "notifications_enabled": True,  # default ON — es uno de los diferenciadores
+        "llm_provider": "xai",  # default legacy — los users actuales siguen igual
+        "openrouter_key": "",
+        "llm_model": "",  # vacío = que el cliente elija default según provider
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -636,6 +678,9 @@ def load_voice_config() -> dict:
             "voice_id": str(data.get("voice_id", DEFAULT_VOICE_ID)) or DEFAULT_VOICE_ID,
             "voice_mode": bool(data.get("voice_mode", False)),
             "notifications_enabled": bool(data.get("notifications_enabled", True)),
+            "llm_provider": str(data.get("llm_provider", "xai")) or "xai",
+            "openrouter_key": str(data.get("openrouter_key", "")),
+            "llm_model": str(data.get("llm_model", "")),
         }
     except Exception:
         return default
@@ -643,7 +688,10 @@ def load_voice_config() -> dict:
 
 def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       openai_key: str = "", voice_mode: bool = False,
-                      notifications_enabled: bool = True) -> None:
+                      notifications_enabled: bool = True,
+                      llm_provider: str = "xai",
+                      openrouter_key: str = "",
+                      llm_model: str = "") -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -656,6 +704,9 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "voice_id": str(voice_id or DEFAULT_VOICE_ID),
             "voice_mode": bool(voice_mode),
             "notifications_enabled": bool(notifications_enabled),
+            "llm_provider": str(llm_provider or "xai"),
+            "openrouter_key": str(openrouter_key or ""),
+            "llm_model": str(llm_model or ""),
         })
     except Exception as e:
         import logging
