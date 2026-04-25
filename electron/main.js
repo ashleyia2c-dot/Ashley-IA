@@ -994,12 +994,27 @@ function killReflex() {
   const frontendPid = frontendProcess && !frontendProcess.killed ? frontendProcess.pid : null;
   const pidsToKill = [backendPid, frontendPid].filter(Boolean);
 
+  // CRÍTICO: cuando Electron está cerrándose para hacer auto-update,
+  // tiene MUY POCOS milisegundos antes de morir. Si usamos exec()
+  // async, los hijos pueden quedar huérfanos cuando Ashley.exe ya se
+  // cerró, y el installer NSIS encuentra archivos lockeados.
+  //
+  // Por eso aquí usamos execSync (bloqueante) — garantiza que los
+  // procesos hijos están MUERTOS antes de que Electron salga.
+  const { execSync } = require('child_process');
+
   for (const pid of pidsToKill) {
     log(`Matando proceso (pid=${pid}) y su árbol`);
     if (process.platform === 'win32') {
-      exec(`taskkill /pid ${pid} /T /F`, { windowsHide: true }, (err) => {
-        if (err) log(`taskkill err: ${err.message}`);
-      });
+      try {
+        execSync(`taskkill /pid ${pid} /T /F`, {
+          windowsHide: true,
+          timeout: 3000,
+          stdio: 'ignore',
+        });
+      } catch (err) {
+        log(`taskkill pid ${pid} err: ${err.message}`);
+      }
     } else {
       try {
         if (pid === backendPid) reflexProcess.kill('SIGTERM');
@@ -1007,8 +1022,26 @@ function killReflex() {
       } catch {}
     }
   }
-  // Sweep amplio: cualquier python/node/bun de este proyecto que haya
-  // quedado suelto. Fire-and-forget (no await — el proceso está cerrando).
+
+  // Sweep adicional bloqueante: mata cualquier python.exe/node.exe
+  // que haya quedado huérfano antes de que Electron salga del todo.
+  // Sin filtros — durante un update queremos cero supervivientes.
+  if (process.platform === 'win32') {
+    for (const img of ['python.exe', 'node.exe', 'bun.exe', 'reflex.exe']) {
+      try {
+        execSync(`taskkill /F /IM "${img}"`, {
+          windowsHide: true,
+          timeout: 2000,
+          stdio: 'ignore',
+        });
+      } catch {
+        // taskkill returns non-zero if no process with that image
+        // exists — totalmente esperable, ignoramos.
+      }
+    }
+  }
+
+  // Sweep async amplio (por si quedó algo que matchee por command line)
   try { killStrayAshleyProcesses(); } catch {}
 }
 

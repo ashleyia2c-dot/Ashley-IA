@@ -1,38 +1,54 @@
-; installer.nsh — custom NSIS script that runs before the installer
-; tries to write any file. Auto-kills Ashley and any leftover python/
-; node processes to avoid the "cannot close Ashley, please close it
-; manually" dialog during auto-update.
+; installer.nsh — kills any process holding Ashley files BEFORE
+; NSIS tries to overwrite them. Without this, the user gets the
+; "Cannot close Ashley" dialog during auto-update.
 ;
-; Triggered by build.nsis.include in package.json.
+; Strategy: simple taskkill on the EXACT image names Ashley spawns.
+; No filters, no PowerShell — just brute force. The trade-off is
+; that if the user has another Python/Node app running, it'll get
+; killed too — but during an Ashley update that's an acceptable
+; compromise versus a broken installer.
 ;
-; IMPORTANT: NSIS interprets `$` as a variable prefix. Inside the
-; PowerShell scripts below, `$_` of PowerShell would be parsed as
-; NSIS variable `_.ProcessId`. We escape with `$$` so NSIS leaves
-; the literal `$` for PowerShell to receive.
+; We hook into MULTIPLE NSIS macros (customInit + customInstall) so
+; the kill fires in both early init and right before file copy.
+; Belt and braces — if one hook timing is wrong, the other catches it.
 
-!macro customInstall
-  ; Empty — kill happens in customInit before NSIS touches files.
+; ─────────────────────────────────────────────────────────────────
+; Reusable macro that does the actual killing.
+; Order matters: kill the parent (Ashley.exe) WITH its tree first,
+; then any leftover orphans. Sleeps in between to let Windows
+; release file handles.
+; ─────────────────────────────────────────────────────────────────
+!macro KillAshleyProcesses
+  ; Kill main Electron process + its child tree (covers most cases).
+  nsExec::Exec 'taskkill /F /IM "Ashley.exe" /T'
+
+  ; Brute-force kill orphaned children. /F = force, no filter so
+  ; this catches them whether the parent died first or not.
+  nsExec::Exec 'taskkill /F /IM "python.exe"'
+  nsExec::Exec 'taskkill /F /IM "node.exe"'
+  nsExec::Exec 'taskkill /F /IM "bun.exe"'
+  nsExec::Exec 'taskkill /F /IM "reflex.exe"'
+
+  ; Conhost windows that may be hosting our spawned processes.
+  nsExec::Exec 'taskkill /F /IM "conhost.exe" /FI "MEMUSAGE lt 5000"'
+
+  ; Wait 2s for Windows to release file handles. Without this,
+  ; the kill returns instantly but the .exe lock can persist.
+  Sleep 2000
 !macroend
 
-; Runs BEFORE any installer screen — no UI interaction required.
+; Runs as part of .onInit — VERY early, before any NSIS UI.
 !macro customInit
-  ; Kill the main Ashley executable if it's running.
-  nsExec::Exec 'taskkill /F /IM "Ashley.exe" /T'
-
-  ; Kill stray python.exe / node.exe processes spawned by Reflex.
-  ; The PowerShell sweep targets only processes whose path contains
-  ; "ashley" (avoids killing the user's other Python apps).
-  nsExec::Exec 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { ($$_.Name -in @(''python.exe'',''node.exe'',''bun.exe'',''reflex.exe'')) -and ($$_.CommandLine -like ''*ashley*'') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
-
-  ; Tiny delay to let Windows release file handles before NSIS starts
-  ; copying. Without this, the kill returns instantly but the exe
-  ; lock can persist for ~500ms.
-  Sleep 1500
+  !insertmacro KillAshleyProcesses
 !macroend
 
-; Runs before the uninstaller too, to clean up before remove.
+; Runs inside the install Section, right before file extraction.
+; Backup in case customInit timing wasn't enough.
+!macro customInstall
+  !insertmacro KillAshleyProcesses
+!macroend
+
+; Same treatment for the uninstaller.
 !macro customUnInit
-  nsExec::Exec 'taskkill /F /IM "Ashley.exe" /T'
-  nsExec::Exec 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { ($$_.Name -in @(''python.exe'',''node.exe'',''bun.exe'',''reflex.exe'')) -and ($$_.CommandLine -like ''*ashley*'') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
-  Sleep 1000
+  !insertmacro KillAshleyProcesses
 !macroend
