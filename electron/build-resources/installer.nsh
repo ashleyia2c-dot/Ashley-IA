@@ -14,23 +14,31 @@
 
 ; ─────────────────────────────────────────────────────────────────
 ; Reusable macro that does the actual killing.
-; Order matters: kill the parent (Ashley.exe) WITH its tree first,
-; then any leftover orphans. Sleeps in between to let Windows
-; release file handles.
+;
+; CRITICAL: do NOT use `/T` on Ashley.exe. When auto-update runs,
+; electron-updater spawns THIS installer as a CHILD of the running
+; Ashley.exe. `taskkill /T` walks the whole process tree, so if we
+; kill Ashley.exe with /T from inside customInit we suicide the
+; installer itself — splash flashes for a moment then everything
+; vanishes (the v0.13.6 → 0.13.7 bug).
+;
+; Workaround: kill each Electron renderer/helper by image name
+; (multiple Ashley.exe instances all match `taskkill /F /IM`),
+; then mop up the spawned children explicitly. None of those use
+; /T, so the installer's own tree survives.
 ; ─────────────────────────────────────────────────────────────────
 !macro KillAshleyProcesses
-  ; Kill main Electron process + its child tree (covers most cases).
-  nsExec::Exec 'taskkill /F /IM "Ashley.exe" /T'
+  ; Kill ALL Ashley.exe instances (main + GPU + renderer + utility),
+  ; but withOUT /T — see the CRITICAL note above.
+  nsExec::Exec 'taskkill /F /IM "Ashley.exe"'
 
-  ; Brute-force kill orphaned children. /F = force, no filter so
-  ; this catches them whether the parent died first or not.
+  ; Mop up the spawned children Ashley would otherwise leak. These
+  ; live as siblings in the process tree (re-parented to System once
+  ; Ashley.exe dies), so we have to name them explicitly.
   nsExec::Exec 'taskkill /F /IM "python.exe"'
   nsExec::Exec 'taskkill /F /IM "node.exe"'
   nsExec::Exec 'taskkill /F /IM "bun.exe"'
   nsExec::Exec 'taskkill /F /IM "reflex.exe"'
-
-  ; Conhost windows that may be hosting our spawned processes.
-  nsExec::Exec 'taskkill /F /IM "conhost.exe" /FI "MEMUSAGE lt 5000"'
 
   ; Wait 2s for Windows to release file handles. Without this,
   ; the kill returns instantly but the .exe lock can persist.
