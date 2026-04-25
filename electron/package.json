@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -112,7 +112,8 @@
       "installerIcon": "build-resources/icon.ico",
       "uninstallerIcon": "build-resources/icon.ico",
       "uninstallDisplayName": "Ashley",
-      "artifactName": "Ashley-Setup-${version}.${ext}"
+      "artifactName": "Ashley-Setup-${version}.${ext}",
+      "include": "build-resources/installer.nsh"
     }
   }
 }

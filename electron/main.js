@@ -677,14 +677,24 @@ function startReflex(apiKey) {
   const hasPrecompiled = fs.existsSync(precompiledFrontend);
   const isFresh = hasPrecompiled && _isFrontendBuildFresh(precompiledFrontend);
 
-  if (hasPrecompiled && isFresh) {
-    log('Frontend precompilado y al día — saltando rebuild');
+  // Fast-path requiere sirv-cli en .web/node_modules. En el .exe
+  // empaquetado por electron-builder, node_modules está EXCLUIDO de
+  // los recursos (extraResources filter !node_modules/**), así que
+  // sirv-cli NO existe en producción y el fast-path falla con
+  // spawn EINVAL. Detectamos esto y caemos al slow-path.
+  const sirvBin = path.join(PROJECT_ROOT, '.web', 'node_modules', 'sirv-cli', 'bin.js');
+  const hasSirv = fs.existsSync(sirvBin);
+
+  if (hasPrecompiled && isFresh && hasSirv) {
+    log('Frontend precompilado y al día + sirv disponible — fast-path');
     _startSplitProcesses(apiKey);
   } else {
     if (hasPrecompiled && !isFresh) {
-      log('Frontend precompilado pero STALE — forzando rebuild para reflejar cambios');
+      log('Frontend precompilado pero STALE — slow-path para rebuild');
+    } else if (!hasSirv) {
+      log('sirv-cli no disponible (entorno empaquetado) — slow-path');
     } else {
-      log('Frontend no precompilado — fallback a reflex run --env prod (build ~9s)');
+      log('Frontend no precompilado — slow-path para build inicial');
     }
     _startSingleReflexProcess(apiKey);
   }
@@ -766,25 +776,24 @@ function _startSplitProcesses(apiKey) {
   _wireReflexExitHandlers();
 
   // ── Frontend estático (sirv lee el build ya hecho) ──
-  // Buscamos sirv-cli en .web/node_modules (lo instala Reflex como dep
-  // transitoria via @sirv). Si no existe, intentamos npx fallback.
+  // El caller (startReflex) ya verificó que sirv-cli existe antes de
+  // llegar aquí. Si por alguna razón se llamó sin sirv, lanzamos un
+  // error en vez del intento npm que daba spawn EINVAL.
   const sirvBin = path.join(webDir, 'node_modules', 'sirv-cli', 'bin.js');
-  let spawnCmd, spawnArgs;
-  if (fs.existsSync(sirvBin)) {
-    spawnCmd = process.execPath;  // el mismo node que corre Electron
-    spawnArgs = [
-      sirvBin,
-      buildDir,
-      '--single', '404.html',
-      '--host',
-      '--port', String(REFLEX_FRONTEND_PORT),
-    ];
-  } else {
-    // Fallback — usar npm run prod (más lento al spawn pero funciona)
-    log('sirv-cli no encontrado — usando npm run prod como fallback');
-    spawnCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    spawnArgs = ['run', 'prod'];
+  if (!fs.existsSync(sirvBin)) {
+    throw new Error(
+      `_startSplitProcesses: sirv-cli not found at ${sirvBin}. ` +
+      'This should never happen — the caller must check hasSirv first.'
+    );
   }
+  const spawnCmd = process.execPath;  // electron como node via ELECTRON_RUN_AS_NODE
+  const spawnArgs = [
+    sirvBin,
+    buildDir,
+    '--single', '404.html',
+    '--host',
+    '--port', String(REFLEX_FRONTEND_PORT),
+  ];
 
   frontendProcess = spawn(spawnCmd, spawnArgs, {
     cwd: webDir,
