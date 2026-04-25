@@ -416,32 +416,50 @@ def global_styles():
     font-style: italic;
   }}
 
-  /* ── Radix Select popup (Settings dialog) ──────────────
-     El dropdown de Radix Select se monta vía Portal. Por defecto le
-     pone z-index: auto, lo que hace que quede DEBAJO de contenedores
-     hermanos con stacking context (p.ej. el box del TTS provider con
-     su bg/border propios). Forzamos z-index altísimo y un fondo sólido
-     para que el popup sea siempre legible encima de todo. */
+  /* ── Radix popups (Select / DropdownMenu / Popover) ──────
+     Todo lo que se abre vía Radix Portal hereda este z-index alto y
+     un fondo sólido. Esto cubre:
+       • rx.select (Select.Content)
+       • rx.menu  (DropdownMenu.Content) — el ⚙ del header
+       • rx.popover (Popover.Content)
+     Sin estas reglas, los popups se ven transparentes encima del
+     avatar/chat, ilegibles. */
   [data-radix-popper-content-wrapper] {{
     z-index: 10050 !important;
   }}
   [data-radix-select-content],
+  [data-radix-menu-content],
+  [data-radix-dropdown-menu-content],
   [data-radix-popover-content] {{
     background: #15121d !important;
     border: 1px solid rgba(255,154,238,0.35) !important;
-    box-shadow: 0 10px 36px rgba(0,0,0,0.75),
+    box-shadow: 0 10px 36px rgba(0,0,0,0.85),
                 0 0 0 1px rgba(255,154,238,0.08) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+    padding: 4px !important;
+    border-radius: 10px !important;
   }}
   [data-radix-select-item],
-  [data-radix-select-item][data-state="checked"] {{
+  [data-radix-select-item][data-state="checked"],
+  [data-radix-menu-item],
+  [data-radix-dropdown-menu-item] {{
     color: #eee !important;
+    border-radius: 6px !important;
+    padding: 6px 10px !important;
   }}
-  [data-radix-select-item][data-highlighted] {{
+  [data-radix-select-item][data-highlighted],
+  [data-radix-menu-item][data-highlighted],
+  [data-radix-dropdown-menu-item][data-highlighted] {{
     background: rgba(255,154,238,0.12) !important;
     color: #ff9aee !important;
     outline: none !important;
+  }}
+  [data-radix-menu-separator],
+  [data-radix-dropdown-menu-separator] {{
+    height: 1px !important;
+    background: rgba(255,154,238,0.18) !important;
+    margin: 4px 6px !important;
   }}
 
   /* ── Achievement gallery ──────────────────────────── */

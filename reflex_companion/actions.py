@@ -597,18 +597,26 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
                 return f"Reproduciendo: '{title}'", True
 
     # Caso 3: no podemos verificar que la pestaña apareció. Ser honesto:
-    # Ashley recibirá este mensaje y así no le mentirá al usuario.
+    # MSAA no responde → no sabemos si fue éxito. Antes devolvíamos
+    # "Reproduciendo..." asumiendo éxito — eso hacía que Ashley mintiera.
+    # Ahora devolvemos un mensaje AMBIGUO para que Ashley NO afirme en
+    # pasado que lo hizo, y pregunte al jefe si lo ve.
     if post_count < 0 or pre_count < 0:
-        # MSAA no disponible — no podemos verificar. Asumir éxito tentativo
-        # para no bloquear acciones legítimas si MSAA falla por otros motivos.
-        log.warning("play_music: MSAA verification unavailable, assuming success")
-        return f"Reproduciendo: '{title}'", True
+        log.warning("play_music: MSAA verification unavailable (ambiguous result)")
+        return (
+            f"Lanzado el enlace de '{title}' al navegador. NO HE PODIDO VERIFICAR "
+            f"si la pestaña realmente se abrió (MSAA/UIA no responde). Informa al "
+            f"jefe con honestidad: 'lo mandé al navegador pero no estoy segura si "
+            f"lo abrió — ¿lo ves en pantalla?'. NO afirmes que está reproduciendo."
+        ), True
 
     log.warning(f"play_music: VERIFICATION FAILED — pre={pre_count} post={post_count}")
     return (
-        f"Error: intenté reproducir '{title}' pero no detecté que se abriera "
-        f"la pestaña (el navegador puede no haber recibido el foco). "
-        f"Pide al usuario que abra una ventana del navegador manualmente e intenta de nuevo."
+        f"Error: intenté reproducir '{title}' pero el navegador NO abrió ninguna "
+        f"pestaña nueva (contador pre={pre_count} post={post_count}). Probablemente "
+        f"el navegador está cerrado o no tiene foco. Dile al jefe con honestidad "
+        f"que falló y pídele que abra el navegador manualmente. NO digas que está "
+        f"reproduciendo porque NO lo está."
     ), False
 
 

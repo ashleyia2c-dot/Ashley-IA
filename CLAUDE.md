@@ -12,9 +12,19 @@ cd reflex-companion && venv\Scripts\activate && reflex run
 # Tests (162 tests, <1s)
 venv\Scripts\python.exe -m pytest tests/ -v
 
-# Build installer (.exe)
+# Build installer (.exe) — prebuild-frontend se ejecuta automático antes
 cd electron && npm run build
 ```
+
+### Frontend build invariant (v0.13.4)
+
+Reflex compila los componentes Python a JSX que vive en `.web/build/client/`. Electron tiene dos caminos de arranque:
+- **Fast-path** (6s): reusa el `.web/build/client/` existente si está al día.
+- **Slow-path** (14s): llama a `reflex run --env prod` que recompila.
+
+El `main.js` decide automáticamente comparando **mtime de cada `.py` en `reflex_companion/` + cada asset en `assets/`** contra `mtime` de `.web/build/client/index.html`. Si cualquier fuente es más nueva → slow-path. Invariante: **el user (dev o final) NUNCA ve una UI stale respecto al código**.
+
+En el installer, `electron/prebuild.js` corre antes de `electron-builder` y hace `reflex export --frontend-only` forzado. Si falla, el installer NO se genera (fail-loud). Ver script en `electron/prebuild.js`.
 
 ## Architecture
 

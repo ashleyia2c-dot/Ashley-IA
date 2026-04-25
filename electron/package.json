@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -9,8 +9,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "electron-builder --win",
-    "release": "electron-builder --win --publish always"
+    "prebuild-frontend": "node prebuild.js",
+    "build": "npm run prebuild-frontend && electron-builder --win",
+    "release": "npm run prebuild-frontend && electron-builder --win --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.8.3"

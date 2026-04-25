@@ -51,6 +51,7 @@ AFFECTION_FILE = _data_path("affection_ashley.json")
 LICENSE_FILE = _data_path("license.json")
 STATS_FILE = _data_path("stats_ashley.json")
 MENTAL_STATE_FILE = _data_path("mental_state_ashley.json")
+NEWS_FILE = _data_path("news_ashley.json")
 
 # ─────────────────────────────────────────────
 #  Licencia (Lemon Squeezy)

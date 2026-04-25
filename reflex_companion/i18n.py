@@ -125,6 +125,36 @@ UI = {
         "settings_voicevox_speaker_label": "VoiceVox speaker ID",
         "settings_voicevox_speaker_hint": "Numeric ID (e.g. 1, 2, 3). See the VoiceVox Engine for full list.",
 
+        # Quick menu labels (header dropdown ⚙) — cortos para no truncar
+        "menu_tts":          "Voice",
+        "menu_pin":          "Pin on top",
+        "menu_initiative":   "Speak now",
+        "menu_settings":     "Full Settings...",
+
+        # News feed (v0.13.3) — Ashley pone aquí sus descubrimientos
+        "pill_news":         "News",
+        "news_tooltip_on":   "See what Ashley found for you",
+        "news_title":        "📰 Ashley's discoveries",
+        "news_empty":        "No discoveries yet. Ashley will put here songs, trailers, and news she finds that match your tastes.",
+        "news_empty_hint":   "Enable \"Proactive Discovery\" in Settings to let Ashley search on her own.",
+        "news_close":        "Back to chat",
+        "news_clear_all":    "Clear all",
+        "news_clear_confirm": "Remove all discoveries?",
+        "news_delete":       "Remove",
+        "news_category_song":    "🎵 Music",
+        "news_category_trailer": "🎬 Trailer",
+        "news_category_article": "📰 Article",
+        "news_category_game":    "🎮 Game",
+        "news_category_tech":    "💻 Tech",
+        "news_category_other":   "✨ Discovery",
+
+        # Discovery toggle (v0.13)
+        "settings_discovery_heading": "🔭 Proactive Discovery",
+        "settings_discovery_label":   "Allow Ashley to bring up new content on her own",
+        "settings_discovery_desc":    "When ON, Ashley may occasionally search the web and share trailers, songs, articles or news that match your tastes. When OFF (default), she focuses on continuing your conversation without injecting random topics. Emotional moments always disable discovery regardless of this setting.",
+        "settings_discovery_on":      "ON — Ashley shares discoveries",
+        "settings_discovery_off":     "OFF — Ashley sticks to our conversation",
+
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
         "settings_elevenlabs_placeholder": "sk_... (leave empty to use free voice)",
@@ -273,6 +303,36 @@ UI = {
         "settings_voicevox_speaker_label": "ID del speaker VoiceVox",
         "settings_voicevox_speaker_hint": "ID numérico (p.ej. 1, 2, 3). Consulta el motor para la lista completa.",
 
+        # Quick menu labels
+        "menu_tts":          "Voz",
+        "menu_pin":          "Encima",
+        "menu_initiative":   "Habla tú",
+        "menu_settings":     "Más ajustes...",
+
+        # News feed
+        "pill_news":         "Noticias",
+        "news_tooltip_on":   "Ver lo que Ashley encontró para ti",
+        "news_title":        "📰 Descubrimientos de Ashley",
+        "news_empty":        "Aún no hay descubrimientos. Ashley irá poniendo aquí canciones, tráilers y noticias que encuentre según tus gustos.",
+        "news_empty_hint":   "Activa \"Descubrimiento proactivo\" en Ajustes para que Ashley busque por su cuenta.",
+        "news_close":        "Volver al chat",
+        "news_clear_all":    "Borrar todo",
+        "news_clear_confirm": "¿Eliminar todos los descubrimientos?",
+        "news_delete":       "Quitar",
+        "news_category_song":    "🎵 Música",
+        "news_category_trailer": "🎬 Tráiler",
+        "news_category_article": "📰 Artículo",
+        "news_category_game":    "🎮 Juego",
+        "news_category_tech":    "💻 Tech",
+        "news_category_other":   "✨ Descubrimiento",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 Descubrimiento proactivo",
+        "settings_discovery_label":   "Deja que Ashley saque temas nuevos por su cuenta",
+        "settings_discovery_desc":    "Cuando está ACTIVADO, Ashley puede buscar en internet y compartir tráilers, canciones, artículos o noticias según tus gustos. Cuando está DESACTIVADO (default), se centra en continuar la conversación sin meter temas random. En momentos emocionales el discovery se desactiva siempre, esté como esté este ajuste.",
+        "settings_discovery_on":      "ACTIVADO — Ashley comparte descubrimientos",
+        "settings_discovery_off":     "DESACTIVADO — Ashley sigue nuestra conversación",
+
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
         "settings_elevenlabs_hint": "Consigue tu clave en elevenlabs.io → Profile → API Keys. Se guarda solo en tu equipo.",
@@ -417,6 +477,36 @@ UI = {
         "settings_voicevox_url_hint": "Installe VoiceVox depuis voicevox.hiroshiba.jp et lance le moteur.",
         "settings_voicevox_speaker_label": "ID du speaker VoiceVox",
         "settings_voicevox_speaker_hint": "ID numérique (ex. 1, 2, 3). Voir le moteur VoiceVox pour la liste complète.",
+
+        # Quick menu labels
+        "menu_tts":          "Voix",
+        "menu_pin":          "Au-dessus",
+        "menu_initiative":   "Parle",
+        "menu_settings":     "Plus de réglages...",
+
+        # News feed
+        "pill_news":         "Actus",
+        "news_tooltip_on":   "Voir ce qu'Ashley a trouvé pour toi",
+        "news_title":        "📰 Découvertes d'Ashley",
+        "news_empty":        "Pas encore de découvertes. Ashley mettra ici des chansons, bandes-annonces et actus qu'elle trouve selon tes goûts.",
+        "news_empty_hint":   "Active « Découverte proactive » dans les Réglages pour qu'Ashley cherche d'elle-même.",
+        "news_close":        "Retour au chat",
+        "news_clear_all":    "Tout effacer",
+        "news_clear_confirm": "Supprimer toutes les découvertes ?",
+        "news_delete":       "Supprimer",
+        "news_category_song":    "🎵 Musique",
+        "news_category_trailer": "🎬 Bande-annonce",
+        "news_category_article": "📰 Article",
+        "news_category_game":    "🎮 Jeu",
+        "news_category_tech":    "💻 Tech",
+        "news_category_other":   "✨ Découverte",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 Découverte proactive",
+        "settings_discovery_label":   "Laisse Ashley apporter de nouveaux sujets d'elle-même",
+        "settings_discovery_desc":    "Quand ACTIVÉ, Ashley peut chercher sur le web et partager des bandes-annonces, chansons, articles ou actus liés à tes goûts. Quand DÉSACTIVÉ (défaut), elle se concentre sur la continuité de la conversation sans injecter de sujets aléatoires. En moment émotionnel, la découverte est toujours désactivée, peu importe ce réglage.",
+        "settings_discovery_on":      "ACTIVÉ — Ashley partage ses découvertes",
+        "settings_discovery_off":     "DÉSACTIVÉ — Ashley reste sur notre conversation",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
@@ -745,6 +835,11 @@ def load_voice_config() -> dict:
         "kokoro_voice": "af_bella",
         "voicevox_url": "http://localhost:50021",
         "voicevox_speaker": "1",  # speaker ID como string para uniformar con inputs
+        # Discovery proactivo (v0.13): default OFF — al abrir la app Ashley
+        # retoma el hilo de la conversación en lugar de soltar noticias
+        # random. Cuando el user lo activa, Ashley vuelve a buscar cosas
+        # en internet según los gustos (trailers, noticias, canciones...).
+        "discovery_enabled": False,
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -770,6 +865,7 @@ def load_voice_config() -> dict:
             "kokoro_voice": str(data.get("kokoro_voice", "af_bella")) or "af_bella",
             "voicevox_url": str(data.get("voicevox_url", "http://localhost:50021")) or "http://localhost:50021",
             "voicevox_speaker": str(data.get("voicevox_speaker", "1")) or "1",
+            "discovery_enabled": bool(data.get("discovery_enabled", False)),
         }
     except Exception:
         return default
@@ -785,7 +881,8 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       kokoro_url: str = "http://localhost:8880",
                       kokoro_voice: str = "af_bella",
                       voicevox_url: str = "http://localhost:50021",
-                      voicevox_speaker: str = "1") -> None:
+                      voicevox_speaker: str = "1",
+                      discovery_enabled: bool = False) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -806,6 +903,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "kokoro_voice": str(kokoro_voice or "af_bella"),
             "voicevox_url": str(voicevox_url or "http://localhost:50021"),
             "voicevox_speaker": str(voicevox_speaker or "1"),
+            "discovery_enabled": bool(discovery_enabled),
         })
     except Exception as e:
         import logging

@@ -79,6 +79,43 @@ def clean_display(text: str) -> str:
     # puntuación sin whitespace (ej. "frase.undefined").
     text = re.sub(r'(?:\s|^)undefined(?:\s|$|[\.\!\?\,\;])', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bundefined\b', '', text, flags=re.IGNORECASE)
+    # Caso adicional: el LLM (o algún data-binding roto) genera un code
+    # block markdown que contiene "undefined". Se renderiza como
+    # rectángulo gris feo en el chat. Regla agresiva: CUALQUIER code
+    # block (fenced o inline) que contenga la palabra "undefined" en
+    # cualquier parte, se elimina entero. Mejor perder texto inocente
+    # tipo "undefined behavior in C" que dejar el rectángulo feo.
+    text = re.sub(r'```[^`]*?undefined[^`]*?```', '', text,
+                  flags=re.IGNORECASE | re.DOTALL)
+    # Code block sin cerrar (truncado al final o al doble salto)
+    text = re.sub(r'```[^`]*?undefined[^`]*?(?:\n\n|$)', '\n\n', text,
+                  flags=re.IGNORECASE | re.DOTALL)
+    # Inline backtick que contenga undefined
+    text = re.sub(r'`[^`]*?undefined[^`]*?`', '', text,
+                  flags=re.IGNORECASE)
+    # Code blocks vacíos (sin contenido o solo whitespace) — pueden
+    # quedar tras eliminar undefined o por otros artefactos del LLM.
+    text = re.sub(r'```[a-zA-Z]*[ \t]*\n?\s*\n?[ \t]*```', '', text,
+                  flags=re.DOTALL)
+    # ── Backticks SIN CERRAR al final del string ────────────────────
+    # Patrón real visto en producción: el LLM emitía "```undefined```"
+    # y la limpieza dejaba solo "```" suelto al final. Markdown lo
+    # interpreta como code block abierto y renderiza "undefined" como
+    # contenido fallback. Eliminamos cualquier ``` (con o sin
+    # language hint) que quede colgando al final del texto sin pareja.
+    # IMPORTANTE: este pase va ANTES de la regla de inline backticks
+    # vacíos, porque si no esa regla rompe el grupo de 3 en pares y
+    # deja un backtick suelto colgando.
+    text = re.sub(r'\n*```[a-zA-Z]*[ \t]*\n*\s*$', '', text)
+    # También al inicio si quedó solo (raro pero posible)
+    text = re.sub(r'^\s*```[a-zA-Z]*[ \t]*\n*', '', text)
+    # Inline backticks vacíos — pero SOLO si NO son parte de un fenced
+    # code block (```). Lookbehind/lookahead lo limita a backticks
+    # individuales rodeados por no-backtick, así no rompe ```js code```.
+    text = re.sub(r'(?<!`)`\s*`(?!`)', '', text)
+    # Backtick único suelto al final (residuo de cleanup previo).
+    # Igual: solo si el carácter anterior no es otro backtick.
+    text = re.sub(r'\n*[ \t]*(?<!`)`\s*$', '', text)
     # Elimina líneas vacías consecutivas que quedan tras limpiar tags
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
@@ -113,6 +150,26 @@ def extract_affection(text: str) -> tuple[str, int]:
     delta = max(-3, min(3, int(matches[0]))) if matches else 0
     clean = re.sub(r'\[\s*affection\s*:[^\]]*\]', '', text, flags=re.IGNORECASE).strip()
     return clean, delta
+
+
+def extract_all_actions(text: str) -> tuple[str, list[dict]]:
+    """Extrae TODAS las acciones del texto en orden de aparición.
+
+    Cuando el user pide dos cosas en un mensaje ("pon X y cierra Y"),
+    Ashley suele emitir dos tags consecutivos. Antes el sistema solo
+    procesaba el primero — la segunda acción se quedaba sin ejecutar
+    pero la descripción verbal daba a entender que sí. Ahora las
+    recogemos todas.
+    """
+    actions: list[dict] = []
+    remaining_text = text
+    while True:
+        stripped, action = extract_action(remaining_text)
+        if action is None:
+            break
+        actions.append(action)
+        remaining_text = stripped
+    return remaining_text, actions
 
 
 def extract_action(text: str) -> tuple[str, dict | None]:

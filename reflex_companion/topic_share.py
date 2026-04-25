@@ -228,6 +228,134 @@ def format_listening_hint(language: str) -> str:
     )
 
 
+# ─────────────────────────────────────────────
+#  Detectores de señales del hilo reciente
+# ─────────────────────────────────────────────
+
+# Frases que indican que el user está CERRANDO la conversación
+# (despedida, irse a dormir, etc.) — Ashley NO debe iniciar tema nuevo.
+_CLOSING_MARKERS = [
+    # Español
+    "nos vemos", "hasta luego", "hasta mañana", "hasta después", "hasta otra",
+    "adios", "adiós", "chao", "chau", "chauu", "bye",
+    "me voy a dormir", "voy a dormir", "a dormir", "me acuesto", "voy a la cama",
+    "buenas noches", "buenas nochis", "buena noche",
+    "me desconecto", "me voy", "ya me voy", "me largo",
+    "hasta la próxima", "nos hablamos", "te hablo luego", "luego te cuento",
+    # Inglés
+    "see you", "see ya", "cya", "bye", "goodnight", "good night",
+    "going to bed", "going to sleep", "off to sleep", "heading to bed",
+    "signing off", "logging off", "talk later", "talk to you later", "ttyl",
+    "catch you later", "gotta go", "got to go", "have to go", "i'm out",
+    # Francés
+    "à plus", "a plus", "à demain", "a demain", "à tout à l'heure",
+    "bonne nuit", "bonsoir" , "salut", "bye",
+    "je vais dormir", "je vais me coucher", "je dois y aller",
+    "au lit", "à bientôt", "a bientot", "on se parle",
+]
+
+
+def is_closing_conversation(messages: list[dict], lookback: int = 2) -> bool:
+    """True si el user está despidiéndose en su último(s) mensaje(s).
+
+    Usada por el initiative handler: si el user acaba de decir "nos vemos"
+    o "me voy a dormir", Ashley NO debe sacar un tema nuevo — sería
+    torpe y forzado. Mejor responde breve o no inicia nada.
+
+    Revisa los últimos `lookback` mensajes del USER.
+    """
+    if not messages:
+        return False
+    count = 0
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        count += 1
+        content = (m.get("content") or "").strip().lower()
+        if _contains_any(content, _CLOSING_MARKERS):
+            return True
+        if count >= lookback:
+            break
+    return False
+
+
+_BANNED_TOPIC_PATTERNS = [
+    # Español
+    r"no\s+(?:me\s+)?hables\s+(?:m[áa]s\s+)?de\s+(.+?)(?:[,\.\?!]|$)",
+    r"no\s+(?:m[áa]s\s+)?(?:de|sobre)\s+(.+?)(?:[,\.\?!]|$)",
+    r"d[ée]jam[ae]\s+(?:en\s+paz\s+)?con\s+(.+?)(?:[,\.\?!]|$)",
+    r"basta\s+(?:ya\s+)?(?:de|con)\s+(.+?)(?:[,\.\?!]|$)",
+    r"c[áa]llate\s+(?:ya\s+)?(?:con|sobre)\s+(.+?)(?:[,\.\?!]|$)",
+    # Inglés — `talk` también (no solo `talking`); "about" opcional
+    r"(?:don'?t|do not|stop|quit)\s+(?:talking|talk|telling me|tell me|mentioning|mention)\s+(?:about\s+)?(.+?)(?:[,\.\?!]|$)",
+    r"no\s+more\s+(.+?)(?:[,\.\?!]|$)",
+    r"stop\s+with\s+(?:the\s+)?(.+?)(?:[,\.\?!]|$)",
+    r"shut\s+up\s+about\s+(.+?)(?:[,\.\?!]|$)",
+    # Francés
+    r"(?:ne\s+)?(?:me\s+)?parle\s+plus\s+(?:de|du|des)\s+(.+?)(?:[,\.\?!]|$)",
+    r"arr[êe]te\s+(?:avec|de\s+parler)\s+(?:de\s+|du\s+|des\s+)?(.+?)(?:[,\.\?!]|$)",
+]
+
+
+def extract_banned_topics(messages: list[dict], lookback: int = 6) -> list[str]:
+    """Extrae temas que el user pidió explícitamente evitar.
+
+    Busca patrones tipo "no me hables de X", "stop with the Y" en los
+    últimos `lookback` mensajes del USER. Devuelve lista de strings —
+    los tópicos a inyectar como NO-GO al initiative prompt.
+
+    Ejemplos:
+      "no me hables más de SQL" → ["SQL"]
+      "déjame en paz con el eval de React" → ["el eval de React"]
+      "stop talking about work" → ["work"]
+    """
+    out: list[str] = []
+    if not messages:
+        return out
+    count = 0
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        count += 1
+        content = (m.get("content") or "").strip()
+        low = content.lower()
+        for pattern in _BANNED_TOPIC_PATTERNS:
+            for match in re.finditer(pattern, low):
+                topic = match.group(1).strip().rstrip(".,?!").strip()
+                if topic and len(topic) <= 60 and topic not in out:
+                    out.append(topic)
+        if count >= lookback:
+            break
+    return out
+
+
+def last_user_was_emotional(messages: list[dict], lookback: int = 3) -> bool:
+    """True si cualquiera de los últimos `lookback` mensajes del USER
+    tuvo carga emocional.
+
+    Se usa para gatear el discovery proactivo — cuando el user vuelve
+    de una charla cargada, NO queremos que Ashley arranque con "mira
+    este tráiler" o "Ronaldo hizo un 3-0". En su lugar, Ashley debe
+    retomar el hilo del jefe (follow-up contextual).
+
+    `messages` es la lista de mensajes en formato Ashley (dict con
+    role/content). Devuelve False si no hay mensajes del user, o si
+    ninguno de los últimos `lookback` era emocional.
+    """
+    if not messages:
+        return False
+    count = 0
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        count += 1
+        if is_emotional_moment(m.get("content") or ""):
+            return True
+        if count >= lookback:
+            break
+    return False
+
+
 def compute_directive_if_needed(user_message: str, language: str) -> str | None:
     """Helper combinado con detección de modo emocional (prioridad).
 

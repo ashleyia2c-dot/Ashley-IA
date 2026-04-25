@@ -270,6 +270,50 @@ Usuario: "qué hora es?"                  →  NONE"""
 
 
 # ─────────────────────────────────────────────
+#  Normalización del historial
+# ─────────────────────────────────────────────
+
+def _merge_consecutive_users(messages: list[dict]) -> list[dict]:
+    """Fusiona mensajes USER consecutivos en uno solo antes de pasarlos al LLM.
+
+    Cuándo pasa esto:
+      • El user borra la última respuesta de Ashley → el último mensaje
+        del historial es del user → escribe algo nuevo → ahora hay dos
+        user messages consecutivos en el historial.
+      • xAI y algunos modelos de OpenRouter rechazan este patrón con un
+        400 "consecutive user turns". Antes del fix, este caso disparaba
+        un error toast al user.
+
+    Qué hace el merge:
+      • Combina los content de los user consecutivos con un separador.
+      • NO fusiona si alguno tenía image adjunta — mantener imagen
+        requiere dejar los mensajes separados (los content-parts de
+        vision no se concatenan limpiamente).
+      • system_result + user se mantienen como están — eso ES válido.
+
+    La UI sigue viendo los mensajes separados (esta función trabaja
+    sobre una copia del historial que solo se pasa al LLM).
+    """
+    out: list[dict] = []
+    for m in messages:
+        if (
+            out
+            and m.get("role") == "user"
+            and out[-1].get("role") == "user"
+            and not out[-1].get("image")
+            and not m.get("image")
+        ):
+            prev = out[-1]
+            prev_content = prev.get("content") or ""
+            new_content = m.get("content") or ""
+            merged_content = (prev_content + "\n\n" + new_content).strip()
+            out[-1] = {**prev, "content": merged_content}
+        else:
+            out.append(m)
+    return out
+
+
+# ─────────────────────────────────────────────
 #  Streaming con retry antes del primer chunk
 # ─────────────────────────────────────────────
 
@@ -293,6 +337,10 @@ def stream_response(
     user en la UI.
     """
     from .llm_provider import is_openai_compat, openai_compat_stream
+
+    # Normalizar historial: fusionar user-user consecutivos (pasa cuando
+    # el user borra la última respuesta de Ashley y escribe otra cosa).
+    messages = _merge_consecutive_users(messages)
 
     # Si el user usa OpenRouter/Ollama → path OpenAI-compatible. Sin
     # web_search (no soportado en ese path) y sin el formato xai_sdk.

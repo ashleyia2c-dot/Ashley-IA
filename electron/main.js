@@ -89,6 +89,7 @@ try { fs.mkdirSync(ASHLEY_DATA_DIR, { recursive: true }); } catch {}
 
 // ─── Estado ───────────────────────────────────────────────────────────────
 let reflexProcess = null;
+let frontendProcess = null;         // sirv serviendo .web/build/client cuando hay precompilado
 let mainWindow = null;
 let splashWindow = null;
 let onboardingWindow = null;
@@ -329,7 +330,12 @@ function killStrayAshleyProcesses() {
     ].join(' ');
     exec(
       `powershell -NoProfile -NonInteractive -Command "${psScript}"`,
-      { windowsHide: true, timeout: 8000 },
+      // 3000ms ya es más que suficiente para que PowerShell spawne, ejecute
+      // Get-CimInstance + Stop-Process y termine. Antes 8000 nos costaba
+      // hasta 1-2s extra en arranques limpios cuando PowerShell tarda en
+      // cargar. Si al timeout no terminó, pasamos — los procesos huérfanos
+      // se mueren solos cuando los puertos los pisa el nuevo Reflex.
+      { windowsHide: true, timeout: 3000 },
       (err, stdout) => {
         if (err) {
           log(`killStrayAshleyProcesses err: ${err.message}`);
@@ -346,14 +352,16 @@ function killStrayAshleyProcesses() {
 }
 
 async function pickReflexPorts() {
-  // Primero sweep amplio: mata cualquier proceso Ashley de una sesión anterior
-  // que haya sobrevivido a un crash (fuera del puerto base).
-  await killStrayAshleyProcesses();
-  // Luego limpia específicamente los puertos base (por si acaso)
-  await killProcessesOnPort(FRONTEND_PORT_BASE);
-  await killProcessesOnPort(BACKEND_PORT_BASE);
+  // Sweep + port cleanup en PARALELO — no dependen entre sí, así ganamos
+  // ~1-2s en arranques limpios. Antes era secuencial y esperaba al sweep
+  // completo de PowerShell (que en cold boot tarda) antes de mirar puertos.
+  await Promise.all([
+    killStrayAshleyProcesses(),
+    killProcessesOnPort(FRONTEND_PORT_BASE),
+    killProcessesOnPort(BACKEND_PORT_BASE),
+  ]);
   // Pequeña espera para que Windows libere los sockets
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 300));
 
   // Ahora sí, busca puerto libre (por TCP connect, robusto contra 0.0.0.0)
   REFLEX_FRONTEND_PORT = await findFreePort(FRONTEND_PORT_BASE);
@@ -652,17 +660,155 @@ function startReflex(apiKey) {
   log(`Arrancando Reflex (intento ${reflexRestartCount + 1}) desde ${PROJECT_ROOT}`);
   log(`Datos en: ${ASHLEY_DATA_DIR}`);
 
-  // reflex run --env prod: sirve assets frontend ya compilados desde .web/
-  // en lugar de correr vite en dev mode con file watchers + hot reload.
-  // Arranque baja de ~22s a ~5s en fria y casi instantaneo si .web/ ya
-  // existe. El backend Python sigue recargando dinamicamente, asi que los
-  // cambios en prompts/State/etc. siguen reflejandose sin rebuild.
+  // ── Fast-path: frontend precompilado ──────────────────────────────────
+  // Si .web/build/client/index.html ya existe Y está al día respecto al
+  // código Python, el frontend está listo y NO hace falta que Reflex lo
+  // recompile cada arranque (9s ahorrados).
   //
-  // El unico caso que requiere rebuild manual (via `reflex run --env dev`
-  // una vez) son cambios en components.py / styles.py porque esos se
-  // compilan a JSX y viven en .web/. Para el user final esto es irrelevante
-  // (no edita codigo) y para dev la perdida es aceptable (solo cuando tocas
-  // UI directamente).
+  // FRESHNESS CHECK (crítico, v0.13.4): antes el fast-path reusaba builds
+  // stale cuando cualquiera (dev o CI) cambiaba un componente Python sin
+  // rebuildear. Resultado: features nuevas invisibles en la UI. Ahora
+  // comparamos mtime de .py vs index.html — si algún fuente es más nuevo,
+  // forzamos el slow-path que rebuildea.
+  //
+  // Si no hay build precompilado o está stale, caemos al comando original
+  // que compila y lo guarda en .web/build/client para el siguiente arranque.
+  const precompiledFrontend = path.join(PROJECT_ROOT, '.web', 'build', 'client', 'index.html');
+  const hasPrecompiled = fs.existsSync(precompiledFrontend);
+  const isFresh = hasPrecompiled && _isFrontendBuildFresh(precompiledFrontend);
+
+  if (hasPrecompiled && isFresh) {
+    log('Frontend precompilado y al día — saltando rebuild');
+    _startSplitProcesses(apiKey);
+  } else {
+    if (hasPrecompiled && !isFresh) {
+      log('Frontend precompilado pero STALE — forzando rebuild para reflejar cambios');
+    } else {
+      log('Frontend no precompilado — fallback a reflex run --env prod (build ~9s)');
+    }
+    _startSingleReflexProcess(apiKey);
+  }
+}
+
+// Comprueba si el build precompilado está al día comparando mtimes:
+// si cualquier fuente Python de reflex_companion/ o asset en assets/
+// es más nuevo que index.html del build, consideramos stale y devolvemos
+// false para forzar rebuild.
+//
+// Por qué esto importa: Reflex COMPILA los componentes Python a JSX/HTML
+// que vive en .web/build/client/. Si cambias reflex_companion.py pero
+// no regeneras el build, el usuario ve la UI VIEJA aunque el código
+// Python sea nuevo. Este check elimina toda posibilidad de ese bug.
+function _isFrontendBuildFresh(indexHtmlPath) {
+  let buildMtime;
+  try {
+    buildMtime = fs.statSync(indexHtmlPath).mtimeMs;
+  } catch (e) {
+    log(`freshness check: cannot stat ${indexHtmlPath}: ${e.message}`);
+    return false;  // fail-safe: si no podemos verificar, rebuild
+  }
+
+  // Directorios a vigilar — si cualquier archivo más nuevo que el
+  // build, consideramos stale.
+  const watchDirs = [
+    { dir: path.join(PROJECT_ROOT, 'reflex_companion'), exts: ['.py'] },
+    { dir: path.join(PROJECT_ROOT, 'assets'),           exts: ['.js', '.css'] },
+  ];
+
+  for (const { dir, exts } of watchDirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const files = fs.readdirSync(dir);
+      for (const f of files) {
+        if (!exts.some(ext => f.endsWith(ext))) continue;
+        const fullPath = path.join(dir, f);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile() && stat.mtimeMs > buildMtime) {
+            log(`stale build: ${path.basename(dir)}/${f} newer than frontend build`);
+            return false;
+          }
+        } catch {}
+      }
+    } catch (e) {
+      log(`freshness scan failed for ${dir}: ${e.message}`);
+      return false;
+    }
+  }
+  return true;
+}
+
+// Fast-path: backend Python + frontend sirv como procesos separados.
+function _startSplitProcesses(apiKey) {
+  const webDir = path.join(PROJECT_ROOT, '.web');
+  const buildDir = path.join(webDir, 'build', 'client');
+
+  // ── Backend Python (sólo el API/WebSocket, no sirve frontend) ──
+  reflexProcess = spawn(VENV_REFLEX, [
+    'run',
+    '--env', 'prod',
+    '--backend-only',
+    '--backend-port', String(REFLEX_BACKEND_PORT),
+    '--loglevel', 'warning',
+  ], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      XAI_API_KEY: apiKey,
+      ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
+      ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
+    },
+    shell: false,
+    windowsHide: true,
+  });
+  reflexProcess.stdout.on('data', makeLineLogger('reflex', false));
+  reflexProcess.stderr.on('data', makeLineLogger('reflex', true));
+  _wireReflexExitHandlers();
+
+  // ── Frontend estático (sirv lee el build ya hecho) ──
+  // Buscamos sirv-cli en .web/node_modules (lo instala Reflex como dep
+  // transitoria via @sirv). Si no existe, intentamos npx fallback.
+  const sirvBin = path.join(webDir, 'node_modules', 'sirv-cli', 'bin.js');
+  let spawnCmd, spawnArgs;
+  if (fs.existsSync(sirvBin)) {
+    spawnCmd = process.execPath;  // el mismo node que corre Electron
+    spawnArgs = [
+      sirvBin,
+      buildDir,
+      '--single', '404.html',
+      '--host',
+      '--port', String(REFLEX_FRONTEND_PORT),
+    ];
+  } else {
+    // Fallback — usar npm run prod (más lento al spawn pero funciona)
+    log('sirv-cli no encontrado — usando npm run prod como fallback');
+    spawnCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    spawnArgs = ['run', 'prod'];
+  }
+
+  frontendProcess = spawn(spawnCmd, spawnArgs, {
+    cwd: webDir,
+    env: {
+      ...process.env,
+      PORT: String(REFLEX_FRONTEND_PORT),
+      // ELECTRON_RUN_AS_NODE hace que el proceso node de Electron se comporte
+      // como Node "puro" en vez de abrir otra instancia de Electron.
+      ELECTRON_RUN_AS_NODE: '1',
+    },
+    shell: false,
+    windowsHide: true,
+  });
+  frontendProcess.stdout.on('data', makeLineLogger('frontend', false));
+  frontendProcess.stderr.on('data', makeLineLogger('frontend', true));
+  frontendProcess.on('exit', (code, signal) => {
+    log(`Frontend process exited (code=${code}, signal=${signal})`);
+    frontendProcess = null;
+  });
+  frontendProcess.on('error', (err) => log(`Frontend spawn error: ${err.message}`));
+}
+
+// Slow-path original: un solo proceso reflex que compila + sirve todo.
+function _startSingleReflexProcess(apiKey) {
   reflexProcess = spawn(VENV_REFLEX, [
     'run',
     '--env', 'prod',
@@ -675,7 +821,6 @@ function startReflex(apiKey) {
       ...process.env,
       XAI_API_KEY: apiKey,
       ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
-      // Para que el frontend sepa dónde está el backend (custom /api/* routes)
       ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
     },
     shell: false,
@@ -684,7 +829,12 @@ function startReflex(apiKey) {
 
   reflexProcess.stdout.on('data', makeLineLogger('reflex', false));
   reflexProcess.stderr.on('data', makeLineLogger('reflex', true));
+  _wireReflexExitHandlers();
+}
 
+// Shared exit/restart handling for the reflex backend process.
+// Auto-restart hasta MAX_REFLEX_RESTARTS en caso de crash inesperado.
+function _wireReflexExitHandlers() {
   reflexProcess.on('exit', (code, signal) => {
     log(`Reflex process exited (code=${code}, signal=${signal})`);
     reflexProcess = null;
@@ -772,7 +922,23 @@ function createMainWindow() {
     },
   });
 
-  mainWindow.loadURL(REFLEX_URL);
+  // ── Cache buster (v0.13.4) ───────────────────────────────────────────
+  // Electron cachea agresivamente los assets de http://127.0.0.1:<port>.
+  // Cuando actualizamos el frontend (dev o auto-update), el browser puede
+  // seguir sirviendo JS/CSS viejos durante días — los hashes de archivo
+  // cambian pero el cache del navegador no se da cuenta si la respuesta
+  // previa tenía un Cache-Control laxo.
+  //
+  // Fix simple: limpiar el disk cache de la session ANTES de cargar la
+  // URL. Cuesta ~20ms y elimina TODA posibilidad de ver UI stale. Los
+  // assets se re-descargan, pero vienen de localhost (instant) así que
+  // el user ni nota la diferencia.
+  mainWindow.webContents.session.clearCache().then(() => {
+    mainWindow.loadURL(REFLEX_URL);
+  }).catch((err) => {
+    log(`clearCache failed (non-fatal): ${err.message}`);
+    mainWindow.loadURL(REFLEX_URL);
+  });
 
   // Links externos → navegador del sistema
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -810,15 +976,21 @@ function createMainWindow() {
 // Así garantizamos cero zombies incluso si Reflex spawn procesos que
 // perdieron a su padre por el camino.
 function killReflex() {
-  const pid = reflexProcess && !reflexProcess.killed ? reflexProcess.pid : null;
-  if (pid) {
-    log(`Matando Reflex (pid=${pid}) y su árbol de procesos`);
+  const backendPid = reflexProcess && !reflexProcess.killed ? reflexProcess.pid : null;
+  const frontendPid = frontendProcess && !frontendProcess.killed ? frontendProcess.pid : null;
+  const pidsToKill = [backendPid, frontendPid].filter(Boolean);
+
+  for (const pid of pidsToKill) {
+    log(`Matando proceso (pid=${pid}) y su árbol`);
     if (process.platform === 'win32') {
       exec(`taskkill /pid ${pid} /T /F`, { windowsHide: true }, (err) => {
         if (err) log(`taskkill err: ${err.message}`);
       });
     } else {
-      try { reflexProcess.kill('SIGTERM'); } catch {}
+      try {
+        if (pid === backendPid) reflexProcess.kill('SIGTERM');
+        if (pid === frontendPid) frontendProcess.kill('SIGTERM');
+      } catch {}
     }
   }
   // Sweep amplio: cualquier python/node/bun de este proyecto que haya

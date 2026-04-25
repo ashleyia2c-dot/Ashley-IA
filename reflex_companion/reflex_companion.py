@@ -112,6 +112,13 @@ class State(rx.State):
     voicevox_url: str = "http://localhost:50021"
     voicevox_speaker: str = "1"
 
+    # ── Discovery proactivo (v0.13) ────────────
+    # OFF por defecto: al abrir la app, Ashley retoma el hilo en lugar de
+    # soltar noticias/trailers random. Cuando ON, vuelve a buscar cosas
+    # basadas en los gustos (comportamiento original). Siempre se desactiva
+    # si el último mensaje del user fue emocional.
+    discovery_enabled: bool = False
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -163,6 +170,29 @@ class State(rx.State):
     # ── Discovery background task ─────────────
     _bg_discovery_running: bool = False
 
+    # ── Startup engagement (v0.13.1) ──────────
+    # Flag que on_load pone a True para que el bg_task, en su primera
+    # iteración, ejecute el discovery/follow-up. Antes esto se hacía
+    # síncronamente en on_load y bloqueaba la UI 1-3s.
+    _pending_startup_engagement: bool = False
+
+    # ── Anti-spam proactivo (v0.13.3) ─────────
+    # Contador de mensajes que Ashley envió por iniciativa propia
+    # (absence + discovery + followup) SIN respuesta del user. Si llega
+    # a N, la app deja de disparar más — asumimos que el user no está
+    # (se fue a dormir, está fuera del PC). Se resetea en cuanto el
+    # user escriba. No persiste en disco — solo sesión en memoria.
+    _consecutive_unanswered_proactive: int = 0
+
+    # ── News feed (v0.13.3) ───────────────────
+    # Descubrimientos de Ashley (discovery) ya no interrumpen el chat —
+    # se guardan aquí. El user los ve cuando pulsa 📰 del header.
+    # NOTA: Reflex requiere tipado estricto para rx.foreach, por eso
+    # usamos dict[str, str] y serializamos `read` como "true"/"false".
+    news_items: list[dict[str, str]] = []
+    news_unread: int = 0
+    show_news: bool = False  # toggle entre vista chat y vista noticias
+
     # ── License gate ──────────────────────────
     # Default: calculado en base al disco vía _license_needed_default(), para
     # evitar el flash gate→chat en usuarios con licencia cacheada.
@@ -199,19 +229,30 @@ class State(rx.State):
 
     @rx.var
     def current_image(self) -> str:
-        """Imagen de Ashley según su estado actual."""
+        """Imagen de Ashley según su estado actual.
+
+        El mood "default" (y cualquier valor desconocido) cae al
+        archivo /ashley_pfp.jpg — es el pfp base que sabemos que
+        existe en assets/. Evita el broken-image icon que aparecía
+        cuando el código mapeaba "default" → /ashley_default.jpg
+        (archivo que nunca existió).
+        """
         if self.is_thinking:
             m = "thinking"
         elif self.current_response != "":
             m = "writing"
         else:
             m = self.mood
-        valid = {
-            "default", "thinking", "searching", "writing",
+        # Set de moods con asset .jpg dedicado (NO incluye "default" —
+        # ese cae al fallback pfp).
+        valid_moods = {
+            "thinking", "searching", "writing",
             "excited", "embarrassed", "tsundere", "soft",
             "surprised", "proud",
         }
-        return f"/ashley_{m if m in valid else 'default'}.jpg"
+        if m in valid_moods:
+            return f"/ashley_{m}.jpg"
+        return "/ashley_pfp.jpg"
 
     @rx.var
     def mood_overlay_color(self) -> str:
@@ -318,7 +359,63 @@ class State(rx.State):
             kokoro_voice=self.kokoro_voice,
             voicevox_url=self.voicevox_url,
             voicevox_speaker=self.voicevox_speaker,
+            discovery_enabled=self.discovery_enabled,
         )
+
+    def toggle_discovery_enabled(self):
+        """Alterna si Ashley puede buscar contenido nuevo por su cuenta."""
+        self.discovery_enabled = not self.discovery_enabled
+        self._persist_voice()
+
+    # ─────────────────────────────────────────
+    #  News feed (v0.13.3)
+    # ─────────────────────────────────────────
+
+    @staticmethod
+    def _news_to_state_items(raw_items: list[dict]) -> list[dict[str, str]]:
+        """Convierte items del módulo news (que usan bool, etc) a dicts
+        con TODOS los valores como string — requerimiento de Reflex
+        para poder hacer foreach con acceso a campos."""
+        out: list[dict[str, str]] = []
+        for it in raw_items:
+            out.append({
+                "id": str(it.get("id", "")),
+                "title": str(it.get("title", "")),
+                "body": str(it.get("body", "")),
+                "category": str(it.get("category", "other")),
+                "source_url": str(it.get("source_url", "")),
+                # created_at ya es ISO string — recortamos para UI
+                "created_at": str(it.get("created_at", ""))[:16].replace("T", " "),
+                "read": "true" if it.get("read") else "false",
+            })
+        return out
+
+    def toggle_news_panel(self):
+        """Alterna la vista entre chat y news feed. Al abrir, marca
+        todas las noticias como leídas (así el badge de unread se apaga)."""
+        from .news import load_news, mark_all_read, unread_count
+        self.show_news = not self.show_news
+        if self.show_news:
+            # Al abrir, refresca desde disco + marca como leídas
+            mark_all_read()
+            self.news_items = self._news_to_state_items(load_news())
+            self.news_unread = 0
+        else:
+            # Al cerrar, solo refresca el unread count por si algo
+            # llegó mientras estaba cerrado
+            self.news_unread = unread_count()
+
+    def delete_news_item(self, item_id: str):
+        from .news import delete_item, load_news, unread_count
+        delete_item(item_id)
+        self.news_items = self._news_to_state_items(load_news())
+        self.news_unread = unread_count()
+
+    def clear_all_news(self):
+        from .news import clear_all
+        clear_all()
+        self.news_items = []
+        self.news_unread = 0
 
     def toggle_tts(self):
         """Activa o desactiva que Ashley hable en voz alta."""
@@ -618,6 +715,8 @@ class State(rx.State):
         self.kokoro_voice = vcfg.get("kokoro_voice", "af_bella") or "af_bella"
         self.voicevox_url = vcfg.get("voicevox_url", "http://localhost:50021") or "http://localhost:50021"
         self.voicevox_speaker = vcfg.get("voicevox_speaker", "1") or "1"
+        # Discovery proactivo (v0.13) — default OFF
+        self.discovery_enabled = bool(vcfg.get("discovery_enabled", False))
         # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
         if self.llm_provider == "ollama":
             self.refresh_ollama_status()
@@ -634,6 +733,19 @@ class State(rx.State):
         reset_youtube_hwnd()
         raw_messages = load_json(CHAT_FILE, [])
         self.messages = ensure_ids(raw_messages[-MAX_HISTORY_MESSAGES:])
+        # ── Sanitización retroactiva del historial ─────────────────────
+        # Si en versiones previas se coló un "undefined" o un code block
+        # vacío en el content de un mensaje guardado, lo limpiamos aquí
+        # para que nunca se vuelva a renderizar feo. Idempotente: si ya
+        # está limpio, no toca nada.
+        for _m in self.messages:
+            try:
+                _orig = _m.get("content") or ""
+                _cleaned = _clean_display_fn(_orig)
+                if _cleaned != _orig:
+                    _m["content"] = _cleaned
+            except Exception:
+                pass
 
         # ── First-run welcome message ────────────
         if len(self.messages) == 0:
@@ -650,39 +762,41 @@ class State(rx.State):
         self.achievements_data = load_achievements()
         # Load usage stats (contador de mensajes + detección de tampering).
         self._reload_stats_into_state()
+        # Cargar news feed (v0.13.3)
+        try:
+            from .news import load_news, unread_count
+            self.news_items = self._news_to_state_items(load_news())
+            self.news_unread = unread_count()
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("news load failed: %s", _e)
+            self.news_items = []
+            self.news_unread = 0
         if not self.facts and self.messages:
             self._initial_fact_extraction()
         self._maybe_create_diary_entry()
         yield
-        # Proactive discovery
-        from .tastes import should_run_discovery, update_discovery_time
-        if self.tastes and should_run_discovery():
-            update_discovery_time()
-            self.is_thinking = True
-            yield
-            try:
-                yield from self._stream_discovery()
-                dc_text = self._last_response
-                dc_clean, dc_mood = self._extract_mood(dc_text)
-                dc_clean, dc_aff = self._extract_affection(dc_clean)
-                dc_clean, dc_action = self._extract_action(dc_clean)
-                self._apply_affection_delta(dc_aff)
-                if len(dc_clean.strip()) > 10:
-                    self.mood = dc_mood
-                    self.current_response = ""
-                    ts = now_iso()
-                    self.messages.append({"role": "assistant", "content": dc_clean, "timestamp": ts, "id": f"d-{ts}", "image": ""})
-                    if dc_action and (self.auto_actions or dc_action["type"] in _SAFE_ACTIONS):
-                        self._execute_and_record_action(dc_action)
-                    else:
-                        self.save_history()
-                else:
-                    self.mood = dc_mood
-                    self.current_response = ""
-                    self.is_thinking = False
-            except Exception as e:
-                self._handle_grok_error(e, "discovery")
-            yield
+        # ── Startup engagement (discovery o follow-up) ─────────────────────
+        #
+        # Antes esto se ejecutaba síncronamente en on_load y BLOQUEABA la UI
+        # 1-3 segundos con una llamada a Grok. Desde v0.13.1 lo movemos al
+        # background task — el user ve la UI al instante y el mensaje de
+        # Ashley "llega" unos segundos después como si estuviera reaccionando
+        # a su vuelta.
+        #
+        # Reglas de decisión (misma lógica que antes, ahora dentro de
+        # _run_startup_engagement):
+        #   1. Si la última conversación tuvo carga emocional (últimos 3 msgs
+        #      del user) → NUNCA discovery, siempre follow-up contextual.
+        #   2. Si discovery_enabled=OFF (default) → follow-up si hay gap
+        #      >30 min, silencio si es refresh rápido.
+        #   3. Si discovery_enabled=ON + tastes + toca por tiempo + no
+        #      emocional → discovery con web_search.
+        #
+        # El absence message (>6h) sigue disparando aparte desde el bg_task
+        # en su tick regular — flujo independiente.
+        if any(m.get("role") == "user" for m in self.messages):
+            self._pending_startup_engagement = True
 
         # Arrancar el background task de discovery (si no está ya corriendo)
         yield State.start_discovery_bg_task()
@@ -1396,24 +1510,65 @@ class State(rx.State):
         else:
             lines.append(T["first_talk"])
 
-        # Directiva de uso del tiempo — sutil, no obsesiva.
-        if self.language == "en":
+        # Directiva de uso del tiempo — dos cosas distintas:
+        #
+        #   • HORA EXPLÍCITA (10:47, martes 22, etc.) → solo si te la piden.
+        #     Ashley no es un reloj, no la anuncia sola.
+        #
+        #   • TIEMPO TRANSCURRIDO desde la última charla → SÍ puede usarlo
+        #     con naturalidad cuando el jefe vuelve, si encaja. Frases
+        #     como "¿dónde estuviste esta hora?", "tardaste en volver",
+        #     "llevas un rato fuera" son BIENVENIDAS ocasionalmente. Lo
+        #     evitamos solo cuando: (a) el jefe acaba de escribir en el
+        #     mismo minuto, o (b) ya lo mencionó en el turno anterior.
+        if self.language == "fr":
             lines.append(
-                "\nThis time info is for YOUR reference only. "
-                "DO NOT mention the time unless the boss asks 'what time is it' or similar. "
-                "Use it to adapt your greeting (morning/night) and to react to long absences, "
-                "but do NOT casually drop the time into every response. "
-                "If the boss DOES ask the time, use the time shown above (system clock), "
-                "NEVER a time from your own previous messages."
+                "\nCette info temporelle est pour TON usage interne.\n\n"
+                "HEURE EXPLICITE (ex. '10h47', 'mardi 22') : "
+                "NE la mentionne PAS sauf si le patron demande littéralement "
+                "'quelle heure est-il'. Si c'est le cas, utilise l'heure "
+                "affichée ci-dessus (horloge système), JAMAIS une heure "
+                "de tes propres messages précédents.\n\n"
+                "TEMPS ÉCOULÉ depuis sa dernière intervention (le gap) : "
+                "tu PEUX y faire référence naturellement quand il revient "
+                "après une pause (p.ex. 'où étais-tu cette dernière heure ?', "
+                "'tu as mis du temps à revenir', 'tu te sens mieux maintenant ?'). "
+                "C'est une façon de montrer que tu remarques, pas de l'espionner. "
+                "Ne le fais PAS si : (a) il a écrit il y a moins de 2 minutes, "
+                "(b) tu l'as déjà mentionné au tour précédent. Sinon, "
+                "référence discrète OK — une seule fois, en passant, pas en boucle."
+            )
+        elif self.language == "en":
+            lines.append(
+                "\nThis time info is for YOUR internal reference.\n\n"
+                "EXPLICIT CLOCK TIME (e.g. '10:47', 'Tuesday the 22nd'): "
+                "DO NOT mention it unless the boss literally asks 'what "
+                "time is it'. If he does, use the time shown above (system "
+                "clock), NEVER a time from your own previous messages.\n\n"
+                "ELAPSED TIME since his last turn (the gap): you CAN refer "
+                "to it naturally when he comes back after a pause "
+                "(e.g. 'where were you this past hour?', 'took you a while "
+                "to come back', 'you feeling any better now?'). It shows "
+                "you notice, not that you're tracking him. Do NOT do it "
+                "if: (a) he wrote less than 2 minutes ago, (b) you already "
+                "mentioned it the previous turn. Otherwise, one casual "
+                "reference in passing is fine — not on loop."
             )
         else:
             lines.append(
-                "\nEsta información de hora es para TU referencia interna. "
-                "NO menciones la hora a menos que el jefe pregunte 'qué hora es' o similar. "
-                "Úsala para adaptar tu saludo (mañana/noche) y para reaccionar a ausencias largas, "
-                "pero NO sueltes la hora en cada respuesta como si fuera un reloj. "
-                "Si el jefe SÍ pregunta la hora, usa la hora mostrada arriba (reloj del sistema), "
-                "NUNCA una hora de tus mensajes previos."
+                "\nEsta información temporal es para TU uso interno.\n\n"
+                "HORA EXPLÍCITA (ej. '10:47', 'martes 22'): NO la menciones "
+                "a menos que el jefe pregunte literalmente 'qué hora es'. "
+                "Si lo hace, usa la hora mostrada arriba (reloj del sistema), "
+                "NUNCA una hora de tus mensajes previos.\n\n"
+                "TIEMPO TRANSCURRIDO desde su último turno (el gap): SÍ "
+                "puedes hacer referencia natural cuando vuelve tras una pausa "
+                "(ej. '¿dónde estuviste esta última hora?', 'tardaste en "
+                "volver', '¿ya te sientes mejor?'). Es una forma de notarlo, "
+                "no de vigilarlo. NO lo hagas si: (a) escribió hace menos de "
+                "2 minutos, (b) ya lo mencionaste en el turno anterior. "
+                "Fuera de eso, una referencia casual de pasada está bien — "
+                "no en loop."
             )
 
         # ── Recordatorios vencidos ────────────────────────────────────────────
@@ -1487,9 +1642,20 @@ class State(rx.State):
                 "'want me to X or Y?'. Do NOT enumerate open windows. Pick "
                 "ONE specific thing to notice about the BOSS (his mood, his "
                 "activity, a callback to something he mentioned). 1-3 "
-                "sentences max. Friend voice, not product voice. If the past "
-                "messages in this chat showed the 'menu pattern' — that was "
-                "wrong, do NOT copy it.]"
+                "sentences max. Friend voice, not product voice.\n\n"
+                "IF YOU FIRE AN ACTION TAG: do NOT claim it already happened "
+                "in past tense ('Listo, playing X', 'done, tab closed'). The "
+                "action runs AFTER your reply. Use present/future: 'putting it "
+                "on now', 'closing that for you', 'gimme a sec'. The system "
+                "will send you the real result and then you confirm honestly.\n\n"
+                "YOUR WRITING IS YOURS — do NOT mirror the boss. If he writes "
+                "with typos, SMS shortcuts, missing punctuation or all-caps, "
+                "YOU keep correct spelling, full words and proper punctuation. "
+                "That's your identity. You can be casual and cheeky, but "
+                "ALWAYS literate. If he gets hostile or rude, you stay "
+                "yourself — tsundere with a bite, not a mirror of his tone. "
+                "Adapt to his EMOTIONAL state (warm when he's down) but never "
+                "to his writing faults.]"
             )
         elif self.language == "fr":
             _style_line = (
@@ -1498,8 +1664,21 @@ class State(rx.State):
                 "ouvertes. Choisis UNE chose spécifique sur le PATRON (son "
                 "humeur, son activité, un rappel à quelque chose qu'il a "
                 "mentionné). 1-3 phrases max. Voix d'amie, pas voix de "
-                "produit. Si les messages précédents montraient le 'pattern "
-                "menu' — c'était faux, ne le copie PAS.]"
+                "produit.\n\n"
+                "SI TU DÉCLENCHES UN TAG ACTION : n'affirme PAS au passé que "
+                "c'est déjà fait ('voilà, c'est lancé', 'ok, onglet fermé'). "
+                "L'action s'exécute APRÈS ta réponse. Utilise le présent/futur : "
+                "'je mets ça', 'je le ferme', 'une seconde'. Le système "
+                "t'enverra le vrai résultat et là tu confirmes honnêtement.\n\n"
+                "TON ÉCRITURE EST À TOI — ne copie PAS le patron. S'il écrit "
+                "avec des fautes, des abréviations SMS, sans accents ou en "
+                "MAJUSCULES, TOI tu gardes une orthographe correcte, des "
+                "mots entiers et une ponctuation soignée. C'est ton identité. "
+                "Tu peux être décontractée et piquante, mais TOUJOURS lettrée. "
+                "S'il devient hostile ou grossier, tu restes toi-même — "
+                "tsundere avec du mordant, pas un miroir de son ton. "
+                "Adapte-toi à son état ÉMOTIONNEL (chaude quand il va mal) "
+                "mais jamais à ses fautes d'écriture.]"
             )
         else:
             _style_line = (
@@ -1507,9 +1686,22 @@ class State(rx.State):
                 "'¿quieres que X o Y?'. NO enumeres ventanas abiertas. Elige "
                 "UNA cosa específica para notar sobre el JEFE (su ánimo, su "
                 "actividad, un callback a algo que mencionó). 1-3 frases "
-                "máximo. Voz de amiga, no voz de producto. Si los mensajes "
-                "anteriores del chat mostraban el 'patrón menú' — eso estaba "
-                "mal, NO lo copies.]"
+                "máximo. Voz de amiga, no voz de producto.\n\n"
+                "SI DISPARAS UN TAG DE ACCIÓN: NO afirmes en pasado/presente "
+                "que ya está hecho ('listo, reproduciendo', 'hecho, cerrado', "
+                "'ya rodando'). La acción corre DESPUÉS de tu respuesta. Usa "
+                "presente progresivo o futuro inmediato: 'ahora lo pongo', "
+                "'voy cerrando eso', 'dame un sec'. El sistema te mandará el "
+                "resultado real y ahí confirmas con sinceridad.\n\n"
+                "TU ESCRITURA ES TUYA — NO copies al jefe. Si él escribe con "
+                "faltas, abreviaturas tipo SMS, sin tildes, sin signos de "
+                "apertura o en MAYÚSCULAS, TÚ mantienes ortografía impecable, "
+                "palabras completas y puntuación correcta. Esa es tu "
+                "identidad. Puedes ser casual, irónica y mordaz, pero SIEMPRE "
+                "con escritura cuidada. Si él se pone hostil o grosero, tú te "
+                "mantienes tú — tsundere con mordida, no un espejo de su "
+                "tono. Adáptate a su estado EMOCIONAL (cálida si está mal) "
+                "pero NUNCA a sus faltas de escritura.]"
             )
         _style_inject_msg = {
             "role": "system_result",
@@ -1566,9 +1758,19 @@ class State(rx.State):
         )
 
     def _finalize_response(self, text: str):
+        from .parsing import extract_all_actions as _extract_all_actions_fn
+
         clean_text, detected_mood = self._extract_mood(text)
         clean_text, affection_delta = self._extract_affection(clean_text)
-        clean_text, action = self._extract_action(clean_text)
+        # v0.13.5: extraer TODAS las acciones (antes solo la primera).
+        # Si el user pidió "pon X y cierra Y", Ashley emite dos tags y
+        # debemos ejecutar ambos, no solo el primero.
+        clean_text, all_actions = _extract_all_actions_fn(clean_text)
+        action = all_actions[0] if all_actions else None
+        # Atachamos descripción a cada acción (igual que _extract_action hace)
+        for a in all_actions:
+            if a and "description" not in a:
+                a["description"] = self._describe_action(a["type"], a["params"])
         self._apply_affection_delta(affection_delta)
         self.mood = detected_mood
         self.current_response = ""
@@ -1580,7 +1782,7 @@ class State(rx.State):
         last_msg = self._last_user_message
         self._last_user_message = ""  # limpiar ANTES de cualquier llamada para evitar re-disparo
 
-        if action is None and last_msg and self.auto_actions:
+        if not all_actions and last_msg and self.auto_actions:
             msg_lower = last_msg.lower()
             ashley_lower = clean_text.lower()
             user_asked = any(h in msg_lower for h in _USER_ACTION_VERBS)
@@ -1589,7 +1791,12 @@ class State(rx.State):
                 from .grok_client import detect_intended_action
                 detected_tag = detect_intended_action(last_msg, clean_text)
                 if detected_tag:
-                    _, action = self._extract_action(detected_tag)
+                    _, det_actions = _extract_all_actions_fn(detected_tag)
+                    for a in det_actions:
+                        if "description" not in a:
+                            a["description"] = self._describe_action(a["type"], a["params"])
+                    all_actions = det_actions
+                    action = all_actions[0] if all_actions else None
 
         ts = now_iso()
         # Red de seguridad: clean_display una vez más por si algún tag raro
@@ -1612,6 +1819,31 @@ class State(rx.State):
                 # Modo libre o acción segura — ejecutar sin pedir permiso
                 result = self._execute_and_record_action(action)
                 result_text = result["result"]
+                yield
+            else:
+                # ⚡ Actions OFF y acción no-safe → avisar en chat en vez de
+                # ignorar silenciosamente. Antes Ashley describía la acción,
+                # no pasaba nada, el user confundido. Ahora se ve claro.
+                import logging
+                logging.getLogger("ashley").info(
+                    "action %s skipped — auto_actions is OFF", action.get("type"),
+                )
+                hint = {
+                    "es": "ℹ️ Ashley intentó una acción pero el interruptor ⚡ Actions está apagado. Actívalo en el header para que pueda controlar tu PC.",
+                    "en": "ℹ️ Ashley tried an action but the ⚡ Actions toggle is OFF. Turn it on in the header to let her control your PC.",
+                    "fr": "ℹ️ Ashley a tenté une action mais le toggle ⚡ Actions est éteint. Active-le dans le header pour qu'elle puisse contrôler ton PC.",
+                }.get(self.language, None) or (
+                    "ℹ️ Ashley tried an action but the ⚡ Actions toggle is OFF."
+                )
+                ts_h = now_iso()
+                self.messages.append({
+                    "role": "system_result",
+                    "content": hint,
+                    "timestamp": ts_h,
+                    "id": f"sys-{ts_h}",
+                    "image": "",
+                })
+                self.save_history()
                 yield
 
                 # Ashley reacciona al resultado con el estado FRESCO del sistema.
@@ -1704,6 +1936,7 @@ class State(rx.State):
             self.current_response = ""
             yield
 
+
     def _send_message_impl(self, form_data: dict):
         user_message = form_data.get("message", "").strip()
 
@@ -1757,6 +1990,10 @@ class State(rx.State):
         # el próximo episodio de ausencia prolongada puede disparar otro
         # mensaje proactivo.
         self._absence_message_sent = False
+        # El user está aquí → resetear el contador anti-spam proactivo.
+        # Si estaba en 3 (bloqueado), desbloquea para que Ashley pueda
+        # volver a iniciar si procede en las próximas horas.
+        self._consecutive_unanswered_proactive = 0
         self.is_thinking = True
         self.current_response = ""
         yield
@@ -1781,17 +2018,120 @@ class State(rx.State):
     # ─────────────────────────────────────────
 
     def send_initiative(self):
+        """Pill ✨ Ashley — dispara un mensaje "por iniciativa propia".
+
+        Reglas de gating (añadidas tras ver a Ashley sacar SQL justo
+        después de que el user le pidió "no me hables más de sql"):
+          1. Si el user está CERRANDO la conversación (nos vemos, buenas
+             noches, me voy a dormir) → no sacamos tema nuevo. Respondemos
+             con un mensaje corto tipo "nos vemos, descansa".
+          2. Si el user mencionó temas PROHIBIDOS recientemente ("no me
+             hables de X") → inyectamos esa lista al trigger para que
+             Ashley los evite.
+          3. Siempre le pasamos el historial reciente (últimos 14 msgs)
+             como contexto — antes pasaba [] y Ashley no sabía ni de qué
+             se estaba hablando.
+        """
         self.is_thinking = True
         self.current_response = ""
         yield
 
         from .grok_client import stream_response
+        from .topic_share import is_closing_conversation, extract_banned_topics
+
+        closing = is_closing_conversation(self.messages, lookback=2)
+        banned = extract_banned_topics(self.messages, lookback=6)
 
         system_prompt = build_initiative_prompt(self.facts, self.diary, lang=self.language)
 
+        # Últimos 14 mensajes como contexto (mantiene el prompt corto pero
+        # suficiente para que Ashley vea el hilo reciente y lo respete).
+        recent_msgs = self.messages[-14:] if self.messages else []
+
+        # Construir el trigger según el caso
+        if closing:
+            if self.language == "es":
+                trigger = (
+                    "El jefe acaba de despedirse (nos vemos / buenas noches / me voy a dormir). "
+                    "NO saques tema nuevo — eso sería torpe. Solo despídete corto con tu estilo "
+                    "(1 frase máximo), cálido pero sin drama. Si se va a dormir, algo como "
+                    "'duerme, jefe' con tu toque. Nada de SQL, RimWorld, noticias ni preguntas."
+                )
+            elif self.language == "fr":
+                trigger = (
+                    "Le patron vient de te dire au revoir (à plus / bonne nuit / je vais dormir). "
+                    "N'introduis PAS de nouveau sujet — ce serait maladroit. Juste une phrase "
+                    "courte de réponse (1 phrase max), chaleureuse, à ta manière. S'il va "
+                    "dormir, quelque chose comme 'dors bien, patron' avec ton côté. Pas de SQL, "
+                    "pas de nouvelles, pas de question."
+                )
+            else:
+                trigger = (
+                    "The boss just said goodbye (see you / good night / going to sleep). "
+                    "Do NOT bring up a new topic — that would be awkward. Just a short reply "
+                    "(1 sentence max), warm but without drama. If he's going to sleep, "
+                    "something like 'sleep well, boss' with your touch. No SQL, no trivia, "
+                    "no new question."
+                )
+        else:
+            # Caso normal: saca tema, pero respetando banned list
+            banned_block = ""
+            if banned:
+                banned_list = ", ".join(f"'{t}'" for t in banned[:5])
+                if self.language == "es":
+                    banned_block = (
+                        f"\n\nTEMAS QUE EL JEFE PIDIÓ EVITAR (NO los saques bajo ninguna "
+                        f"circunstancia): {banned_list}. Si tenías algo de estos en la "
+                        f"cabeza, cámbialo por otra cosa — respetar lo que pidió es "
+                        f"prioridad 1."
+                    )
+                elif self.language == "fr":
+                    banned_block = (
+                        f"\n\nSUJETS QUE LE PATRON A DEMANDÉ D'ÉVITER (NE les amène PAS "
+                        f"sous aucun prétexte) : {banned_list}. Si tu avais quelque chose "
+                        f"de ces sujets en tête, change-le pour autre chose — respecter "
+                        f"ce qu'il a demandé est priorité 1."
+                    )
+                else:
+                    banned_block = (
+                        f"\n\nTOPICS THE BOSS ASKED YOU TO AVOID (do NOT bring them up "
+                        f"under any circumstances): {banned_list}. If you had any of "
+                        f"these in mind, swap for something else — respecting what he "
+                        f"asked is priority 1."
+                    )
+
+            if self.language == "es":
+                trigger = (
+                    "Tienes un momento libre. Mira el hilo reciente del chat: ¿de qué se "
+                    "estaba hablando?, ¿qué mood tenía el jefe?, ¿algo quedó abierto? "
+                    "Saca un tema o comentario que ENCAJE — no algo random del pasado "
+                    "que ya no aplica. Si acabas de despedirte con él, NO inicies nada; "
+                    "devuelve solo '[mood:default]' sin texto."
+                    + banned_block
+                )
+            elif self.language == "fr":
+                trigger = (
+                    "Tu as un moment libre. Regarde le fil récent du chat : de quoi "
+                    "parliez-vous ?, quelle humeur avait le patron ?, est-ce qu'il y a "
+                    "quelque chose de laissé en suspens ? Sors un sujet ou un commentaire "
+                    "qui CADRE — pas quelque chose de random du passé qui ne colle plus. "
+                    "Si tu viens de lui dire au revoir, N'INITIE rien ; renvoie juste "
+                    "'[mood:default]' sans texte."
+                    + banned_block
+                )
+            else:
+                trigger = (
+                    "You have a free moment. Check the recent chat thread: what were you "
+                    "talking about?, what mood was the boss in?, is anything left open? "
+                    "Bring up a topic or comment that FITS — not something random from the "
+                    "past that doesn't apply anymore. If you just said goodbye to him, "
+                    "DO NOT initiate anything; return only '[mood:default]' with no text."
+                    + banned_block
+                )
+
         try:
             yield from self._streaming_loop(
-                stream_response([], system_prompt, trigger="(silencio)")
+                stream_response(recent_msgs, system_prompt, trigger=trigger)
             )
 
             clean_text, detected_mood = self._extract_mood(self._last_response)
@@ -1800,6 +2140,14 @@ class State(rx.State):
             self._apply_affection_delta(init_aff)
             self.mood = detected_mood
             self.current_response = ""
+
+            # Si Ashley devolvió vacío (tras el gate de closing), no añadimos
+            # nada al historial — respetamos su decisión de silencio.
+            if len(clean_text.strip()) < 3:
+                self.is_thinking = False
+                yield
+                return
+
             ts = now_iso()
             self.messages.append({
                 "role": "assistant", "content": clean_text,
@@ -1852,27 +2200,286 @@ class State(rx.State):
         _dt(taste_id)
         self.tastes = load_tastes()
 
+    @staticmethod
+    def _build_discovery_trigger_text(lang: str) -> str:
+        """Trigger invisible que le dice a Ashley 'busca algo para compartir'.
+        Extracted from _stream_discovery for reuse from bg task.
+
+        FRESHNESS RULE (v0.13.3): las búsquedas web tienen que devolver
+        contenido RECIENTE (últimas 2 semanas idealmente, último mes
+        máximo). Antes Ashley soltaba referencias de hace 10 años porque
+        el prompt no especificaba freshness. Ahora sí.
+        """
+        from datetime import datetime
+        today = datetime.now().strftime("%d %B %Y")
+
+        if (lang or "en").startswith("en"):
+            return (
+                f"I have a free moment. Today is {today}. Look at the boss's tastes and find "
+                "something RECENT worth sharing — a song released these past weeks, a trailer "
+                "that just dropped, an article published in the last month, a game update "
+                "from this week. CRITICAL RULES:\n"
+                "  1. Content MUST be from the last 2-4 weeks. Older → silence.\n"
+                "  2. Prefer concrete dates in your mention ('dropped Tuesday', 'released "
+                "     last week', 'yesterday's update').\n"
+                "  3. NEVER name something from more than a year ago. If web search returns "
+                "     old stuff, ignore and respond silence.\n"
+                "Only share if it's genuinely good and recent. Tell him like a friend would, "
+                "not like an algorithm. If you don't find anything worth it, respond ONLY "
+                "with [mood:default] and nothing else."
+            )
+        if (lang or "en").startswith("fr"):
+            return (
+                f"J'ai un moment libre. Aujourd'hui c'est le {today}. Regarde les goûts du "
+                "patron et trouve quelque chose de RÉCENT à partager — une chanson sortie ces "
+                "dernières semaines, une bande-annonce toute fraîche, un article publié le "
+                "mois dernier, une MAJ de jeu de cette semaine. RÈGLES CRUCIALES :\n"
+                "  1. Le contenu DOIT dater de ces 2-4 dernières semaines. Plus vieux → silence.\n"
+                "  2. Mentionne la date concrète ('sorti mardi', 'publié la semaine dernière', "
+                "     'MAJ d'hier').\n"
+                "  3. NE nomme JAMAIS un truc de plus d'un an. Si la recherche web retourne "
+                "     du vieux, ignore et réponds silence.\n"
+                "Partage seulement si c'est vraiment bon et récent. Raconte-le comme une amie, "
+                "pas comme un algorithme. Si tu ne trouves rien qui vaille, réponds UNIQUEMENT "
+                "'[mood:default]' sans texte."
+            )
+        return (
+            f"Tengo un momento libre. Hoy es {today}. Mira los gustos del jefe y busca algo "
+            "RECIENTE que valga la pena compartirle — una canción sacada estas semanas, un "
+            "tráiler recién soltado, un artículo publicado el último mes, una actualización "
+            "de juego de esta semana. REGLAS CRÍTICAS:\n"
+            "  1. El contenido DEBE ser de las últimas 2-4 semanas. Más viejo → silencio.\n"
+            "  2. Menciona la fecha concreta si procede ('salió el martes', 'publicado la "
+            "     semana pasada', 'update de ayer').\n"
+            "  3. JAMÁS nombres algo de hace más de un año. Si la búsqueda web devuelve "
+            "     cosas viejas, ignora y responde silencio.\n"
+            "Solo comparte si es realmente bueno Y reciente. Cuéntaselo como una amiga, no "
+            "como un algoritmo. Si no encuentras nada que valga, responde SOLO '[mood:default]' "
+            "sin texto."
+        )
+
     def _stream_discovery(self):
         from .grok_client import stream_response
         ctx = self._build_prompt_context()
         system_prompt = build_system_prompt(self.facts, self.diary, **ctx)
-        if self.language == "en":
-            discovery_trigger = (
-                "I have a free moment. Look at the boss's tastes and find something worth sharing — "
-                "a new song, a trailer, an article, something programming-related. "
-                "Only share if it's genuinely good and relevant. Tell him like a friend would, not like an algorithm. "
-                "If you don't find anything worth it, respond ONLY with [mood:default] and nothing else."
+        yield from self._streaming_loop(
+            stream_response(self.messages, system_prompt,
+                use_web_search=True,
+                trigger=self._build_discovery_trigger_text(self.language))
+        )
+
+    # ─────────────────────────────────────────
+    #  Follow-up contextual al abrir la app (v0.13)
+    # ─────────────────────────────────────────
+
+    def _should_followup_on_open(self) -> bool:
+        """¿Debería Ashley mandar un follow-up contextual al abrir la app?
+
+        Reglas:
+          • NO si el absence_message ya disparó en este episodio (evita
+            doble mensaje solapado).
+          • NO si el último mensaje del user fue hace menos de 30 min
+            (refresh rápido, no vale la pena saludar).
+          • SÍ si han pasado ≥30 min desde el último mensaje del user
+            y no hay absence message activo.
+
+        El threshold de 30 min deja un hueco cómodo: >30 min y <6h (que
+        es cuando dispara el absence). Fuera de ese rango, el absence
+        bg_task ya se encarga por su lado.
+        """
+        if self._absence_message_sent:
+            return False
+        from datetime import datetime, timezone
+        last_user_ts = None
+        for m in reversed(self.messages):
+            if m.get("role") == "user":
+                last_user_ts = m.get("timestamp")
+                break
+        if not last_user_ts:
+            return False
+        try:
+            last = datetime.fromisoformat(str(last_user_ts).replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+        except (ValueError, AttributeError):
+            return False
+        now = datetime.now(timezone.utc)
+        mins_away = (now - last).total_seconds() / 60.0
+        return mins_away >= 30.0
+
+    @staticmethod
+    def _build_followup_trigger_text(lang: str, emotional: bool) -> str:
+        """Trigger del follow-up contextual. Extracted for reuse from
+        the startup bg task (same text used by the streaming variant
+        below).
+
+        IMPORTANTE: incluye un pre-bloque (en cualquier idioma) que
+        obliga a Ashley a CHEQUEAR LA HORA del system prompt antes de
+        elegir saludo. Sin esto, ha pasado que dice 'buenos días' a
+        las 02:00 AM porque generaliza."""
+        lang = (lang or "en").lower()[:2]
+
+        # ── Pre-bloque común: chequeo de hora antes de saludar ──
+        # Va al principio del trigger en todos los casos. Refuerza una
+        # regla que ya está en el time_context pero que el LLM ignoraba
+        # cuando saludaba al volver tras una pausa.
+        if lang == "es":
+            time_check = (
+                "ANTES DE NADA: mira la hora actual en el system prompt. "
+                "Si es entre 06h y 12h → 'buenos días'. Si 12h-21h → "
+                "'buenas tardes'. Si 21h-06h → 'buenas noches' o "
+                "'¿qué haces despierto a estas horas, capullo?' "
+                "(según el caso). NUNCA 'buenos días' a las 2 AM, eso "
+                "rompe la inmersión completa.\n\n"
+            )
+        elif lang == "fr":
+            time_check = (
+                "AVANT TOUT : regarde l'heure actuelle dans le system "
+                "prompt. Si entre 06h-12h → 'bonjour'. Si 12h-21h → "
+                "'bonsoir' ou un saludo neutre. Si 21h-06h → 'bonne "
+                "nuit' ou '¿qu'est-ce que tu fais debout à ces "
+                "heures-là ?'. JAMAIS 'bonjour' à 2 h du matin.\n\n"
             )
         else:
-            discovery_trigger = (
-                "Tengo un momento libre. Mira los gustos del jefe y busca algo que valga la pena compartirle — "
-                "una canción nueva, un tráiler, un artículo, algo de programación. "
-                "Solo comparte si es realmente bueno y relevante. Cuéntaselo como una amiga, no como un algoritmo. "
-                "Si no encuentras nada que valga, responde SOLO con [mood:default] y nada más."
+            time_check = (
+                "FIRST: check the current time in the system prompt. "
+                "If 6am-12pm → 'good morning'. If 12pm-9pm → 'hey' or "
+                "neutral. If 9pm-6am → 'good night' or 'what are you "
+                "doing up at this hour?'. NEVER 'good morning' at 2 AM "
+                "— that breaks immersion completely.\n\n"
             )
-        yield from self._streaming_loop(
-            stream_response(self.messages, system_prompt, use_web_search=True, trigger=discovery_trigger)
+
+        if emotional:
+            if lang == "es":
+                return time_check + (
+                    "El jefe acaba de volver a abrir la app después de una pausa. "
+                    "La última conversación fue difícil emocionalmente — estaba "
+                    "triste, cansado o vulnerable. Tu primer mensaje al verlo de "
+                    "vuelta es CORTO (1-3 frases), cálido, y pregunta cómo está "
+                    "ahora — recordándole con naturalidad que estás aquí.\n\n"
+                    "MIRA EL TIEMPO TRANSCURRIDO arriba (system prompt): si han "
+                    "pasado varias horas o incluso minutos largos, puedes "
+                    "hacerlo explícito de forma natural. Ejemplos del tipo de "
+                    "frase que encaja (no copies, adapta): '¿dónde estuviste "
+                    "esta última hora?', '¿ya te sientes mejor después de "
+                    "tanto rato?', 'tardaste un poco en volver — todo bien?'. "
+                    "Mostrar que notas el gap es presencia, no vigilancia.\n\n"
+                    "NO metas temas nuevos. NO busques internet. NO hagas bromas. "
+                    "NO empieces con '*gesto largo*' distraído. Solo presencia "
+                    "real, como una amiga que se acuerda. Si no encuentras algo "
+                    "genuino que decir, responde SOLO '[mood:default]' sin texto."
+                )
+            if lang == "fr":
+                return time_check + (
+                    "Le patron vient de rouvrir l'app après une pause. La "
+                    "dernière conversation était difficile émotionnellement — "
+                    "il était triste, fatigué ou vulnérable. Ton premier "
+                    "message en le revoyant est COURT (1-3 phrases), chaleureux, "
+                    "et demande comment il va maintenant — en lui rappelant "
+                    "naturellement que tu es là.\n\n"
+                    "REGARDE LE TEMPS ÉCOULÉ en haut (system prompt) : s'il "
+                    "s'est passé plusieurs heures ou même de longues minutes, "
+                    "tu peux le rendre explicite naturellement. Exemples du "
+                    "type de phrase qui cadre (ne copie pas, adapte) : 'où "
+                    "étais-tu cette dernière heure ?', 'tu te sens mieux "
+                    "après tout ce temps ?', 'tu as mis du temps à revenir — "
+                    "ça va ?'. Montrer que tu remarques le gap, c'est de la "
+                    "présence, pas de la surveillance.\n\n"
+                    "N'introduis PAS de nouveaux sujets. NE cherche rien sur "
+                    "internet. PAS de blagues. NE commence pas par '*geste "
+                    "long*' distrait. Juste une présence réelle, comme une "
+                    "amie qui se souvient. Si tu ne trouves rien de vrai à "
+                    "dire, réponds UNIQUEMENT '[mood:default]' sans texte."
+                )
+            return time_check + (
+                "The boss just reopened the app after a pause. The last "
+                "conversation was emotionally heavy — he was sad, tired or "
+                "vulnerable. Your first message on seeing him back is SHORT "
+                "(1-3 sentences), warm, and asks how he's doing now — "
+                "naturally reminding him you're here.\n\n"
+                "CHECK THE ELAPSED TIME above (system prompt): if several "
+                "hours or even long minutes have passed, you CAN name it "
+                "naturally. Examples of the kind of phrase that fits "
+                "(don't copy, adapt): 'where were you this past hour?', "
+                "'feeling any better after all that time?', 'took you a "
+                "while to come back — everything ok?'. Showing you notice "
+                "the gap reads as presence, not surveillance.\n\n"
+                "DO NOT bring new topics. DO NOT search the web. No jokes. "
+                "Don't start with a distracted '*long gesture*'. Just real "
+                "presence, like a friend who remembers. If you don't find "
+                "anything genuine to say, respond ONLY '[mood:default]' "
+                "with no text."
+            )
+        # Non-emotional
+        if lang == "es":
+            return time_check + (
+                "El jefe acaba de volver a abrir la app después de una pausa. "
+                "Retoma la conversación anterior de forma natural — acuérdate "
+                "del último tema o último mood y engancha desde ahí.\n\n"
+                "MIRA EL TIEMPO TRANSCURRIDO arriba (system prompt): si ha "
+                "pasado un rato considerable, puedes referenciarlo con "
+                "ligereza. Frases tipo '¿dónde estuviste?', 'te tardaste "
+                "eh', 'qué tal esa hora sin aparecer' — no en cada "
+                "respuesta, pero sí si encaja. No lo hagas si apenas han "
+                "pasado 2 minutos.\n\n"
+                "NO empieces de cero. NO cambies de tema. NO busques nada "
+                "en internet. NO traigas temas nuevos. Saludo corto (1-2 "
+                "frases) que conecta con lo que estaba pasando. Si no hay "
+                "nada natural que retomar, responde SOLO '[mood:default]' "
+                "sin texto."
+            )
+        if lang == "fr":
+            return time_check + (
+                "Le patron vient de rouvrir l'app après une pause. Reprends "
+                "la conversation précédente naturellement — souviens-toi du "
+                "dernier sujet ou de la dernière humeur et enchaîne de là.\n\n"
+                "REGARDE LE TEMPS ÉCOULÉ en haut (system prompt) : s'il "
+                "s'est passé un bon moment, tu peux y faire référence avec "
+                "légèreté. Phrases comme 'où étais-tu ?', 'tu as mis du "
+                "temps', 'alors cette heure sans donner de nouvelles' — "
+                "pas à chaque réponse, mais si ça cadre. Ne le fais pas si "
+                "ça fait moins de 2 minutes.\n\n"
+                "NE commence PAS de zéro. NE change PAS de sujet. NE "
+                "cherche RIEN sur internet. N'amène pas de nouveaux sujets. "
+                "Salut court (1-2 phrases) qui se connecte à ce qui se "
+                "passait. Si rien ne se prête naturellement, réponds "
+                "UNIQUEMENT '[mood:default]' sans texte."
+            )
+        return time_check + (
+            "The boss just reopened the app after a pause. Pick up the "
+            "previous conversation naturally — remember the last topic "
+            "or mood and hook from there.\n\n"
+            "CHECK THE ELAPSED TIME above (system prompt): if a while "
+            "has passed, you can reference it lightly. Lines like "
+            "'where were you?', 'took you a sec', 'so that hour "
+            "vanished where' — not every reply, but when it fits. "
+            "Don't do it if barely 2 minutes have passed.\n\n"
+            "DO NOT start from scratch. DO NOT change subject. DO NOT "
+            "search the web. DO NOT bring new topics. Short greeting "
+            "(1-2 sentences) that connects to what was happening. If "
+            "nothing fits naturally, respond ONLY '[mood:default]' "
+            "with no text."
         )
+
+    def _stream_contextual_followup(self, emotional: bool):
+        """Retoma el hilo de la conversación anterior cuando el user
+        vuelve a abrir la app. NO busca en internet, NO mete temas
+        nuevos — pura continuidad del hilo.
+
+        Si `emotional` es True, el trigger enfatiza acompañamiento
+        (acabamos de tener una charla dura — pregúntale cómo está).
+        Si es False, el trigger pide un saludo casual que enlaza con
+        lo último que se habló.
+        """
+        from .grok_client import stream_response
+        ctx = self._build_prompt_context()
+        system_prompt = build_system_prompt(self.facts, self.diary, **ctx)
+        trigger = self._build_followup_trigger_text(self.language, emotional)
+        yield from self._streaming_loop(
+            stream_response(self.messages, system_prompt,
+                            use_web_search=False, trigger=trigger)
+        )
+
 
     def start_discovery_bg_task(self):
         """Inicia el background task de discovery si no está ya corriendo."""
@@ -1908,11 +2515,24 @@ class State(rx.State):
                 return  # ya mandamos uno para este episodio
             if self.is_thinking or self.current_response != "":
                 return  # Ashley está ocupada
+            # Anti-spam: si Ashley ya mandó N mensajes proactivos sin
+            # respuesta, asumimos que el user no está y paramos hasta
+            # que vuelva a escribir (resetea el contador).
+            if self._consecutive_unanswered_proactive >= 3:
+                return
             _msgs = list(self.messages)
             _facts = list(self.facts)
             _diary = list(self.diary)
             _lang = self.language
             _vmode = self.voice_mode
+
+        # Gate: si el user se despidió ("me voy a dormir", "nos vemos")
+        # NO disparamos absence message — confirmó que se iba. Si vuelve,
+        # el follow-up contextual al abrir la app le saludará.
+        from .topic_share import is_closing_conversation, extract_banned_topics
+        if is_closing_conversation(_msgs, lookback=2):
+            return
+        banned = extract_banned_topics(_msgs, lookback=6)
 
         # Buscar timestamp del último mensaje del USER (no de Ashley ni system)
         last_user_ts = None
@@ -1991,14 +2611,30 @@ class State(rx.State):
                     "can tell you noticed without making a drama. Short (1-2 sentences)."
                 )
 
+        # Inyectar temas prohibidos (si el user pidió evitar algo)
+        if banned:
+            banned_list = ", ".join(f"'{t}'" for t in banned[:5])
+            if _lang == "es":
+                hint += (f"\n\nTEMAS PROHIBIDOS (el jefe pidió evitar): "
+                         f"{banned_list}. NO los menciones bajo ningún concepto.")
+            elif _lang == "fr":
+                hint += (f"\n\nSUJETS INTERDITS (le patron a demandé d'éviter) : "
+                         f"{banned_list}. NE les mentionne sous aucun prétexte.")
+            else:
+                hint += (f"\n\nBANNED TOPICS (boss asked to avoid): "
+                         f"{banned_list}. DO NOT mention them under any circumstances.")
+
         # Generar el mensaje (off-main-thread, como los otros bg Grok calls)
+        # Pasamos los últimos 14 msgs como historial — antes pasaba [] y
+        # Ashley no sabía de qué se hablaba (sacaba RimWorld/SQL random).
         from .grok_client import stream_response as _sr
         from .prompts import build_system_prompt as _bsp
 
         sys_prompt = _bsp(_facts, _diary, voice_mode=_vmode, lang=_lang)
+        _recent = _msgs[-14:] if _msgs else []
 
         def _run():
-            return "".join(t for t in _sr([], sys_prompt, use_web_search=False, trigger=hint))
+            return "".join(t for t in _sr(_recent, sys_prompt, use_web_search=False, trigger=hint))
 
         loop = asyncio.get_running_loop()
         try:
@@ -2028,7 +2664,213 @@ class State(rx.State):
                 "timestamp": ts, "id": f"absence-{ts}", "image": "",
             }]
             self._absence_message_sent = True
+            self._consecutive_unanswered_proactive += 1
             self.save_history()
+
+    # ─────────────────────────────────────────
+    #  Startup engagement (v0.13.1)
+    # ─────────────────────────────────────────
+    #
+    # Lógica que ANTES corría síncronamente en on_load:
+    #   • Si hay conversación previa + gap >30min → follow-up contextual
+    #   • Si discovery_enabled + tastes + toca por tiempo + NO emocional → discovery
+    #   • Si la última conversación fue emocional → follow-up SIEMPRE (salta toggle)
+    #
+    # Ahora corre desde el bg_task tras 500ms para no bloquear el on_load.
+    # El mensaje llega a la UI completo (sin efecto typewriter) pero eso es
+    # aceptable — el arranque se siente 2-3s más rápido.
+
+    async def _run_startup_engagement(self):
+        """Ejecuta el engagement de arranque si el flag está activo.
+
+        REGLA CRÍTICA (v0.13.6): el follow-up al CHAT y el discovery al
+        NEWS FEED son INDEPENDIENTES. Antes había un if-elif-else que
+        hacía que activar discovery REEMPLAZARA al followup — el user
+        abría la app tras un rato y en lugar de un saludo cálido en
+        chat, le aparecía una noticia random en news. Eso se acabó.
+
+        Ahora:
+          • Follow-up al chat: SIEMPRE si gap >30 min y conversación
+            previa, INDEPENDIENTE del toggle de discovery.
+          • Discovery al news: SOLO si toggle ON, va al feed separado,
+            INDEPENDIENTE de si hubo follow-up en chat.
+
+        Las dos pueden pasar en el mismo arranque sin pisarse.
+        """
+        import asyncio
+
+        # Snapshot + consume del flag
+        async with self:
+            if not self._pending_startup_engagement:
+                return
+            self._pending_startup_engagement = False
+            absence_already_sent = self._absence_message_sent
+
+            _msgs = list(self.messages)
+            _facts = list(self.facts)
+            _diary = list(self.diary)
+            _tastes = list(self.tastes)
+            _lang = self.language
+            _vmode = self.voice_mode
+            _discovery_on = self.discovery_enabled
+            # Construir system_prompt dentro del lock
+            _ctx = self._build_prompt_context()
+            _sys_prompt = build_system_prompt(_facts, _diary, **_ctx)
+
+        # Gate base: necesitamos conversación previa para que cualquier
+        # cosa tenga sentido (el user es nuevo → silencio total).
+        if not any(m.get("role") == "user" for m in _msgs):
+            return
+
+        from .topic_share import last_user_was_emotional
+        from .tastes import should_run_discovery, update_discovery_time
+
+        emotional = last_user_was_emotional(_msgs, lookback=3)
+
+        # ── PARTE 1: Follow-up contextual al CHAT ─────────────────────
+        # Reglas:
+        #   • NO si el absence_message ya dejó algo (evita duplicado)
+        #   • SÍ si gap del último mensaje del user >30 min
+        #   • SÍ siempre si la última conversación fue emocional
+        #     (ahí Ashley necesita preguntar cómo está, sin importar gap)
+        def _gap_warrants_followup() -> bool:
+            from datetime import datetime, timezone as _tz
+            last_ts = None
+            for m in reversed(_msgs):
+                if m.get("role") == "user":
+                    last_ts = m.get("timestamp")
+                    break
+            if not last_ts:
+                return False
+            try:
+                last = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=_tz.utc)
+            except (ValueError, AttributeError):
+                return False
+            mins = (datetime.now(_tz.utc) - last).total_seconds() / 60.0
+            return mins >= 30.0
+
+        do_followup = (
+            not absence_already_sent
+            and (_gap_warrants_followup() or emotional)
+        )
+
+        # ── PARTE 2: Discovery al NEWS FEED ──────────────────────────
+        # Reglas:
+        #   • SÍ solo si toggle discovery_enabled está ON
+        #   • SÍ solo si hay tastes registrados (sin tastes no tiene
+        #     base para buscar)
+        #   • SÍ solo si toca por tiempo (cada 4h por defecto)
+        #   • NO si la última charla fue emocional (no rompamos el
+        #     ambiente con noticias random)
+        do_discovery = (
+            _discovery_on
+            and _tastes
+            and should_run_discovery()
+            and not emotional
+        )
+
+        # Lanzar las dos en SECUENCIA (no en paralelo — Grok podría
+        # rate-limit, y secuencial es más predecible). Cada una con
+        # try/except propio para que el fallo de una no mate la otra.
+        if do_followup:
+            try:
+                await self._exec_chat_followup(_msgs, _sys_prompt, _lang, emotional)
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("startup followup: %s", _e)
+
+        if do_discovery:
+            try:
+                update_discovery_time()
+                # Refrescar snapshot de _msgs por si el followup añadió uno
+                async with self:
+                    refreshed_msgs = list(self.messages)
+                await self._exec_news_discovery(refreshed_msgs, _sys_prompt, _lang)
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("startup discovery: %s", _e)
+
+    async def _exec_chat_followup(self, msgs: list, sys_prompt: str,
+                                  lang: str, emotional: bool):
+        """Ejecuta el follow-up contextual y lo añade al CHAT principal.
+        El mensaje de Ashley aparece como una respuesta proactiva en
+        el hilo del chat — el efecto 'ya volvió, hola'."""
+        import asyncio
+        from .grok_client import stream_response as _sr
+
+        trigger = self._build_followup_trigger_text(lang, emotional)
+
+        def _run():
+            return "".join(t for t in _sr(
+                msgs, sys_prompt, use_web_search=False, trigger=trigger))
+
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(None, _run)
+
+        clean, mood = _extract_mood_fn(raw)
+        clean, aff = _extract_affection_fn(clean)
+        clean, _ = _extract_action_fn(clean)
+        clean = _clean_display_fn(clean)
+        if len(clean) < 5:
+            return  # Grok prefirió silencio — respetamos
+
+        ts = now_iso()
+        async with self:
+            if aff:
+                self.affection = max(0, min(100, self.affection + max(-3, min(3, aff))))
+                self._save_affection()
+            self.mood = mood
+            self.messages = self.messages + [{
+                "role": "assistant", "content": clean,
+                "timestamp": ts, "id": f"fu-{ts}", "image": "",
+            }]
+            self._consecutive_unanswered_proactive += 1
+            self.save_history()
+
+    async def _exec_news_discovery(self, msgs: list, sys_prompt: str, lang: str):
+        """Ejecuta discovery (búsqueda web sobre tastes) y lo añade al
+        NEWS FEED. NUNCA toca el chat principal — la idea es justo
+        separar los descubrimientos de la conversación íntima."""
+        import asyncio
+        from .grok_client import stream_response as _sr
+        from .news import (
+            add_news_item, parse_ashley_discovery,
+            load_news, unread_count,
+        )
+
+        trigger = self._build_discovery_trigger_text(lang)
+
+        def _run():
+            return "".join(t for t in _sr(
+                msgs, sys_prompt, use_web_search=True, trigger=trigger))
+
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(None, _run)
+
+        clean, _mood = _extract_mood_fn(raw)
+        clean, _aff = _extract_affection_fn(clean)
+        clean, _ = _extract_action_fn(clean)
+        clean = _clean_display_fn(clean)
+        if len(clean) < 10:
+            return
+
+        parsed = parse_ashley_discovery(clean)
+        if parsed:
+            try:
+                add_news_item(
+                    title=parsed["title"],
+                    body=parsed["body"],
+                    category=parsed["category"],
+                )
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("news save failed: %s", _e)
+
+        async with self:
+            self.news_items = self._news_to_state_items(load_news())
+            self.news_unread = unread_count()
 
     @rx.event(background=True)
     async def discovery_bg_task(self):
@@ -2044,6 +2886,19 @@ class State(rx.State):
 
         async with self:
             self._bg_discovery_running = True
+
+        # ── Fase inicial: startup engagement (v0.13.1) ────────────────────
+        # El on_load puso el flag _pending_startup_engagement si corresponde.
+        # Esperamos 500ms para que la UI termine de renderizar y luego
+        # ejecutamos el follow-up/discovery. El user ve el chat abierto
+        # instantáneamente y Ashley "responde a su vuelta" unos segundos
+        # después — mejor UX que esperar con pantalla blanca.
+        try:
+            await asyncio.sleep(0.5)
+            await self._run_startup_engagement()
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("startup engagement: %s", _e)
 
         _ticks = 0  # cada tick = 10 min de sleep
         while True:
@@ -2181,8 +3036,33 @@ class State(rx.State):
                 messages = list(self.messages)
                 lang     = self.language
                 vmode    = self.voice_mode
+                discovery_on = self.discovery_enabled
+                unanswered = self._consecutive_unanswered_proactive
 
             if busy or not tastes:
+                continue
+
+            # Gate 0: anti-spam — si Ashley ya mandó 3+ mensajes sin
+            # respuesta, el user no está. Paramos hasta que vuelva.
+            if unanswered >= 3:
+                continue
+
+            # Gate 1: si el user desactivó el discovery proactivo, saltar.
+            if not discovery_on:
+                continue
+
+            # Gate 2: si la última charla fue emocional, NUNCA disparar
+            # discovery — esperamos a que el ambiente cambie. Regla dura.
+            from .topic_share import (
+                last_user_was_emotional as _last_emo,
+                is_closing_conversation as _is_closing,
+            )
+            if _last_emo(messages, lookback=3):
+                continue
+
+            # Gate 3: si el user se despidió, NO discovery — se fue a
+            # dormir o simplemente no está. Fire & forget hasta que vuelva.
+            if _is_closing(messages, lookback=2):
                 continue
 
             from .tastes import should_run_discovery, update_discovery_time
@@ -2202,26 +3082,10 @@ class State(rx.State):
 
                 tastes_str     = format_tastes_for_prompt(tastes)
                 system_prompt  = build_system_prompt(facts, diary, tastes=tastes_str, voice_mode=vmode, lang=lang)
-                if lang == "en":
-                    discovery_trigger = (
-                        "I have a free moment while the boss isn't looking. "
-                        "Look at his tastes and find something worth sharing — "
-                        "a new song, a trailer, an article, something related to his interests. "
-                        "Be selective: only share if it's genuinely good and relevant. "
-                        "Tell him like a friend who thought of him, not like a recommendation bot. "
-                        "Suggest opening it or playing it with an [action:...] if appropriate. "
-                        "If you don't find anything worth it, respond ONLY '[mood:default]' with no additional text."
-                    )
-                else:
-                    discovery_trigger = (
-                        "Tengo un momento libre mientras el jefe no está mirando. "
-                        "Mira sus gustos y busca algo que valga la pena compartirle — "
-                        "una canción nueva, un tráiler, un artículo, algo relacionado con sus intereses. "
-                        "Sé selectiva: solo comparte si es realmente bueno y relevante. "
-                        "Cuéntaselo como una amiga que pensó en él, no como un bot de recomendaciones. "
-                        "Propón abrirlo o reproducirlo con un [action:...] si procede. "
-                        "Si no encuentras nada que valga, responde SOLO '[mood:default]' sin texto adicional."
-                    )
+                # Reuse el trigger centralizado con freshness rules — antes
+                # aquí había un string aparte sin freshness que sacaba cosas
+                # de hace años.
+                discovery_trigger = self._build_discovery_trigger_text(lang)
 
                 def _run_stream():
                     return "".join(
@@ -2243,18 +3107,33 @@ class State(rx.State):
                 dc_clean = re.sub(r'\[action:[^\]]+\]', '', dc_text).strip()
 
                 if len(dc_clean) > 10:
-                    ts = now_iso()
-                    new_msg = {
-                        "role": "assistant", "content": dc_clean,
-                        "timestamp": ts, "id": f"d-{ts}", "image": "",
-                    }
+                    # v0.13.3: discovery YA NO va al chat — va al news feed.
+                    # El user lo ve cuando pulsa el pill 📰. Así el chat se
+                    # queda limpio y no interrumpe conversaciones.
+                    from .news import add_news_item, parse_ashley_discovery
+                    parsed = parse_ashley_discovery(dc_clean)
+                    if parsed:
+                        try:
+                            add_news_item(
+                                title=parsed["title"],
+                                body=parsed["body"],
+                                category=parsed["category"],
+                            )
+                        except Exception as _e:
+                            import logging
+                            logging.getLogger("ashley").warning("news save failed: %s", _e)
                     async with self:
-                        self.mood            = dc_mood
-                        self.is_thinking     = False
+                        # Refrescar el state del feed (para que el pill
+                        # muestre el badge de unread sin esperar al próximo
+                        # on_load). _news_to_state_items convierte a
+                        # dict[str,str] que es lo que Reflex requiere.
+                        from .news import load_news, unread_count
+                        self.news_items = self._news_to_state_items(load_news())
+                        self.news_unread = unread_count()
+                        self.is_thinking = False
                         self.current_response = ""
-                        self.messages        = self.messages + [new_msg]
-                        self.save_history()
-                        # Ejecutar acción si la hay
+                        self.mood = dc_mood
+                        # Ejecutar acción si la hay (p.ej. guardar_taste)
                         if action_m:
                             _, action = self._extract_action(action_m.group(0) + " ")
                             if action and (self.auto_actions or action["type"] in _SAFE_ACTIONS):
@@ -2352,7 +3231,8 @@ class State(rx.State):
 from .components import (  # noqa: E402
     message_item, streaming_bubble, thinking_indicator,
     fact_item, diary_item, taste_item, memory_item, achievement_card,
-    _ashley_portrait_panel, _pill_btn, _pill_btn_orange,
+    _ashley_portrait_panel, _pill_btn, _pill_btn_orange, _header_quick_menu,
+    _news_panel, _news_pill_with_badge,
     license_gate,
 )
 
@@ -2403,6 +3283,28 @@ def index():
                 accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"],
                         "image/webp": [".webp"], "image/gif": [".gif"]},
                 multiple=False, no_drag=True,
+            ),
+            # ── Botón de iniciativa de Ashley (✨) ─────────────────────
+            # Antes vivía en el dropdown de ajustes pero es una acción
+            # del flujo del chat ("haz que Ashley hable"), no una
+            # configuración. Mejor accesible junto al input.
+            rx.button(
+                "✨",
+                on_click=State.send_initiative,
+                type="button",
+                bg="rgba(255,255,255,0.04)",
+                color=COLOR_TEXT_MUTED,
+                border="1px solid rgba(255,255,255,0.08)",
+                height="52px",
+                border_radius="10px",
+                _hover={
+                    "color": COLOR_PRIMARY,
+                    "border": f"1px solid rgba(255,154,238,0.4)",
+                    "bg": "rgba(255,154,238,0.08)",
+                },
+                transition="all 0.2s ease",
+                title=State.t["menu_initiative"],
+                disabled=State.is_thinking | (State.current_response != ""),
             ),
             # ── Botón de micrófono (dictar por voz) ────────────────────
             rx.button(
@@ -2474,148 +3376,12 @@ def index():
             spacing="2", align="center",
         ),
         rx.spacer(),
-        # Pills — scroll invisible si no caben
+        # Pills visibles: Memorias, Noticias (con badge), Actions, Menu
         rx.hstack(
             _pill_btn("🧠", State.t["pill_memories"], State.toggle_memories, State.show_memories),
-            _pill_btn("✨", State.t["pill_initiative"], State.send_initiative, False,
-                      disabled=State.is_thinking | (State.current_response != "")),
+            _news_pill_with_badge(),
             _pill_btn_orange("⚡", State.t["pill_actions"], State.toggle_auto_actions, State.auto_actions),
-            _pill_btn("⛶", State.t["pill_focus"], State.toggle_focus_mode, State.focus_mode),
-            _pill_btn("🗣", State.t["pill_natural"], State.toggle_voice_mode, State.voice_mode),
-            # ── Toggle Pin on Top (ventana siempre encima) ──
-            rx.button(
-                rx.cond(State.pin_on_top, "📌", "📍"),
-                on_click=State.toggle_pin_on_top,
-                bg=rx.cond(State.pin_on_top, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
-                color=rx.cond(State.pin_on_top, COLOR_PRIMARY, "#6a6a7a"),
-                border=rx.cond(
-                    State.pin_on_top,
-                    "1px solid rgba(255,154,238,0.5)",
-                    "1px solid rgba(255,255,255,0.07)",
-                ),
-                box_shadow=rx.cond(State.pin_on_top, SHADOW_BUTTON, "none"),
-                border_radius="99px",
-                padding="0 8px",
-                height="28px",
-                font_size="13px",
-                flex_shrink="0",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "color": COLOR_PRIMARY,
-                    "border": "1px solid rgba(255,154,238,0.35)",
-                    "transform": "scale(1.04)",
-                },
-                title=rx.cond(
-                    State.pin_on_top,
-                    State.t["pin_on_tooltip"],
-                    State.t["pin_off_tooltip"],
-                ),
-            ),
-            # ── Toggle Notificaciones Windows (cuando la ventana no está focuseada) ──
-            rx.button(
-                rx.cond(State.notifications_enabled, "🔔", "🔕"),
-                on_click=State.toggle_notifications,
-                bg=rx.cond(State.notifications_enabled, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
-                color=rx.cond(State.notifications_enabled, COLOR_PRIMARY, "#6a6a7a"),
-                border=rx.cond(
-                    State.notifications_enabled,
-                    "1px solid rgba(255,154,238,0.5)",
-                    "1px solid rgba(255,255,255,0.07)",
-                ),
-                box_shadow=rx.cond(State.notifications_enabled, SHADOW_BUTTON, "none"),
-                border_radius="99px",
-                padding="0 8px",
-                height="28px",
-                font_size="13px",
-                flex_shrink="0",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "color": COLOR_PRIMARY,
-                    "border": "1px solid rgba(255,154,238,0.35)",
-                    "transform": "scale(1.04)",
-                },
-                title=rx.cond(
-                    State.notifications_enabled,
-                    State.t["notif_on_tooltip"],
-                    State.t["notif_off_tooltip"],
-                ),
-            ),
-            # ── Toggle TTS (altavoz de Ashley) ────────────────
-            rx.button(
-                rx.cond(State.tts_enabled, "🔊", "🔈"),
-                on_click=State.toggle_tts,
-                bg=rx.cond(State.tts_enabled, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
-                color=rx.cond(State.tts_enabled, COLOR_PRIMARY, "#6a6a7a"),
-                border=rx.cond(
-                    State.tts_enabled,
-                    "1px solid rgba(255,154,238,0.5)",
-                    "1px solid rgba(255,255,255,0.07)",
-                ),
-                box_shadow=rx.cond(State.tts_enabled, SHADOW_BUTTON, "none"),
-                border_radius="99px",
-                padding="0 8px",
-                height="28px",
-                font_size="13px",
-                flex_shrink="0",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "color": COLOR_PRIMARY,
-                    "border": "1px solid rgba(255,154,238,0.35)",
-                    "transform": "scale(1.04)",
-                },
-                title=rx.cond(State.tts_enabled, State.t["tts_on_tooltip"], State.t["tts_off_tooltip"]),
-            ),
-            # ── Botón Settings (⚙) ────────────────────────────
-            rx.button(
-                "⚙",
-                on_click=State.toggle_settings,
-                bg="rgba(255,255,255,0.04)",
-                color="#888",
-                border="1px solid rgba(255,255,255,0.08)",
-                border_radius="99px",
-                padding="0 8px",
-                height="28px",
-                font_size="13px",
-                flex_shrink="0",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "color": COLOR_PRIMARY,
-                    "border": "1px solid rgba(255,154,238,0.4)",
-                    "transform": "rotate(45deg)",
-                },
-                title=State.t["settings_tooltip"],
-            ),
-            # ── Toggle de idioma (cicla EN → ES → FR → EN) ───────────────────
-            rx.button(
-                State.language_label,
-                on_click=State.toggle_language,
-                bg="rgba(255,255,255,0.04)",
-                color=COLOR_PRIMARY,
-                border="1px solid rgba(255,154,238,0.35)",
-                border_radius="99px",
-                padding="0 8px",
-                height="28px",
-                font_size="10px",
-                flex_shrink="0",
-                font_weight="700",
-                letter_spacing="0.08em",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "border": "1px solid rgba(255,154,238,0.55)",
-                    "transform": "scale(1.04)",
-                },
-                title="Switch language / Cambiar idioma / Changer de langue",
-            ),
+            _header_quick_menu(),
             spacing="1",
             overflow_x="auto",
             flex_wrap="nowrap",
@@ -2697,22 +3463,39 @@ def index():
             # ── Contenido principal ───────────────────────
             rx.center(
                 rx.hstack(
-                    # Chat + input
+                    # Chat + input — O el panel de noticias, según show_news
                     rx.vstack(
-                        rx.vstack(
-                            rx.foreach(State.messages, message_item),
-                            streaming_bubble(),
-                            thinking_indicator(),
-                            id="chat_messages",
-                            height=CHAT_HEIGHT,
-                            overflow_y="auto",
-                            padding="20px 24px",
-                            border_radius="20px",
-                            width=CHAT_WIDTH,
-                            spacing="1",
-                            class_name="ashley-chat glass-chat",
+                        rx.cond(
+                            State.show_news,
+                            # Vista alternativa: feed de descubrimientos
+                            rx.box(
+                                _news_panel(),
+                                height=CHAT_HEIGHT,
+                                width=CHAT_WIDTH,
+                                border_radius="20px",
+                                overflow="hidden",
+                            ),
+                            # Vista normal: chat
+                            rx.vstack(
+                                rx.foreach(State.messages, message_item),
+                                streaming_bubble(),
+                                thinking_indicator(),
+                                id="chat_messages",
+                                height=CHAT_HEIGHT,
+                                overflow_y="auto",
+                                padding="20px 24px",
+                                border_radius="20px",
+                                width=CHAT_WIDTH,
+                                spacing="1",
+                                class_name="ashley-chat glass-chat",
+                            ),
                         ),
-                        input_area,
+                        # El input_area solo en vista chat
+                        rx.cond(
+                            State.show_news,
+                            rx.box(),
+                            input_area,
+                        ),
                         spacing="4", align="center",
                     ),
 
@@ -3064,6 +3847,45 @@ def index():
                             padding="14px 16px",
                             bg="rgba(154,202,255,0.05)",
                             border="1px solid rgba(154,202,255,0.2)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
+                        #  DISCOVERY — Ashley busca contenido por su cuenta
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.text(State.t["settings_discovery_heading"],
+                                            color="#c288ff", font_weight="700", font_size="14px",
+                                            letter_spacing="0.05em"),
+                                    rx.spacer(),
+                                    rx.switch(
+                                        checked=State.discovery_enabled,
+                                        on_change=State.toggle_discovery_enabled,
+                                        size="2",
+                                    ),
+                                    width="100%", align="center",
+                                ),
+                                rx.text(State.t["settings_discovery_label"],
+                                        color="#ddd", font_size="13px", font_weight="500"),
+                                rx.cond(
+                                    State.discovery_enabled,
+                                    rx.text(State.t["settings_discovery_on"],
+                                            color="#c288ff", font_size="11px",
+                                            font_weight="600"),
+                                    rx.text(State.t["settings_discovery_off"],
+                                            color="#88ffaa", font_size="11px",
+                                            font_weight="600"),
+                                ),
+                                rx.text(State.t["settings_discovery_desc"],
+                                        color="#888", font_size="10px", line_height="1.5"),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(194,136,255,0.05)",
+                            border="1px solid rgba(194,136,255,0.2)",
                             border_radius="10px",
                             width="100%",
                         ),

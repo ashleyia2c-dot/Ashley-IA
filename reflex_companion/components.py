@@ -479,6 +479,417 @@ def _pill_btn_orange(
 
 
 # ─────────────────────────────────────────────
+#  Header quick menu (consolida toggles secundarios en un dropdown)
+# ─────────────────────────────────────────────
+#
+# Antes del v0.13 el header tenía 9-10 botones tirados en una sola fila —
+# visualmente ruidoso. Ahora solo quedan VISIBLES:
+#   🧠 Memorias          (acción frecuente, abre dialog)
+#   ⚡ Actions           (toggle maestro crítico, afecta comportamiento)
+#   ⚙ Menu desplegable  (TODO lo demás vive aquí)
+#
+# Dentro del dropdown (orden = frecuencia de uso esperada):
+#   ✨ Iniciativa       (acción de Ashley)
+#   🔊/🔈 TTS           (toggle altavoz)
+#   🗣 Modo natural     (toggle voz sin gestos)
+#   ⛶  Focus mode      (toggle oculta panel derecho)
+#   📌 Pin on top       (toggle ventana encima)
+#   🔔 Notificaciones   (toggle Windows)
+#   🌐 Idioma           (cicla EN → ES → FR)
+#   ───────────
+#   ⚙ Ajustes completos (abre modal con providers, TTS, etc.)
+
+
+def _quick_menu_toggle_item(
+    icon_on: str,
+    icon_off: str,
+    label: str,
+    active,
+    on_click,
+) -> rx.Component:
+    """Item del quick menu que actúa como toggle.
+
+    IMPORTANTE: NO usamos rx.menu.item porque Radix cierra el menú al
+    hacer click en un Item. Para que el user pueda cambiar varios
+    toggles sin re-abrir el menú, usamos un rx.box custom con
+    on_click. Radix no reconoce el box como Item → no cierra el menú.
+    Imitamos el look de menu.item con class y estilos inline.
+    """
+    return rx.box(
+        rx.hstack(
+            rx.text(rx.cond(active, icon_on, icon_off),
+                    font_size="14px", width="20px", text_align="center"),
+            rx.text(label, font_size="12px"),
+            rx.spacer(),
+            rx.cond(
+                active,
+                rx.text("✓", color=COLOR_PRIMARY, font_size="12px", font_weight="700"),
+                rx.text("", width="10px"),
+            ),
+            width="100%", align="center", spacing="2",
+        ),
+        on_click=on_click,
+        cursor="pointer",
+        padding="6px 10px",
+        border_radius="6px",
+        color="#eee",
+        transition="background 0.15s ease, color 0.15s ease",
+        _hover={
+            "background": "rgba(255,154,238,0.12)",
+            "color": "#ff9aee",
+        },
+        class_name="ashley-menu-toggle-item",
+    )
+
+
+def _quick_menu_action_item(
+    icon: str,
+    label: str,
+    on_click,
+    disabled=False,
+    right_slot=None,
+) -> rx.Component:
+    """Item del menu para acciones (initiative / language).
+    También usa rx.box custom para NO cerrar el menú al hacer click."""
+    row = [
+        rx.text(icon, font_size="14px", width="20px", text_align="center"),
+        rx.text(label, font_size="12px"),
+    ]
+    if right_slot is not None:
+        row.extend([rx.spacer(), right_slot])
+    return rx.box(
+        rx.hstack(*row, width="100%", align="center", spacing="2"),
+        on_click=on_click,
+        cursor=rx.cond(disabled, "not-allowed", "pointer"),
+        opacity=rx.cond(disabled, "0.5", "1"),
+        padding="6px 10px",
+        border_radius="6px",
+        color="#eee",
+        transition="background 0.15s ease, color 0.15s ease",
+        _hover={
+            "background": "rgba(255,154,238,0.12)",
+            "color": "#ff9aee",
+        },
+        class_name="ashley-menu-toggle-item",
+    )
+
+
+def _header_quick_menu() -> rx.Component:
+    """Dropdown menu ⚙ que consolida todos los toggles secundarios +
+    la acción de iniciativa + idioma + acceso a settings completos."""
+    State = _get_state()
+    return rx.menu.root(
+        rx.menu.trigger(
+            rx.button(
+                "⚙",
+                bg="rgba(255,255,255,0.04)",
+                color="#888",
+                border="1px solid rgba(255,255,255,0.08)",
+                border_radius="99px",
+                padding="0 10px",
+                height="28px",
+                font_size="13px",
+                flex_shrink="0",
+                cursor="pointer",
+                transition="all 0.2s ease",
+                _hover={
+                    "bg": "rgba(255,154,238,0.12)",
+                    "color": COLOR_PRIMARY,
+                    "border": "1px solid rgba(255,154,238,0.4)",
+                    "transform": "rotate(45deg)",
+                },
+                title=State.t["settings_tooltip"],
+            ),
+        ),
+        rx.menu.content(
+            # Ningún item usa rx.menu.item — todos son rx.box custom vía
+            # _quick_menu_*_item, que NO disparan el cierre del menú. Así
+            # el user puede tocar varios toggles de una sentada. El menú
+            # sólo se cierra haciendo click FUERA o en la rueda ⚙.
+            # NOTA (v0.13.7): "Iniciativa de Ashley" se sacó de este
+            # dropdown y se movió al lado del input — es una acción del
+            # flujo del chat, no de configuración.
+
+            # ── Toggles ──────────────────────────────
+            _quick_menu_toggle_item(
+                "🔊", "🔈",
+                State.t["menu_tts"],
+                State.tts_enabled,
+                State.toggle_tts,
+            ),
+            _quick_menu_toggle_item(
+                "🗣", "🗣",
+                State.t["pill_natural"],
+                State.voice_mode,
+                State.toggle_voice_mode,
+            ),
+            _quick_menu_toggle_item(
+                "⛶", "⛶",
+                State.t["pill_focus"],
+                State.focus_mode,
+                State.toggle_focus_mode,
+            ),
+            _quick_menu_toggle_item(
+                "📌", "📍",
+                State.t["menu_pin"],
+                State.pin_on_top,
+                State.toggle_pin_on_top,
+            ),
+            _quick_menu_toggle_item(
+                "🔔", "🔕",
+                State.t["pill_notifications"],
+                State.notifications_enabled,
+                State.toggle_notifications,
+            ),
+            rx.menu.separator(),
+
+            # ── Idioma (cicla EN → ES → FR) ──────────
+            _quick_menu_action_item(
+                "🌐",
+                State.t["lang_label"],
+                State.toggle_language,
+                right_slot=rx.text(State.language_label,
+                    color=COLOR_PRIMARY, font_size="11px",
+                    font_weight="700", letter_spacing="0.08em"),
+            ),
+            rx.menu.separator(),
+
+            # ── Full settings (abre el modal grande) ─
+            _quick_menu_action_item(
+                "⚙",
+                State.t["menu_settings"],
+                State.toggle_settings,
+            ),
+
+            # Estilo del content — más ancho para que nada se trunque
+            align="end",
+            side_offset=6,
+            style={"min_width": "240px"},
+        ),
+    )
+
+
+# ─────────────────────────────────────────────
+#  News pill (header) + news panel (vista alternativa al chat)
+# ─────────────────────────────────────────────
+
+
+def _news_pill_with_badge() -> rx.Component:
+    """Pill 📰 en el header con badge numérico si hay unread items."""
+    State = _get_state()
+    return rx.button(
+        rx.hstack(
+            rx.text("📰", font_size="12px"),
+            rx.text(State.t["pill_news"], font_size="11px", font_weight="600"),
+            rx.cond(
+                State.news_unread > 0,
+                rx.box(
+                    State.news_unread.to_string(),
+                    bg=COLOR_PRIMARY,
+                    color="black",
+                    border_radius="99px",
+                    padding="0 6px",
+                    font_size="10px",
+                    font_weight="700",
+                    line_height="16px",
+                    min_width="18px",
+                    text_align="center",
+                ),
+                rx.box(),
+            ),
+            spacing="1", align="center",
+        ),
+        on_click=State.toggle_news_panel,
+        bg=rx.cond(
+            State.show_news,
+            "rgba(194,136,255,0.2)",
+            rx.cond(State.news_unread > 0, "rgba(255,154,238,0.1)", "rgba(255,255,255,0.04)"),
+        ),
+        color=rx.cond(
+            State.show_news,
+            "#c288ff",
+            rx.cond(State.news_unread > 0, COLOR_PRIMARY, "#6a6a7a"),
+        ),
+        border=rx.cond(
+            State.show_news,
+            "1px solid rgba(194,136,255,0.5)",
+            rx.cond(
+                State.news_unread > 0,
+                "1px solid rgba(255,154,238,0.4)",
+                "1px solid rgba(255,255,255,0.07)",
+            ),
+        ),
+        border_radius="99px",
+        padding="0 10px",
+        height="28px",
+        flex_shrink="0",
+        transition="all 0.2s ease",
+        _hover={
+            "bg": "rgba(194,136,255,0.15)",
+            "color": "#c288ff",
+            "border": "1px solid rgba(194,136,255,0.4)",
+            "transform": "scale(1.04)",
+        },
+        cursor="pointer",
+        title=State.t["news_tooltip_on"],
+    )
+
+
+def _news_category_label(cat: str) -> str:
+    """Mapea category → i18n key. Usa la clave t[...] dentro del item."""
+    return f"news_category_{cat}"
+
+
+def _news_item_card(item: dict) -> rx.Component:
+    """Card de un descubrimiento en el feed."""
+    State = _get_state()
+    # Para traducir la categoría del item, compongo la clave en runtime
+    # pero como State.t es dict estático en Python, uso rx.match.
+    cat_label = rx.match(
+        item["category"],
+        ("song",    State.t["news_category_song"]),
+        ("trailer", State.t["news_category_trailer"]),
+        ("article", State.t["news_category_article"]),
+        ("game",    State.t["news_category_game"]),
+        ("tech",    State.t["news_category_tech"]),
+        State.t["news_category_other"],
+    )
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.text(cat_label,
+                        color=COLOR_PRIMARY, font_size="10px",
+                        font_weight="700", letter_spacing="0.05em"),
+                rx.spacer(),
+                rx.text(item["created_at"],
+                        color="#666", font_size="10px",
+                        font_family="monospace"),
+                rx.button(
+                    "×",
+                    on_click=State.delete_news_item(item["id"]),
+                    bg="transparent",
+                    color="#666",
+                    border="none",
+                    font_size="18px",
+                    line_height="1",
+                    padding="0 4px",
+                    cursor="pointer",
+                    _hover={"color": "#ff8080"},
+                    title=State.t["news_delete"],
+                ),
+                spacing="2", align="center", width="100%",
+            ),
+            rx.text(item["title"],
+                    color="#eee", font_size="14px",
+                    font_weight="600", line_height="1.4"),
+            rx.cond(
+                item["body"] != "",
+                rx.text(item["body"],
+                        color="#bbb", font_size="12px",
+                        line_height="1.5", white_space="pre-wrap"),
+                rx.box(),
+            ),
+            rx.cond(
+                item["source_url"] != "",
+                rx.link(
+                    item["source_url"],
+                    href=item["source_url"],
+                    is_external=True,
+                    color=COLOR_PRIMARY,
+                    font_size="11px",
+                    style={"textDecoration": "underline"},
+                ),
+                rx.box(),
+            ),
+            spacing="1", align="stretch",
+        ),
+        padding="14px 16px",
+        bg="rgba(255,255,255,0.03)",
+        border="1px solid rgba(255,154,238,0.12)",
+        border_radius="12px",
+        width="100%",
+        transition="all 0.2s ease",
+        _hover={
+            "border": "1px solid rgba(255,154,238,0.28)",
+            "bg": "rgba(255,154,238,0.04)",
+        },
+    )
+
+
+def _news_panel() -> rx.Component:
+    """Vista alternativa al chat: feed de descubrimientos de Ashley."""
+    State = _get_state()
+    return rx.vstack(
+        # Header
+        rx.hstack(
+            rx.text(State.t["news_title"],
+                    color=COLOR_PRIMARY, font_size="17px",
+                    font_weight="800", letter_spacing="0.03em"),
+            rx.spacer(),
+            rx.cond(
+                State.news_items.length() > 0,
+                rx.button(
+                    State.t["news_clear_all"],
+                    on_click=State.clear_all_news,
+                    bg="transparent",
+                    color="#ff8080",
+                    border="1px solid rgba(255,128,128,0.3)",
+                    border_radius="8px",
+                    padding="4px 10px",
+                    font_size="11px",
+                    cursor="pointer",
+                    _hover={"bg": "rgba(255,128,128,0.08)"},
+                ),
+                rx.box(),
+            ),
+            rx.button(
+                State.t["news_close"],
+                on_click=State.toggle_news_panel,
+                bg="rgba(255,154,238,0.08)",
+                color=COLOR_PRIMARY,
+                border="1px solid rgba(255,154,238,0.35)",
+                border_radius="8px",
+                padding="4px 12px",
+                font_size="11px",
+                font_weight="600",
+                cursor="pointer",
+                _hover={"bg": "rgba(255,154,238,0.18)"},
+            ),
+            spacing="2", align="center", width="100%",
+            padding_bottom="10px",
+            border_bottom="1px solid rgba(255,154,238,0.12)",
+        ),
+        # Feed
+        rx.cond(
+            State.news_items.length() > 0,
+            rx.vstack(
+                rx.foreach(State.news_items, _news_item_card),
+                spacing="2", align="stretch", width="100%",
+                padding_top="12px",
+            ),
+            rx.vstack(
+                rx.text("📰", font_size="40px", opacity="0.4"),
+                rx.text(State.t["news_empty"],
+                        color="#888", font_size="13px",
+                        line_height="1.5", text_align="center",
+                        max_width="400px"),
+                rx.text(State.t["news_empty_hint"],
+                        color="#666", font_size="11px",
+                        font_style="italic", text_align="center",
+                        max_width="400px"),
+                spacing="3", align="center",
+                padding="48px 24px",
+            ),
+        ),
+        spacing="2", align="stretch", width="100%",
+        height="100%",
+        padding="18px 24px",
+        overflow_y="auto",
+        class_name="ashley-chat glass-chat",
+    )
+
+
+# ─────────────────────────────────────────────
 #  License gate (se muestra cuando LICENSE_CHECK_ENABLED y no hay licencia)
 # ─────────────────────────────────────────────
 

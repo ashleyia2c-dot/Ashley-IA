@@ -189,18 +189,16 @@
       }
     });
 
-    // Enter = submit, Shift+Enter = newline
+    // Enter = submit form, Shift+Enter = newline
     document.addEventListener('keydown', function (e) {
       if (e.target && e.target.id === 'message' && e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           var form = e.target.closest('form');
           if (form) {
-            // Use requestSubmit so Reflex's onSubmit handler fires correctly
             if (form.requestSubmit) {
               form.requestSubmit();
             } else {
-              // Fallback for older browsers
               var btn = form.querySelector('button[type="submit"]');
               if (btn) btn.click();
             }

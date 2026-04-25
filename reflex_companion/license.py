@@ -45,7 +45,11 @@ _log = logging.getLogger("ashley.license")
 # ─────────────────────────────────────────────
 
 LS_API_BASE = "https://api.lemonsqueezy.com/v1"
-REQUEST_TIMEOUT = 10.0
+# 3s es suficiente: Lemon Squeezy responde típicamente en 200-500ms. Si
+# tarda más de 3s, es razonable asumir que el user está offline o la red
+# está rota — el grace period de 7 días cubre ese caso. Antes 10s
+# bloqueaba el arranque con un ping lento.
+REQUEST_TIMEOUT = 3.0
 OFFLINE_GRACE_DAYS = 7
 
 # Errores de red que justifican retry (todo el resto, incluido 400/401/403,
