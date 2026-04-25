@@ -867,18 +867,69 @@ def _news_panel() -> rx.Component:
                 spacing="2", align="stretch", width="100%",
                 padding_top="12px",
             ),
-            rx.vstack(
-                rx.text("📰", font_size="40px", opacity="0.4"),
-                rx.text(State.t["news_empty"],
-                        color="#888", font_size="13px",
-                        line_height="1.5", text_align="center",
-                        max_width="400px"),
-                rx.text(State.t["news_empty_hint"],
-                        color="#666", font_size="11px",
-                        font_style="italic", text_align="center",
-                        max_width="400px"),
-                spacing="3", align="center",
-                padding="48px 24px",
+            # Empty state — diseño con card + ilustración + tips, no
+            # solo un emoji solitario. Antes se sentía placeholder.
+            rx.center(
+                rx.vstack(
+                    # Hero icon con halo glow
+                    rx.box(
+                        rx.text("📰", font_size="56px"),
+                        width="100px", height="100px",
+                        display="flex",
+                        align_items="center",
+                        justify_content="center",
+                        border_radius="50%",
+                        bg="rgba(255,154,238,0.06)",
+                        border="2px solid rgba(255,154,238,0.18)",
+                        box_shadow="0 0 32px rgba(255,154,238,0.15), inset 0 0 20px rgba(255,154,238,0.05)",
+                        margin_bottom="8px",
+                    ),
+                    # Título principal
+                    rx.text(
+                        State.t["news_empty"],
+                        color="#dddddd", font_size="15px",
+                        font_weight="600", line_height="1.5",
+                        text_align="center", max_width="380px",
+                    ),
+                    # Hint en italic
+                    rx.text(
+                        State.t["news_empty_hint"],
+                        color="#888888", font_size="12px",
+                        font_style="italic", line_height="1.5",
+                        text_align="center", max_width="380px",
+                    ),
+                    # Card con tip de cómo activar
+                    rx.box(
+                        rx.hstack(
+                            rx.text("💡", font_size="18px"),
+                            rx.vstack(
+                                rx.text(
+                                    State.t["news_empty_tip_title"],
+                                    color=COLOR_PRIMARY,
+                                    font_size="12px",
+                                    font_weight="700",
+                                ),
+                                rx.text(
+                                    State.t["news_empty_tip_body"],
+                                    color="#aaaaaa",
+                                    font_size="11px",
+                                    line_height="1.4",
+                                ),
+                                spacing="1", align="start",
+                            ),
+                            spacing="3", align="start",
+                        ),
+                        bg="rgba(255,154,238,0.04)",
+                        border="1px solid rgba(255,154,238,0.18)",
+                        border_radius="14px",
+                        padding="14px 18px",
+                        max_width="420px",
+                        margin_top="10px",
+                    ),
+                    spacing="3", align="center",
+                ),
+                width="100%",
+                padding="60px 24px",
             ),
         ),
         spacing="2", align="stretch", width="100%",

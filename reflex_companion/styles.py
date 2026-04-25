@@ -423,7 +423,10 @@ def global_styles():
        • rx.menu  (DropdownMenu.Content) — el ⚙ del header
        • rx.popover (Popover.Content)
      Sin estas reglas, los popups se ven transparentes encima del
-     avatar/chat, ilegibles. */
+     avatar/chat, ilegibles.
+
+     Pulido v0.13.4: padding más generoso, animación de entrada
+     suave, hover con transición, bordes más definidos. */
   [data-radix-popper-content-wrapper] {{
     z-index: 10050 !important;
   }}
@@ -431,35 +434,56 @@ def global_styles():
   [data-radix-menu-content],
   [data-radix-dropdown-menu-content],
   [data-radix-popover-content] {{
-    background: #15121d !important;
-    border: 1px solid rgba(255,154,238,0.35) !important;
-    box-shadow: 0 10px 36px rgba(0,0,0,0.85),
-                0 0 0 1px rgba(255,154,238,0.08) !important;
-    backdrop-filter: blur(14px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
-    padding: 4px !important;
-    border-radius: 10px !important;
+    background: linear-gradient(180deg, #1a1525 0%, #14101e 100%) !important;
+    border: 1px solid rgba(255,154,238,0.28) !important;
+    box-shadow:
+      0 12px 48px rgba(0,0,0,0.85),
+      0 0 0 1px rgba(255,154,238,0.06),
+      inset 0 1px 0 rgba(255,255,255,0.04) !important;
+    backdrop-filter: blur(16px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+    padding: 6px !important;
+    border-radius: 12px !important;
+    animation: dropdownEnter 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }}
+  @keyframes dropdownEnter {{
+    from {{ opacity: 0; transform: translateY(-4px) scale(0.98); }}
+    to   {{ opacity: 1; transform: translateY(0) scale(1); }}
   }}
   [data-radix-select-item],
   [data-radix-select-item][data-state="checked"],
   [data-radix-menu-item],
   [data-radix-dropdown-menu-item] {{
-    color: #eee !important;
-    border-radius: 6px !important;
-    padding: 6px 10px !important;
+    color: #e5e0f0 !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease !important;
   }}
   [data-radix-select-item][data-highlighted],
   [data-radix-menu-item][data-highlighted],
   [data-radix-dropdown-menu-item][data-highlighted] {{
-    background: rgba(255,154,238,0.12) !important;
+    background: linear-gradient(90deg,
+      rgba(255,154,238,0.15) 0%,
+      rgba(255,154,238,0.08) 100%) !important;
     color: #ff9aee !important;
     outline: none !important;
+    transform: translateX(2px) !important;
   }}
   [data-radix-menu-separator],
   [data-radix-dropdown-menu-separator] {{
     height: 1px !important;
-    background: rgba(255,154,238,0.18) !important;
-    margin: 4px 6px !important;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255,154,238,0.25) 50%,
+      transparent 100%) !important;
+    margin: 6px 8px !important;
+  }}
+  /* Items custom (rx.box que usamos en el dropdown ⚙) */
+  .ashley-menu-toggle-item {{
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease !important;
+  }}
+  .ashley-menu-toggle-item:hover {{
+    transform: translateX(2px) !important;
   }}
 
   /* ── Achievement gallery ──────────────────────────── */
