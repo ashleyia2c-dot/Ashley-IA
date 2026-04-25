@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -66,6 +66,24 @@
           "**/*",
           "!node_modules/**",
           "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../.web/node_modules",
+        "to": ".web/node_modules",
+        "filter": [
+          "sirv-cli/**",
+          "sirv/**",
+          "sade/**",
+          "kleur/**",
+          "tinydate/**",
+          "semiver/**",
+          "get-port/**",
+          "local-access/**",
+          "console-clear/**",
+          "mrmime/**",
+          "totalist/**",
+          "@polka/**"
         ]
       },
       {
