@@ -677,22 +677,27 @@ function startReflex(apiKey) {
   const hasPrecompiled = fs.existsSync(precompiledFrontend);
   const isFresh = hasPrecompiled && _isFrontendBuildFresh(precompiledFrontend);
 
-  // Fast-path requiere sirv-cli en .web/node_modules. En el .exe
-  // empaquetado por electron-builder, node_modules está EXCLUIDO de
-  // los recursos (extraResources filter !node_modules/**), así que
-  // sirv-cli NO existe en producción y el fast-path falla con
-  // spawn EINVAL. Detectamos esto y caemos al slow-path.
   const sirvBin = path.join(PROJECT_ROOT, '.web', 'node_modules', 'sirv-cli', 'bin.js');
   const hasSirv = fs.existsSync(sirvBin);
 
-  if (hasPrecompiled && isFresh && hasSirv) {
-    log('Frontend precompilado y al día + sirv disponible — fast-path');
+  // Fast-path SOLO en dev (!app.isPackaged). En producción el spawn
+  // de sirv via Electron-as-node se cuelga silenciosamente — el
+  // frontend nunca responde el health check y Ashley queda esperando
+  // hasta que se cumple el timeout de 180s. v0.13.2 lo activamos en
+  // producción y los users vieron arranques de 3 minutos. v0.13.3:
+  // de vuelta a slow-path en prod (arranque ~14s pero confiable).
+  const isDev = !app.isPackaged;
+
+  if (isDev && hasPrecompiled && isFresh && hasSirv) {
+    log('DEV mode + frontend precompilado + sirv — fast-path');
     _startSplitProcesses(apiKey);
   } else {
-    if (hasPrecompiled && !isFresh) {
+    if (!isDev) {
+      log('Producción — slow-path (reflex run --env prod)');
+    } else if (hasPrecompiled && !isFresh) {
       log('Frontend precompilado pero STALE — slow-path para rebuild');
     } else if (!hasSirv) {
-      log('sirv-cli no disponible (entorno empaquetado) — slow-path');
+      log('sirv-cli no disponible — slow-path');
     } else {
       log('Frontend no precompilado — slow-path para build inicial');
     }
