@@ -3490,18 +3490,13 @@ def index():
             rx.center(
                 rx.hstack(
                     # Chat + input — O el panel de noticias, según show_news
+                    # v0.13.7: ambos paneles SIEMPRE en el DOM, alternamos
+                    # con display:none/flex en lugar de rx.cond. Antes el
+                    # chat se desmontaba al ver noticias y al volver el
+                    # scroll se reseteaba arriba — ahora se conserva.
                     rx.vstack(
-                        rx.cond(
-                            State.show_news,
-                            # Vista alternativa: feed de descubrimientos
-                            rx.box(
-                                _news_panel(),
-                                height=CHAT_HEIGHT,
-                                width=CHAT_WIDTH,
-                                border_radius="20px",
-                                overflow="hidden",
-                            ),
-                            # Vista normal: chat
+                        # Panel de chat (se oculta cuando show_news=True)
+                        rx.box(
                             rx.vstack(
                                 rx.foreach(State.messages, message_item),
                                 streaming_bubble(),
@@ -3515,12 +3510,22 @@ def index():
                                 spacing="1",
                                 class_name="ashley-chat glass-chat",
                             ),
+                            display=rx.cond(State.show_news, "none", "block"),
                         ),
-                        # El input_area solo en vista chat
-                        rx.cond(
-                            State.show_news,
-                            rx.box(),
+                        # Panel de noticias (se oculta cuando show_news=False)
+                        rx.box(
+                            _news_panel(),
+                            height=CHAT_HEIGHT,
+                            width=CHAT_WIDTH,
+                            border_radius="20px",
+                            overflow="hidden",
+                            display=rx.cond(State.show_news, "block", "none"),
+                        ),
+                        # Input solo cuando estamos en chat
+                        rx.box(
                             input_area,
+                            display=rx.cond(State.show_news, "none", "block"),
+                            width="100%",
                         ),
                         spacing="4", align="center",
                     ),

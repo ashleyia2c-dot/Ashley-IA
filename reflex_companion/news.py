@@ -131,11 +131,31 @@ def unread_count() -> int:
 #  Parser — extrae title+body+category de la respuesta raw de Ashley
 # ─────────────────────────────────────────────
 
+def _smart_truncate(text: str, max_len: int) -> tuple[str, str]:
+    """Trunca `text` a `max_len` SIN cortar a media palabra.
+    Devuelve (truncated, leftover). Si el texto cabe entero,
+    leftover es ''.
+
+    v0.13.7: antes el title se cortaba a media palabra ('...y e').
+    Ahora retrocedemos al último espacio si la palabra final está
+    incompleta y el spillover va al body.
+    """
+    if len(text) <= max_len:
+        return text, ""
+    truncated = text[:max_len]
+    leftover = text[max_len:]
+    last_space = truncated.rfind(' ')
+    if last_space > max_len * 0.5:
+        leftover = text[last_space:].lstrip()
+        truncated = truncated[:last_space]
+    return truncated.rstrip(' .!?,;:—–-'), leftover
+
+
 def parse_ashley_discovery(raw_text: str) -> Optional[dict]:
     """Dado el texto crudo que Ashley produjo en un discovery, intenta
     extraer (title, body, category). Heurística simple:
 
-      • La primera oración = title (corta a 200 chars).
+      • La primera oración = title (corte sin partir palabras, ~280 chars).
       • El resto = body.
       • Si el body contiene 'canción'/'song' → category='song', etc.
 
@@ -148,20 +168,22 @@ def parse_ashley_discovery(raw_text: str) -> Optional[dict]:
     if len(text) < 15:
         return None
 
-    # Split por primera oración (. ! ?)
     import re
     first_sentence_end = None
     for m in re.finditer(r"[\.!?]\s", text + " "):
         first_sentence_end = m.end()
         break
 
-    if first_sentence_end and first_sentence_end < len(text):
-        title = text[:first_sentence_end].strip(" .!?")[:200]
-        body = text[first_sentence_end:].strip()
+    if first_sentence_end and first_sentence_end < len(text) and first_sentence_end < 320:
+        # Primera oración razonable → title=oración, body=resto
+        raw_title = text[:first_sentence_end].strip(" .!?")
+        title, spillover = _smart_truncate(raw_title, 280)
+        rest = text[first_sentence_end:].strip()
+        body = (spillover + " " + rest).strip() if spillover else rest
     else:
-        # Texto corto sin puntuación clara → usarlo entero como title
-        title = text[:200]
-        body = ""
+        # Sin puntuación o primera oración demasiado larga → cortar
+        # por palabra completa al rededor de 200 chars; resto al body.
+        title, body = _smart_truncate(text, 200)
 
     # Heurística de categoría (ES/EN/FR)
     low = text.lower()
