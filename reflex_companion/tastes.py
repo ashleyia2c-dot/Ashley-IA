@@ -46,7 +46,14 @@ def format_tastes_for_prompt(tastes: list[dict]) -> str:
         lines.append(f"  {cat}: {', '.join(vals)}")
     return "\n".join(lines)
 
-def should_run_discovery(min_hours: float = 4.0) -> bool:
+def should_run_discovery(min_hours: float = 1.0) -> bool:
+    """¿Toca buscar contenido nuevo según los gustos del jefe?
+
+    v0.13.6: bajamos el threshold de 4h → 1h. Antes el feed quedaba
+    casi vacío entre sesiones — el user activaba 'Discovery' y no
+    veía nada en horas. Ahora cada hora Ashley puede traer algo
+    nuevo si hay tastes registrados y el toggle está ON.
+    """
     state = _load_dict(DISCOVERY_FILE)
     last = state.get("last_run_at")
     if not last: return True

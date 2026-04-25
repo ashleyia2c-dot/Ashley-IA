@@ -363,9 +363,33 @@ class State(rx.State):
         )
 
     def toggle_discovery_enabled(self):
-        """Alterna si Ashley puede buscar contenido nuevo por su cuenta."""
+        """Alterna si Ashley puede buscar contenido nuevo por su cuenta.
+
+        v0.13.6: al ACTIVAR (no al desactivar), forzamos un discovery
+        inmediato. Antes el user activaba el toggle y no pasaba nada
+        durante horas hasta que tocaba el ciclo del bg_task — el feed
+        quedaba vacío y se sentía roto. Ahora el toggle se siente
+        responsive: actívalo y en ~5s ya tienes la primera noticia
+        en el panel.
+        """
+        was_off = not self.discovery_enabled
         self.discovery_enabled = not self.discovery_enabled
         self._persist_voice()
+
+        # Si lo acabamos de ENCENDER y hay tastes (sin tastes Ashley
+        # no sabe qué buscar), pedimos al bg_task que dispare un
+        # discovery ya. Si está corriendo, lo hará; si no, on_load
+        # lo dispara la próxima vez.
+        if was_off and self.discovery_enabled and self.tastes:
+            # Reset del timer de discovery para que se considere "toca"
+            try:
+                from .tastes import _save
+                from .config import DISCOVERY_FILE
+                _save(DISCOVERY_FILE, {"last_run_at": ""})
+            except Exception:
+                pass
+            # Marcar que toca engagement YA (mismo flag que on_load usa)
+            self._pending_startup_engagement = True
 
     # ─────────────────────────────────────────
     #  News feed (v0.13.3)
@@ -3023,8 +3047,10 @@ class State(rx.State):
                     import logging
                     logging.getLogger("ashley").warning("vision bg: %s", _e)
 
-            # ── Discovery de contenido (cada ~45 min = tick 4-5) ──────
-            if _ticks % 5 != 0:  # solo cada 5 ticks (50 min)
+            # ── Discovery de contenido (cada ~30 min = tick 3) ──────
+            # v0.13.6: bajado de cada 50 min a cada 30 min para que
+            # el feed se sienta vivo cuando el toggle está ON.
+            if _ticks % 3 != 0:
                 continue
 
             # Snapshot del estado (lectura atómica)
