@@ -1783,6 +1783,7 @@ class State(rx.State):
 
     def _finalize_response(self, text: str):
         from .parsing import extract_all_actions as _extract_all_actions_fn
+        from .actions import describe_action as _describe_action_fn
 
         clean_text, detected_mood = self._extract_mood(text)
         clean_text, affection_delta = self._extract_affection(clean_text)
@@ -1794,7 +1795,7 @@ class State(rx.State):
         # Atachamos descripción a cada acción (igual que _extract_action hace)
         for a in all_actions:
             if a and "description" not in a:
-                a["description"] = self._describe_action(a["type"], a["params"])
+                a["description"] = _describe_action_fn(a["type"], a["params"], lang=self.language)
         self._apply_affection_delta(affection_delta)
         self.mood = detected_mood
         self.current_response = ""
@@ -1818,7 +1819,7 @@ class State(rx.State):
                     _, det_actions = _extract_all_actions_fn(detected_tag)
                     for a in det_actions:
                         if "description" not in a:
-                            a["description"] = self._describe_action(a["type"], a["params"])
+                            a["description"] = _describe_action_fn(a["type"], a["params"], lang=self.language)
                     all_actions = det_actions
                     action = all_actions[0] if all_actions else None
 
