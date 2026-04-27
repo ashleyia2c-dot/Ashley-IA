@@ -1502,9 +1502,31 @@ def _volume_pycaw(action: str, value: Optional[str]) -> str:
     return f"Acción de volumen desconocida: '{action}'"
 
 
-def _volume_powershell(action: str) -> str:
+def _volume_powershell(action: str, value: Optional[str] = None) -> str:
+    """Fallback que SOLO soporta up/down/mute. Para 'set' tendríamos que
+    invocar nircmd o un script PS más complejo — no merece la pena ese
+    path; mejor reportar honestly que no se puede.
+
+    v0.13.16: BUG GRAVE corregido. Antes:
+        key_map.get(action, "173")
+    El default '173' es la tecla de MUTE. Si la action era 'set' (porque
+    pycaw falló), el código defaulteaba a mute y silenciaba el audio.
+    El bug del 'súbele al máximo → silencio' venía de aquí, no de Ashley
+    emitiendo set:0 (que era la teoría inicial).
+    Ahora: si la action no está en key_map, NO ejecutamos nada y
+    devolvemos error claro.
+    """
     key_map = {"up": "175", "down": "174", "mute": "173"}
-    k = key_map.get(action, "173")
+    if action not in key_map:
+        # NUNCA defaultear a mute (ese era el bug). Devolver error claro
+        # para que el user / log entiendan qué pasó.
+        if action == "set":
+            return (f"Volumen 'set:{value}' no se pudo aplicar — pycaw no "
+                    f"disponible y el fallback de PowerShell no soporta "
+                    f"valores numéricos exactos. Instala pycaw o reinicia.")
+        return f"Volumen '{action}' no soportado en el fallback. Instala pycaw."
+
+    k = key_map[action]
     reps = 5 if action in ("up", "down") else 1
     ps = "$w=New-Object -ComObject WScript.Shell;" + "".join(
         [f"$w.SendKeys([char]{k});" for _ in range(reps)]
@@ -1513,8 +1535,12 @@ def _volume_powershell(action: str) -> str:
         ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
         capture_output=True,
     )
-    labels = {"up": "Volumen subido.", "down": "Volumen bajado.", "mute": "Audio silenciado/activado."}
-    return labels.get(action, f"Volumen: {action}.")
+    labels = {
+        "up":   "Volumen subido.",
+        "down": "Volumen bajado.",
+        "mute": "Audio silenciado/activado.",
+    }
+    return labels[action]
 
 
 def control_volume(action: str, value: Optional[str] = None) -> str:
@@ -1524,6 +1550,8 @@ def control_volume(action: str, value: Optional[str] = None) -> str:
         return _volume_powershell(action)
     except Exception as e:
         return f"Error de volumen: {e}"
+
+
 
 
 # ── Control de teclado ────────────────────────────────────────────────────────
