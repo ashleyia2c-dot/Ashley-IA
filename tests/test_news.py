@@ -171,3 +171,110 @@ def test_parse_title_capped_at_200():
     huge = "x" * 500 + "."
     parsed = news.parse_ashley_discovery(huge)
     assert len(parsed["title"]) <= 200
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Tag stripping (defense-in-depth contra tags que se cuelan al feed)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_add_strips_affection_tag_from_title(tmp_path, monkeypatch):
+    """Si un [affection:N] se cuela al title, NO debe quedar visible."""
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    item = news.add_news_item("Salió un single nuevo [affection:0]", "body", "song")
+    assert "[affection" not in item["title"]
+    assert "Salió un single nuevo" in item["title"]
+
+
+def test_add_strips_affection_tag_from_body(tmp_path, monkeypatch):
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    item = news.add_news_item("title", "body con tag [affection:+1] al medio", "other")
+    assert "[affection" not in item["body"]
+    assert "body con tag" in item["body"]
+
+
+def test_add_strips_mood_and_action_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    item = news.add_news_item(
+        "[mood:excited] Title text",
+        "[action:open_url:foo] body text",
+        "other",
+    )
+    assert "[mood" not in item["title"]
+    assert "[action" not in item["body"]
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Dedup (rechazar items muy similares a recientes)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_dedup_rejects_very_similar_item(tmp_path, monkeypatch):
+    """Dos items hablando del mismo tema (League patch 26.8) — el segundo
+    debe rechazarse y devolver None."""
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    first = news.add_news_item(
+        "Parche fresquito de League del 14 de abril",
+        "El 26.8 trae skins nuevos como PsyOps Vladimir y otros campeones reworkeados",
+        "game",
+    )
+    assert first is not None
+    second = news.add_news_item(
+        "League soltó el patch 26.8 hace doce días",
+        "Hablan de cambios groovy en skins PsyOps y el fin de la Season",
+        "game",
+    )
+    # Comparten 'league', 'patch'/'parche', 'skins', 'psyops' → dedup
+    assert second is None
+    assert len(news.load_news()) == 1
+
+
+def test_dedup_allows_distinct_items(tmp_path, monkeypatch):
+    """Dos items distintos del mismo género NO deben dedup-earse."""
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    first = news.add_news_item(
+        "Salió single nuevo de Bad Bunny",
+        "Track latino con vibes veraniegas, dropped el martes",
+        "song",
+    )
+    second = news.add_news_item(
+        "Nuevo álbum de Rosalía sale viernes",
+        "Disco completo flamenco-electrónico, primer single muy bueno",
+        "song",
+    )
+    assert first is not None
+    assert second is not None
+    assert len(news.load_news()) == 2
+
+
+def test_dedup_short_items_not_blocked(tmp_path, monkeypatch):
+    """Items con muy poco contenido (<3 palabras significativas) no
+    deben rechazarse por dedup — no hay base fiable para comparar."""
+    monkeypatch.setattr(news, "NEWS_FILE", str(tmp_path / "news.json"))
+    first = news.add_news_item("ok", "ok", "other")
+    second = news.add_news_item("vale", "vale", "other")
+    assert first is not None
+    assert second is not None
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Smart truncate (anti-corte en palabras muy cortas)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_smart_truncate_drops_trailing_short_word():
+    """Si la última palabra es ≤3 chars y no es número, debe ir al
+    leftover. Antes el title quedaba como '...PsyOps Vladimir y e'."""
+    text = ("a" * 195) + " y eXxxxxx algo más"  # forzar que "y eXxx" caiga al boundary
+    truncated, leftover = news._smart_truncate(text, 200)
+    # El trailing "y" o "y e" no debe colgar
+    assert not truncated.endswith(" y")
+    assert not truncated.endswith(" y e")
+    assert "eXxxxxx" in leftover or "y" in leftover
+
+
+def test_smart_truncate_keeps_short_numeric_word():
+    """Excepción: 'patch 26' no se debe romper (los números son ok aunque
+    sean cortos — años, versiones, episodios)."""
+    text = ("x" * 195) + " patch 26 con muchas cosas más texto"
+    truncated, leftover = news._smart_truncate(text, 200)
+    # El "26" puede mantenerse aunque tenga 2 chars (es número)
+    # Solo verificamos que no rompa con error
+    assert truncated  # no vacío
