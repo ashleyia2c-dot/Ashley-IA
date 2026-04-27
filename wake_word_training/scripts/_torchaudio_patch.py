@@ -90,13 +90,39 @@ def _load_with_soundfile(uri, frame_offset=0, num_frames=-1, normalize=True,
     return tensor, sr
 
 
+class _AudioInfo:
+    """Replacement for the result of torchaudio.info() — only exposes the
+    attributes that torch_audiomentations actually uses (num_frames,
+    sample_rate, num_channels). PyTorch 2.12 nightly removed
+    torchaudio.info entirely (deprecated in favor of torchcodec)."""
+
+    def __init__(self, num_frames: int, sample_rate: int, num_channels: int):
+        self.num_frames = num_frames
+        self.sample_rate = sample_rate
+        self.num_channels = num_channels
+
+
+def _info_with_soundfile(uri):
+    """Drop-in replacement de torchaudio.info via soundfile."""
+    info = sf.info(str(uri))
+    return _AudioInfo(
+        num_frames=info.frames,
+        sample_rate=info.samplerate,
+        num_channels=info.channels,
+    )
+
+
 def apply():
     """Aplica el patch. Idempotente — múltiples llamadas son no-op."""
     if getattr(torchaudio.load, "_is_soundfile_patch", False):
         return
     _load_with_soundfile._is_soundfile_patch = True
     torchaudio.load = _load_with_soundfile
-    _log.info("torchaudio.load monkey-patched to use soundfile (avoiding torchcodec)")
+    # torchaudio.info también necesita patch — torch_audiomentations
+    # background_noise lo usa para pre-validar paths sin cargar todo.
+    _info_with_soundfile._is_soundfile_patch = True
+    torchaudio.info = _info_with_soundfile
+    _log.info("torchaudio.load + torchaudio.info monkey-patched to use soundfile (avoiding torchcodec)")
     # NO llamamos _patch_openwakeword_trim_mmap aquí porque:
     # (a) sobreescribiría el fix directo aplicado a venv/.../data.py
     # (b) la función _patch en este módulo tiene exactamente el mismo
