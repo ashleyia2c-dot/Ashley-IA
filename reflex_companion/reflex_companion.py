@@ -523,16 +523,24 @@ class State(rx.State):
 
         En PCs con muchas apps instaladas el escaneo puede tomar 5-30s
         (PowerShell secuencial por cada .lnk en Desktop + Start Menu +
-        Taskbar). Async permite que el toggle responda inmediato y la
-        UI muestre 'Configurando...' mientras esto trabaja.
+        Taskbar). Sin run_in_executor, los subprocess.run síncronos del
+        wizard bloquean el event loop de asyncio entero — el user no
+        puede ni cerrar el dialog de Settings (bug reportado en sesión
+        de debug 2026-04-27). Con run_in_executor, la función síncrona
+        corre en un thread separado del ThreadPoolExecutor default y
+        el event loop queda libre para procesar clicks/UI events.
         """
         from .browser_setup import configure_all_shortcuts
+        import asyncio
         import logging
 
         try:
-            # configure_all_shortcuts es síncrono (PowerShell + I/O), pero
-            # como estamos en background task NO bloquea la UI principal.
-            result = configure_all_shortcuts(enable=enable)
+            # configure_all_shortcuts es síncrono (PowerShell + I/O).
+            # Lo despachamos a un thread real para que no bloquee asyncio.
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, configure_all_shortcuts, enable,
+            )
 
             if enable:
                 if result["modified"] > 0:
