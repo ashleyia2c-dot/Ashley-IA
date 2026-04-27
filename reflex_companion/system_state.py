@@ -21,16 +21,15 @@ from typing import Optional
 
 
 def get_system_volume() -> Optional[int]:
-    """Volumen master del sistema en porcentaje 0-100. None si falla."""
-    try:
-        from ctypes import cast, POINTER
-        from comtypes import CLSCTX_ALL
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    """Volumen master del sistema en porcentaje 0-100. None si falla.
 
-        devices = AudioUtilities.GetSpeakers()
-        iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        vol = cast(iface, POINTER(IAudioEndpointVolume))
-        scalar = vol.GetMasterVolumeLevelScalar()
+    v0.13.19: usa la nueva API de pycaw 20251023+ (EndpointVolume
+    directamente, sin Activate/cast). El código antiguo crasheaba con
+    'AudioDevice has no attribute Activate' en la versión bundled."""
+    try:
+        from pycaw.pycaw import AudioUtilities
+        device = AudioUtilities.GetSpeakers()
+        scalar = device.EndpointVolume.GetMasterVolumeLevelScalar()
         return int(round(scalar * 100))
     except Exception:
         return None
@@ -39,14 +38,9 @@ def get_system_volume() -> Optional[int]:
 def get_volume_muted() -> Optional[bool]:
     """True si el sistema está muteado, False si no, None si falla."""
     try:
-        from ctypes import cast, POINTER
-        from comtypes import CLSCTX_ALL
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-
-        devices = AudioUtilities.GetSpeakers()
-        iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        vol = cast(iface, POINTER(IAudioEndpointVolume))
-        return bool(vol.GetMute())
+        from pycaw.pycaw import AudioUtilities
+        device = AudioUtilities.GetSpeakers()
+        return bool(device.EndpointVolume.GetMute())
     except Exception:
         return None
 

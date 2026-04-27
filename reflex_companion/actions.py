@@ -1474,13 +1474,18 @@ def _navigate_browser_to(url: str) -> bool:
 # ── Volumen ───────────────────────────────────────────────────────────────────
 
 def _volume_pycaw(action: str, value: Optional[str]) -> str:
-    from ctypes import cast, POINTER
-    from comtypes import CLSCTX_ALL
-    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    # v0.13.19: pycaw 20251023+ cambió la API. Antes:
+    #   devices = AudioUtilities.GetSpeakers()  # retornaba IMMDevice
+    #   iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    #   vol = cast(iface, POINTER(IAudioEndpointVolume))
+    # Ahora GetSpeakers() retorna un wrapper AudioDevice y EndpointVolume
+    # ya es la interfaz IAudioEndpointVolume — sin Activate ni cast.
+    # Causa del bug "Error de volumen: 'AudioDevice' object has no
+    # attribute 'Activate'" en v0.13.18.
+    from pycaw.pycaw import AudioUtilities
 
-    devices = AudioUtilities.GetSpeakers()
-    iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    vol = cast(iface, POINTER(IAudioEndpointVolume))
+    device = AudioUtilities.GetSpeakers()
+    vol = device.EndpointVolume
     current = vol.GetMasterVolumeLevelScalar()
 
     if action == "up":
