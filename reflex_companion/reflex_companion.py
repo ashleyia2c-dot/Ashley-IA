@@ -1920,6 +1920,17 @@ class State(rx.State):
                 result = self._execute_and_record_action(action)
                 result_text = result["result"]
                 yield
+
+                # v0.13.20: si la acción falló, Ashley reacciona en
+                # personaje. Antes el user solo veía el badge gris con
+                # texto técnico ("Error de volumen: 'AudioDevice'..."),
+                # cosa que rompe la inmersión. Ahora Ashley genera una
+                # disculpa breve en su voz, sin mencionar nombres de
+                # librerías ni códigos de error al usuario.
+                if not result.get("success", True):
+                    yield from self._stream_action_failure_apology(
+                        action, result_text,
+                    )
             else:
                 # ⚡ Actions OFF y acción no-safe → avisar en chat en vez de
                 # ignorar silenciosamente. Antes Ashley describía la acción,
@@ -3289,6 +3300,84 @@ class State(rx.State):
         yield from self._streaming_loop(
             stream_response(self.messages, system_prompt, trigger=trigger)
         )
+
+    def _stream_action_failure_apology(self, action: dict, error_msg: str):
+        """v0.13.20: cuando una acción ejecutó pero falló (success=False),
+        Ashley reacciona en personaje pidiendo disculpa breve.
+
+        Sin esto, el user solo veía el badge gris con texto técnico
+        ("Error de volumen: 'AudioDevice' object has no attribute
+        'Activate'") que rompe la inmersión. Ahora Ashley se entera
+        del fallo y comenta como ella, en 1-2 frases, sin filtrar
+        nombres de librerías ni códigos de error al usuario.
+
+        El trigger NO le da a Ashley ejemplos específicos de qué
+        decir — solo le indica el contexto y le pide que reaccione
+        en su voz. La personalidad la construye ella desde el system
+        prompt.
+        """
+        self.is_thinking = True
+        self.current_response = ""
+        yield
+
+        action_label = action.get("description", "") or action.get("type", "")
+
+        if (self.language or "en").startswith("es"):
+            trigger = (
+                f"[FALLO INTERNO DE ACCIÓN — el sistema no ejecutó tu tag.] "
+                f"Acción intentada: {action_label}. "
+                f"Detalle técnico (NO se lo cuentes al jefe, es para tu "
+                f"contexto): {error_msg}\n\n"
+                f"Reacciona EN TU PERSONALIDAD: dile al jefe que no pudiste "
+                f"hacerlo. 1-2 frases, voz natural Ashley. NO menciones "
+                f"nombres de librerías, códigos, ni términos técnicos. "
+                f"Sí puedes ofrecer reintentar o sugerir que reinicie si "
+                f"el problema persiste."
+            )
+        elif (self.language or "en").startswith("fr"):
+            trigger = (
+                f"[ÉCHEC INTERNE D'ACTION — le système n'a pas exécuté ton "
+                f"tag.] Action tentée : {action_label}. "
+                f"Détail technique (NE PAS le partager avec le patron, "
+                f"c'est pour ton contexte) : {error_msg}\n\n"
+                f"Réagis DANS TA VOIX : dis au patron que tu n'as pas pu. "
+                f"1-2 phrases, ton Ashley. PAS de noms de librairies ni de "
+                f"termes techniques. Tu peux proposer de réessayer ou "
+                f"suggérer un redémarrage si le problème persiste."
+            )
+        else:
+            trigger = (
+                f"[ACTION INTERNAL FAILURE — the system did not execute "
+                f"your tag.] Attempted action: {action_label}. "
+                f"Technical detail (DO NOT share with the boss, this is "
+                f"for your context only): {error_msg}\n\n"
+                f"React IN YOUR VOICE: tell the boss you couldn't do it. "
+                f"1-2 sentences, natural Ashley tone. NO library names, "
+                f"error codes, or technical terms. You may offer to retry "
+                f"or suggest restarting if the problem persists."
+            )
+
+        try:
+            yield from self._stream_with_trigger(trigger)
+            apology_text = self._last_response
+            ap_clean, ap_mood = self._extract_mood(apology_text)
+            ap_clean, ap_aff = self._extract_affection(ap_clean)
+            ap_clean, _ = self._extract_action(ap_clean)
+            self._apply_affection_delta(ap_aff)
+            self.mood = ap_mood
+            self.current_response = ""
+            ts = now_iso()
+            self.messages.append({
+                "role": "assistant",
+                "content": _clean_display_fn(ap_clean),
+                "timestamp": ts,
+                "id": f"a-{ts}",
+                "image": "",
+            })
+            self.save_history()
+        except Exception as e:
+            self._handle_grok_error(e, "action_failure_apology")
+        yield
 
     def confirm_action(self):
         """El jefe autorizó la acción — ejecutarla y que Ashley reaccione."""
