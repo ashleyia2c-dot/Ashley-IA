@@ -1932,20 +1932,25 @@ class State(rx.State):
                         action, result_text,
                     )
             else:
-                # ⚡ Actions OFF y acción no-safe → avisar en chat en vez de
-                # ignorar silenciosamente. Antes Ashley describía la acción,
-                # no pasaba nada, el user confundido. Ahora se ve claro.
+                # ⚡ Actions OFF y acción no-safe → la action NO se ejecuta.
+                # Ashley reacciona en personaje pidiendo al jefe que active el
+                # toggle. v0.13.22: el flow viejo aquí intentaba reusar el
+                # follow-up de acciones EJECUTADAS y referenciaba result_text
+                # que NO existe en este branch → NameError visible al user
+                # ('cannot access local variable result_text'). Y el badge
+                # gris con texto técnico tampoco reflejaba la voz de Ashley.
                 import logging
                 logging.getLogger("ashley").info(
                     "action %s skipped — auto_actions is OFF", action.get("type"),
                 )
+
+                # Badge gris breve (audit) — el user verá la bubble de Ashley
+                # justo después con el mismo mensaje en su voz.
                 hint = {
-                    "es": "ℹ️ Ashley intentó una acción pero el interruptor ⚡ Actions está apagado. Actívalo en el header para que pueda controlar tu PC.",
-                    "en": "ℹ️ Ashley tried an action but the ⚡ Actions toggle is OFF. Turn it on in the header to let her control your PC.",
-                    "fr": "ℹ️ Ashley a tenté une action mais le toggle ⚡ Actions est éteint. Active-le dans le header pour qu'elle puisse contrôler ton PC.",
-                }.get(self.language, None) or (
-                    "ℹ️ Ashley tried an action but the ⚡ Actions toggle is OFF."
-                )
+                    "es": "⚡ Actions OFF — la acción no se ejecutó.",
+                    "en": "⚡ Actions OFF — action not executed.",
+                    "fr": "⚡ Actions OFF — l'action n'a pas été exécutée.",
+                }.get(self.language, "⚡ Actions OFF — action not executed.")
                 ts_h = now_iso()
                 self.messages.append({
                     "role": "system_result",
@@ -1957,47 +1962,47 @@ class State(rx.State):
                 self.save_history()
                 yield
 
-                # Ashley reacciona al resultado con el estado FRESCO del sistema.
-                # Usamos trigger explícito para que ella vea si la acción realmente funcionó,
-                # en lugar de confiar ciegamente en el mensaje del sistema anterior.
+                # Ashley pide en personaje que activen el toggle
                 self.is_thinking = True
                 self.current_response = ""
                 yield
                 try:
-                    try:
-                        import time as _t
-                        _a_type = action.get("type", "")
-                        # Esperar a que MSAA refleje el cambio antes de consultar.
-                        # Distintas acciones tienen distinta latencia:
-                        #   - window actions (open/close_window): 1.5s
-                        #   - tab/URL actions: 1.2s (navegador procesa teclado + render)
-                        if _a_type in ("open_app", "close_window"):
-                            _t.sleep(1.5)
-                        elif _a_type in ("play_music", "open_url", "search_web",
-                                         "close_browser_tab"):
-                            _t.sleep(1.2)
-                        # Invalidar cache de tabs para forzar lectura MSAA fresca.
-                        # Sin esto, get_system_state devuelve pestañas de hace hasta 8s.
-                        try:
-                            from .actions import _tabs_cache
-                            _tabs_cache["ts"] = 0.0
-                        except Exception:
-                            pass
-                        from .actions import get_system_state
-                        fresh_state = get_system_state()
-                    except Exception as _e:
-                        import logging
-                        logging.getLogger("ashley").warning("getting fresh system state after action: %s", _e)
-                        fresh_state = "(no disponible)"
-                    followup_trigger = (
-                        f"Resultado de la acción: {result_text}\n\n"
-                        f"Estado actual del sistema AHORA MISMO:\n{fresh_state}\n\n"
-                        f"Instrucción: informa honestamente al jefe basándote en el estado actual, no en el mensaje de resultado. "
-                        f"Si cerraste algo y sigue en la lista → falló. "
-                        f"Si abriste algo y aparece en la lista → éxito. "
-                        f"Sé breve y directo."
-                    )
-                    yield from self._stream_with_trigger(followup_trigger)
+                    action_label = action.get("description", "") or action.get("type", "")
+                    if (self.language or "en").startswith("es"):
+                        blocked_trigger = (
+                            f"[ACCIÓN BLOQUEADA — el toggle ⚡ Actions del "
+                            f"header está APAGADO, así que tu tag "
+                            f"'{action_label}' NO se ejecutó.]\n\n"
+                            f"Reacciona EN TU PERSONALIDAD: dile al jefe que "
+                            f"para que puedas hacerlo tiene que encender el "
+                            f"toggle ⚡ Actions del header (arriba a la "
+                            f"derecha). 1-2 frases, voz natural Ashley. NO "
+                            f"menciones términos técnicos ni nombres de "
+                            f"funciones, solo el toggle visible en la UI."
+                        )
+                    elif (self.language or "en").startswith("fr"):
+                        blocked_trigger = (
+                            f"[ACTION BLOQUÉE — le toggle ⚡ Actions du "
+                            f"header est ÉTEINT, donc ton tag "
+                            f"'{action_label}' n'a PAS été exécuté.]\n\n"
+                            f"Réagis DANS TA VOIX : dis au patron que pour "
+                            f"que tu puisses le faire, il doit activer le "
+                            f"toggle ⚡ Actions du header (en haut à droite). "
+                            f"1-2 phrases, ton Ashley naturel."
+                        )
+                    else:
+                        blocked_trigger = (
+                            f"[ACTION BLOCKED — the ⚡ Actions toggle in the "
+                            f"header is OFF, so your tag '{action_label}' "
+                            f"did NOT execute.]\n\n"
+                            f"React IN YOUR VOICE: tell the boss that for "
+                            f"you to do it he needs to turn on the ⚡ Actions "
+                            f"toggle in the header (top-right). 1-2 sentences, "
+                            f"natural Ashley tone. NO technical terms or "
+                            f"function names, just the visible UI toggle."
+                        )
+
+                    yield from self._stream_with_trigger(blocked_trigger)
                     followup_text = self._last_response
                     ft_clean, ft_mood = self._extract_mood(followup_text)
                     ft_clean, ft_aff = self._extract_affection(ft_clean)
@@ -2012,9 +2017,8 @@ class State(rx.State):
                     })
                     self.save_history()
                 except Exception as e:
-                    self._handle_grok_error(e, "action_followup")
+                    self._handle_grok_error(e, "action_blocked_followup")
                 yield
-            # Modo OFF → ignorar la acción silenciosamente
 
     # ─────────────────────────────────────────
     #  Envío de mensajes
