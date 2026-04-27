@@ -24,6 +24,20 @@ def global_styles():
     background: transparent !important;
   }}
 
+  /* v0.13.13: Radix Select dropdown content debe estar SIEMPRE
+     encima de cualquier overlay o panel. Sin esto, en el panel de
+     Settings la lista de modelos quedaba parcialmente tapada por
+     el bloque de "Descubrimiento proactivo" justo debajo (los
+     bloques tienen su propio stacking context y el portal de
+     Radix podía caer detrás dependiendo de cómo Reflex/Next.js
+     lo ubique en el DOM). 9999 es seguro — está por encima del
+     portal típico (~1500) y debajo de cualquier modal del
+     navegador. */
+  [data-radix-popper-content-wrapper],
+  [data-radix-select-content] {{
+    z-index: 9999 !important;
+  }}
+
   /* ── Animaciones ─────────────────────────────────────── */
   @keyframes fadeSlideIn {{
     from {{ opacity: 0; transform: translateY(12px); }}
