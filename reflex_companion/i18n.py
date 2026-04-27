@@ -170,7 +170,7 @@ UI = {
         "settings_cdp_on":      "ON — Ashley controls the browser via CDP",
         "settings_cdp_off":     "OFF — Ashley uses keyboard simulation (legacy)",
         "settings_cdp_desc":    "When ON, Ashley talks directly to the browser through localhost:9222 (no keyboard simulation, no visible tab cycling, sub-100ms). Falls back to legacy mode automatically if the browser doesn't respond. Trade-off: any local app could connect to that port — risk is low for users without active malware.",
-        "settings_cdp_howto":   "How to use: close your browser completely and reopen it with the flag --remote-debugging-port=9222. Easiest way: edit your Chrome/Edge/Brave shortcut and append the flag to the Target field.",
+        "settings_cdp_howto":   "Activating this toggle automatically modifies your browser's shortcuts (Chrome/Edge/Brave/Opera...) to add the required flag. Originals are backed up — turning OFF restores them exactly. After activating, close and reopen your browser for the change to take effect.",
 
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
@@ -363,7 +363,7 @@ UI = {
         "settings_cdp_on":      "ACTIVADO — Ashley controla el navegador vía CDP",
         "settings_cdp_off":     "DESACTIVADO — Ashley usa simulación de teclado (clásico)",
         "settings_cdp_desc":    "Cuando está ACTIVADO, Ashley se conecta directamente al navegador en localhost:9222 — sin simulación de teclas, sin pestañas cambiando visiblemente, sub-100ms. Cae automático al modo clásico si el navegador no responde. Trade-off: cualquier app local podría conectarse a ese puerto — riesgo bajo si no tienes malware activo.",
-        "settings_cdp_howto":   "Cómo usarlo: cierra el navegador completamente y reábrelo con el flag --remote-debugging-port=9222. Lo más fácil: edita el acceso directo de Chrome/Edge/Brave y añade el flag al campo 'Destino'.",
+        "settings_cdp_howto":   "Al activar este toggle Ashley modifica automáticamente los accesos directos de tu navegador (Chrome/Edge/Brave/Opera...) para añadir el flag necesario. Los originales se guardan en backup — al desactivar se restauran tal cual estaban. Después de activar, cierra y reabre tu navegador para que el cambio tenga efecto.",
 
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
@@ -553,7 +553,7 @@ UI = {
         "settings_cdp_on":      "ACTIVÉ — Ashley contrôle le navigateur via CDP",
         "settings_cdp_off":     "DÉSACTIVÉ — Ashley utilise la simulation clavier (classique)",
         "settings_cdp_desc":    "Quand ACTIVÉ, Ashley parle directement au navigateur via localhost:9222 — pas de simulation clavier, pas d'onglets visibles qui défilent, sub-100ms. Bascule automatiquement au mode classique si le navigateur ne répond pas. Compromis : n'importe quelle app locale pourrait se connecter à ce port — risque faible sans malware actif.",
-        "settings_cdp_howto":   "Comment l'utiliser : ferme complètement le navigateur et rouvre-le avec le flag --remote-debugging-port=9222. Le plus facile : édite le raccourci de Chrome/Edge/Brave et ajoute le flag au champ 'Cible'.",
+        "settings_cdp_howto":   "Activer ce toggle modifie automatiquement les raccourcis de ton navigateur (Chrome/Edge/Brave/Opera...) pour ajouter le flag requis. Les originaux sont sauvegardés — désactiver les restaure exactement. Après activation, ferme et rouvre ton navigateur pour appliquer le changement.",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
