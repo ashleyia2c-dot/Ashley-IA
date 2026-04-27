@@ -514,18 +514,28 @@ def _close_window_by_hwnd(hwnd: int) -> bool:
     return False
 
 
-def play_music(query: str, browser_already_open: bool = False) -> tuple[str, bool]:
+def play_music(query: str, browser_already_open: bool = False) -> tuple[str, bool, bool]:
     """
     Busca el primer video en YouTube y lo reproduce.
     - Si ya hay una pestaña de YouTube que Ashley abrió antes → NAVEGA a la nueva URL
       en esa misma pestaña (no abre otra ni cierra nada del usuario).
     - Si no hay pestaña previa → abre una nueva pestaña (NO ventana nueva).
     NUNCA cierra ventanas/pestañas del usuario. Solo reutiliza las que Ashley abrió.
-    Devuelve (mensaje, nuevo_valor_de_browser_opened).
 
-    VERIFICACIÓN: tras la acción cuenta las pestañas del navegador. Si no
-    aumentó (ni navegó a URL visible), devuelve un mensaje de error honesto
-    para que Ashley NO mienta diciendo que reprodujo algo que no abrió.
+    Devuelve (mensaje, browser_opened, success).
+      - success=True  → la canción se reprodujo (o navegamos su pestaña)
+      - success=False → falló: el navegador no abrió ninguna pestaña visible
+                        para la nueva URL. El caller debe propagar success=False
+                        a execute_action para que Ashley genere disculpa en
+                        personaje en lugar de afirmar éxito falsamente.
+
+    Caso ambiguo (MSAA no responde) → success=True con disclaimer en el
+    mensaje pidiéndole a Ashley que pregunte al jefe si lo ve.
+
+    v0.13.24 introdujo verificación más estricta del título. v0.13.25 (este
+    cambio) propaga el success real al execute_action layer — antes
+    siempre devolvía True aunque el mensaje fuera 'Error: ...', así que
+    Ashley nunca disparaba la disculpa post-fallo.
     """
     global _youtube_hwnd
     import logging
@@ -553,38 +563,47 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
     pre_count, pre_tabs = _count_tabs_fresh()
     log.warning(f"play_music: pre-action tab count={pre_count}")
 
-    # Intentar reutilizar la pestaña que Ashley abrió antes
-    navigated = False
-    if _youtube_hwnd:
-        import ctypes
-        if ctypes.windll.user32.IsWindow(_youtube_hwnd):
-            log.warning(f"play_music: reusing existing tab hwnd={_youtube_hwnd}, navigating to new URL")
-            navigated = _navigate_browser_subprocess(video_url, _youtube_hwnd)
-            if not navigated:
-                log.warning("play_music: navigation failed, opening new tab instead")
-        if not navigated:
-            _youtube_hwnd = 0
+    # v0.13.25: SIMPLIFICACIÓN. Antes intentábamos ser "smart" con un
+    # subprocess que enfocaba el browser y simulaba Ctrl+L → URL → Enter
+    # para reusar la tab de YouTube anterior. Funciona en algunos browsers
+    # pero Opera (y posiblemente otros browsers Chromium con anti-input
+    # protections) BLOQUEA los SendInput sintéticos — el SetForegroundWindow
+    # y el cycling parecen funcionar pero las teclas Ctrl+L nunca llegan
+    # al browser y la URL no se navega. Resultado: badge "Reproduciendo" pero
+    # la canción nueva no carga.
+    #
+    # Test empírico (sesión debug 2026-04-27 con el user reporting bug):
+    #   - webbrowser.open con URL de test → tab nueva apareció ✓
+    #   - subprocess SendInput Ctrl+L → la tab activa NO cambió de URL ✗
+    #
+    # Decisión: SIEMPRE webbrowser.open. Trade-off: tabs viejas de YouTube
+    # se acumulan si el user pide "pon otra" varias veces. Mitigación: el
+    # user puede pedir "cierra YouTube" → close_tab los limpia. Es worse
+    # que el ideal "cambia la canción in-place" pero confiable.
+    log.warning("play_music: opening URL via webbrowser.open (system shell handler)")
+    webbrowser.open(video_url)
 
-    # No hay pestaña previa (o falló navegación) → abrir nueva pestaña
-    if not navigated:
-        log.warning("play_music: opening new tab via webbrowser.open")
-        webbrowser.open(video_url)
-
-    # Capturar HWND (para reutilizar la próxima vez)
+    # Capturar HWND (para futuras referencias / close_tab)
     captured = _capture_browser_hwnd(wait=2.0)
     if captured:
         _youtube_hwnd = captured
     log.warning(f"play_music: captured hwnd={_youtube_hwnd}")
 
     # ── VERIFICACIÓN post-acción ────────────────────────────────────────
-    # Esperar un poco para que el navegador procese y MSAA refleje el cambio.
-    time.sleep(1.0)
+    # Esperar a que el browser procese + UIA refleje el cambio. Aumentado
+    # a 2.0s desde 1.0s — algunos browsers (Opera notably) tardan más en
+    # responder al shell handler especialmente si estaban minimizados.
+    time.sleep(2.0)
     post_count, post_tabs = _count_tabs_fresh()
     log.warning(f"play_music: post-action tab count={post_count}")
+    # Sin subprocess de navegación, navigated siempre False — el flow
+    # de verificación bajo solo aplica el caso 1 (count subió) o el
+    # caso de error.
+    navigated = False
 
     # Caso 1: conteo aumentó → nueva pestaña abierta, éxito.
     if pre_count >= 0 and post_count > pre_count:
-        return f"Reproduciendo: '{title}'", True
+        return f"Reproduciendo: '{title}'", True, True
 
     # Caso 2: conteo igual pero navegamos una pestaña existente. Buscar un
     # título que contenga PALABRAS DEL QUERY entre las pestañas.
@@ -602,7 +621,7 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
             for t in post_tabs:
                 t_lower = t.lower()
                 if any(w in t_lower for w in q_words):
-                    return f"Reproduciendo: '{title}'", True
+                    return f"Reproduciendo: '{title}'", True, True
             log.warning(
                 f"play_music: navigated=True but NO tab matches query "
                 f"words {q_words} — navigation likely silently failed"
@@ -611,13 +630,15 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
             # Query sin palabras significativas — fallback al check viejo
             for t in post_tabs:
                 if "youtube" in t.lower():
-                    return f"Reproduciendo: '{title}'", True
+                    return f"Reproduciendo: '{title}'", True, True
 
     # Caso 3: no podemos verificar que la pestaña apareció. Ser honesto:
     # MSAA no responde → no sabemos si fue éxito. Antes devolvíamos
     # "Reproduciendo..." asumiendo éxito — eso hacía que Ashley mintiera.
     # Ahora devolvemos un mensaje AMBIGUO para que Ashley NO afirme en
     # pasado que lo hizo, y pregunte al jefe si lo ve.
+    # success=True para evitar disparar disculpa en personaje en este
+    # caso (es ambiguo, no fallo claro).
     if post_count < 0 or pre_count < 0:
         log.warning("play_music: MSAA verification unavailable (ambiguous result)")
         return (
@@ -625,16 +646,19 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
             f"si la pestaña realmente se abrió (MSAA/UIA no responde). Informa al "
             f"jefe con honestidad: 'lo mandé al navegador pero no estoy segura si "
             f"lo abrió — ¿lo ves en pantalla?'. NO afirmes que está reproduciendo."
-        ), True
+        ), True, True
 
-    log.warning(f"play_music: VERIFICATION FAILED — pre={pre_count} post={post_count}")
+    # Caso 4: fallo claro — pre y post conocidos pero el conteo no aumentó.
+    # success=False dispara que Ashley genere disculpa en personaje vía
+    # _stream_action_failure_apology. Mensaje del badge corto + amigable
+    # (los detalles técnicos van al log para debug).
+    log.warning(
+        f"play_music: VERIFICATION FAILED — pre={pre_count} post={post_count} "
+        f"query={query!r} title={title!r}"
+    )
     return (
-        f"Error: intenté reproducir '{title}' pero el navegador NO abrió ninguna "
-        f"pestaña nueva (contador pre={pre_count} post={post_count}). Probablemente "
-        f"el navegador está cerrado o no tiene foco. Dile al jefe con honestidad "
-        f"que falló y pídele que abra el navegador manualmente. NO digas que está "
-        f"reproduciendo porque NO lo está."
-    ), False
+        f"No se pudo abrir '{title}' en el navegador."
+    ), False, False
 
 
 # ── Búsqueda web ──────────────────────────────────────────────────────────────
@@ -1776,8 +1800,13 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "play_music":
-            msg, new_flag = play_music(" ".join(params), browser_already_open=browser_opened)
-            return {"success": True, "result": msg,
+            # v0.13.25: play_music ahora propaga success real (3-tuple)
+            # para que execute_and_record_action pueda disparar la
+            # disculpa de Ashley en personaje cuando la canción no se
+            # reproduce. Antes siempre se devolvía success=True aunque
+            # play_music hubiera devuelto un mensaje 'Error: ...'.
+            msg, new_flag, success = play_music(" ".join(params), browser_already_open=browser_opened)
+            return {"success": success, "result": msg,
                     "screenshot": None, "browser_opened": new_flag}
 
         elif action_type == "search_web":
