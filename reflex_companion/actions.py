@@ -1526,13 +1526,17 @@ def _volume_powershell(action: str, value: Optional[str] = None) -> str:
     """
     key_map = {"up": "175", "down": "174", "mute": "173"}
     if action not in key_map:
-        # NUNCA defaultear a mute (ese era el bug). Devolver error claro
-        # para que el user / log entiendan qué pasó.
-        if action == "set":
-            return (f"Volumen 'set:{value}' no se pudo aplicar — pycaw no "
-                    f"disponible y el fallback de PowerShell no soporta "
-                    f"valores numéricos exactos. Instala pycaw o reinicia.")
-        return f"Volumen '{action}' no soportado en el fallback. Instala pycaw."
+        # NUNCA defaultear a mute (ese era el bug). Mensaje user-friendly:
+        # los detalles técnicos van al log, el user solo ve "no se pudo
+        # ajustar el volumen". v0.13.18: si pycaw está bundled (debería),
+        # este path NO se debería ejecutar nunca en producción.
+        import logging
+        logging.getLogger("ashley.actions").warning(
+            "volume action '%s' value=%s fell back to PowerShell which "
+            "doesn't support it; pycaw should be bundled — check the venv",
+            action, value,
+        )
+        return "No se pudo ajustar el volumen ahora mismo. Reinicia Ashley si el problema persiste."
 
     k = key_map[action]
     reps = 5 if action in ("up", "down") else 1
@@ -1555,7 +1559,10 @@ def control_volume(action: str, value: Optional[str] = None) -> str:
     try:
         return _volume_pycaw(action, value)
     except ImportError:
-        return _volume_powershell(action)
+        # v0.13.18: pasar value al fallback. Antes _volume_powershell se
+        # llamaba sin value, así que para action="set" el mensaje de
+        # error decía "set:None" en vez del valor real que Ashley emitió.
+        return _volume_powershell(action, value)
     except Exception as e:
         return f"Error de volumen: {e}"
 
