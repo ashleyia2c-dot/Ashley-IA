@@ -1913,11 +1913,23 @@ class State(rx.State):
         # ── Check achievements ───────────────────────
         self._check_achievements(executed_action=(action is not None))
 
-        if action:
-            _is_safe = action["type"] in _SAFE_ACTIONS
+        # v0.13.25 (fix): antes ejecutaba SOLO la primera acción aunque
+        # extract_all_actions devolviera varias. El comentario en el bloque
+        # anterior (línea ~1865) ya decía 'extraer TODAS las acciones... debemos
+        # ejecutar ambos, no solo el primero', pero el código real solo procesaba
+        # all_actions[0]. Bug preexistente desde v0.13.5 — surfaced cuando el
+        # user pidió 'cierra todas las tabs de YT' y Ashley emitió 3 tags
+        # close_tab pero solo se cerró 1. Ahora iteramos sobre all_actions.
+        #
+        # Excepción: si una acción es bloqueada por Actions OFF + non-safe,
+        # paramos el loop y mostramos el toggle hint UNA VEZ (en lugar de
+        # spamear N bubbles de "actívame el toggle").
+        blocked_action = None
+        for current_action in (all_actions or []):
+            _is_safe = current_action["type"] in _SAFE_ACTIONS
             if self.auto_actions or _is_safe:
                 # Modo libre o acción segura — ejecutar sin pedir permiso
-                result = self._execute_and_record_action(action)
+                result = self._execute_and_record_action(current_action)
                 result_text = result["result"]
                 yield
 
@@ -1929,87 +1941,95 @@ class State(rx.State):
                 # librerías ni códigos de error al usuario.
                 if not result.get("success", True):
                     yield from self._stream_action_failure_apology(
-                        action, result_text,
+                        current_action, result_text,
                     )
             else:
-                # ⚡ Actions OFF y acción no-safe → la action NO se ejecuta.
-                # Ashley reacciona en personaje pidiendo al jefe que active el
-                # toggle. v0.13.22: el flow viejo aquí intentaba reusar el
-                # follow-up de acciones EJECUTADAS y referenciaba result_text
-                # que NO existe en este branch → NameError visible al user
-                # ('cannot access local variable result_text'). Y el badge
-                # gris con texto técnico tampoco reflejaba la voz de Ashley.
-                import logging
-                logging.getLogger("ashley").info(
-                    "action %s skipped — auto_actions is OFF", action.get("type"),
-                )
+                # ⚡ Actions OFF y acción no-safe → guardamos para tratar
+                # FUERA del loop (UNA vez) y rompemos. No tiene sentido
+                # ejecutar acciones posteriores si el toggle está OFF —
+                # el user tiene que activarlo primero.
+                blocked_action = current_action
+                break
 
-                # Badge gris breve (audit) — el user verá la bubble de Ashley
-                # justo después con el mismo mensaje en su voz.
-                hint = {
-                    "es": "⚡ Actions OFF — la acción no se ejecutó.",
-                    "en": "⚡ Actions OFF — action not executed.",
-                    "fr": "⚡ Actions OFF — l'action n'a pas été exécutée.",
-                }.get(self.language, "⚡ Actions OFF — action not executed.")
-                ts_h = now_iso()
-                self.messages.append({
-                    "role": "system_result",
-                    "content": hint,
-                    "timestamp": ts_h,
-                    "id": f"sys-{ts_h}",
-                    "image": "",
-                })
-                self.save_history()
-                yield
+        if blocked_action:
+            # ⚡ Actions OFF y acción no-safe → la action NO se ejecuta.
+            # Ashley reacciona en personaje pidiendo al jefe que active el
+            # toggle. v0.13.22: el flow viejo aquí intentaba reusar el
+            # follow-up de acciones EJECUTADAS y referenciaba result_text
+            # que NO existe en este branch → NameError visible al user
+            # ('cannot access local variable result_text'). Y el badge
+            # gris con texto técnico tampoco reflejaba la voz de Ashley.
+            import logging
+            logging.getLogger("ashley").info(
+                "action %s skipped — auto_actions is OFF", blocked_action.get("type"),
+            )
 
-                # Ashley pide en personaje que activen el toggle
-                self.is_thinking = True
+            # Badge gris breve (audit) — el user verá la bubble de Ashley
+            # justo después con el mismo mensaje en su voz.
+            hint = {
+                "es": "⚡ Actions OFF — la acción no se ejecutó.",
+                "en": "⚡ Actions OFF — action not executed.",
+                "fr": "⚡ Actions OFF — l'action n'a pas été exécutée.",
+            }.get(self.language, "⚡ Actions OFF — action not executed.")
+            ts_h = now_iso()
+            self.messages.append({
+                "role": "system_result",
+                "content": hint,
+                "timestamp": ts_h,
+                "id": f"sys-{ts_h}",
+                "image": "",
+            })
+            self.save_history()
+            yield
+
+            # Ashley pide en personaje que activen el toggle
+            self.is_thinking = True
+            self.current_response = ""
+            yield
+            try:
+                action_label = blocked_action.get("description", "") or blocked_action.get("type", "")
+                if (self.language or "en").startswith("es"):
+                    blocked_trigger = (
+                        f"[ACCIÓN BLOQUEADA — el toggle ⚡ Actions del "
+                        f"header está APAGADO, así que tu tag "
+                        f"'{action_label}' NO se ejecutó.]\n\n"
+                        f"Reacciona EN TU PERSONALIDAD: dile al jefe que "
+                        f"para que puedas hacerlo tiene que encender el "
+                        f"toggle ⚡ Actions del header (arriba a la "
+                        f"derecha). 1-2 frases, voz natural Ashley. NO "
+                        f"menciones términos técnicos ni nombres de "
+                        f"funciones, solo el toggle visible en la UI."
+                    )
+                elif (self.language or "en").startswith("fr"):
+                    blocked_trigger = (
+                        f"[ACTION BLOQUÉE — le toggle ⚡ Actions du "
+                        f"header est ÉTEINT, donc ton tag "
+                        f"'{action_label}' n'a PAS été exécuté.]\n\n"
+                        f"Réagis DANS TA VOIX : dis au patron que pour "
+                        f"que tu puisses le faire, il doit activer le "
+                        f"toggle ⚡ Actions du header (en haut à droite). "
+                        f"1-2 phrases, ton Ashley naturel."
+                    )
+                else:
+                    blocked_trigger = (
+                        f"[ACTION BLOCKED — the ⚡ Actions toggle in the "
+                        f"header is OFF, so your tag '{action_label}' "
+                        f"did NOT execute.]\n\n"
+                        f"React IN YOUR VOICE: tell the boss that for "
+                        f"you to do it he needs to turn on the ⚡ Actions "
+                        f"toggle in the header (top-right). 1-2 sentences, "
+                        f"natural Ashley tone. NO technical terms or "
+                        f"function names, just the visible UI toggle."
+                    )
+
+                yield from self._stream_with_trigger(blocked_trigger)
+                followup_text = self._last_response
+                ft_clean, ft_mood = self._extract_mood(followup_text)
+                ft_clean, ft_aff = self._extract_affection(ft_clean)
+                ft_clean, _ = self._extract_action(ft_clean)
+                self._apply_affection_delta(ft_aff)
+                self.mood = ft_mood
                 self.current_response = ""
-                yield
-                try:
-                    action_label = action.get("description", "") or action.get("type", "")
-                    if (self.language or "en").startswith("es"):
-                        blocked_trigger = (
-                            f"[ACCIÓN BLOQUEADA — el toggle ⚡ Actions del "
-                            f"header está APAGADO, así que tu tag "
-                            f"'{action_label}' NO se ejecutó.]\n\n"
-                            f"Reacciona EN TU PERSONALIDAD: dile al jefe que "
-                            f"para que puedas hacerlo tiene que encender el "
-                            f"toggle ⚡ Actions del header (arriba a la "
-                            f"derecha). 1-2 frases, voz natural Ashley. NO "
-                            f"menciones términos técnicos ni nombres de "
-                            f"funciones, solo el toggle visible en la UI."
-                        )
-                    elif (self.language or "en").startswith("fr"):
-                        blocked_trigger = (
-                            f"[ACTION BLOQUÉE — le toggle ⚡ Actions du "
-                            f"header est ÉTEINT, donc ton tag "
-                            f"'{action_label}' n'a PAS été exécuté.]\n\n"
-                            f"Réagis DANS TA VOIX : dis au patron que pour "
-                            f"que tu puisses le faire, il doit activer le "
-                            f"toggle ⚡ Actions du header (en haut à droite). "
-                            f"1-2 phrases, ton Ashley naturel."
-                        )
-                    else:
-                        blocked_trigger = (
-                            f"[ACTION BLOCKED — the ⚡ Actions toggle in the "
-                            f"header is OFF, so your tag '{action_label}' "
-                            f"did NOT execute.]\n\n"
-                            f"React IN YOUR VOICE: tell the boss that for "
-                            f"you to do it he needs to turn on the ⚡ Actions "
-                            f"toggle in the header (top-right). 1-2 sentences, "
-                            f"natural Ashley tone. NO technical terms or "
-                            f"function names, just the visible UI toggle."
-                        )
-
-                    yield from self._stream_with_trigger(blocked_trigger)
-                    followup_text = self._last_response
-                    ft_clean, ft_mood = self._extract_mood(followup_text)
-                    ft_clean, ft_aff = self._extract_affection(ft_clean)
-                    ft_clean, _ = self._extract_action(ft_clean)
-                    self._apply_affection_delta(ft_aff)
-                    self.mood = ft_mood
-                    self.current_response = ""
                     ts3 = now_iso()
                     self.messages.append({
                         "role": "assistant", "content": _clean_display_fn(ft_clean),
