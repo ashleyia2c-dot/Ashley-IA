@@ -136,6 +136,12 @@ class State(rx.State):
     # cada vez que el toggle se acciona.
     cdp_setup_message: str = ""
 
+    # True mientras el wizard de CDP está corriendo (escanea + modifica
+    # shortcuts en background). La UI muestra un spinner para que el
+    # user sepa que algo está pasando — sin esto, parecía que la app
+    # se quedaba colgada (a veces tarda 5-30s en PCs con muchas apps).
+    cdp_setup_in_progress: bool = False
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -484,70 +490,87 @@ class State(rx.State):
     def toggle_cdp_enabled(self):
         """Alterna el modo browser moderno (Chrome DevTools Protocol).
 
-        Cuando ON:
-          1. Lanza el wizard de browser_setup que ENCUENTRA todos los
-             shortcuts (.lnk) de browsers Chromium en Desktop, Start
-             Menu y Taskbar, y les añade --remote-debugging-port=9222
-             al campo Arguments. Hace backup automático en .lnk.bak.
-          2. Las próximas veces que el user abra el browser desde esos
-             shortcuts, CDP estará activo en localhost:9222.
-          3. Ashley se conecta directo via HTTP. Sub-100ms, sin foco
-             visible, robust contra anti-input shields.
+        IMPORTANTE: el wizard que modifica los shortcuts del browser
+        corre en BACKGROUND (ver run_cdp_setup_wizard) porque puede
+        tardar 5-30s (escanear 100+ .lnk vía PowerShell secuencial).
+        Si lo hiciéramos síncrono aquí, la UI entera se quedaría
+        congelada durante el escaneo — el user reportó este bug en
+        2026-04-27 al activar el toggle.
 
-        Cuando OFF:
-          1. El wizard restaura los shortcuts desde su .bak. Quedan
-             exactamente como estaban antes (preservando args como
-             --profile-directory=Default que algunos browsers tienen).
-          2. Ashley vuelve al path legacy SendInput/keybd_event.
+        El handler ahora:
+          1. Flip el state inmediatamente (UI responde al instante)
+          2. Setea cdp_setup_message a "Configurando..." (feedback visual)
+          3. Persist el cambio
+          4. Dispatcha el bg task que hace el escaneo + modificación
 
-        Si el user activa el toggle pero su browser ya está corriendo,
-        el cambio no surte efecto hasta que cierre y reabra el browser.
-        El mensaje de status (cdp_setup_message) lo recuerda.
-
-        Si CDP está ON pero el browser no responde a localhost:9222
-        (ej: arrancado por otro camino), play_music/close_tab caen
-        automáticamente al legacy. Sin crashes.
+        Cuando el bg task termina, actualiza cdp_setup_message con el
+        resultado real (cuántos shortcuts modificados, etc.).
         """
         new_state = not self.cdp_enabled
+        self.cdp_enabled = new_state
+        self.cdp_setup_in_progress = True
+        if new_state:
+            self.cdp_setup_message = "Configurando accesos directos del navegador..."
+        else:
+            self.cdp_setup_message = "Restaurando accesos directos al estado original..."
+        self._persist_voice()
+        return State.run_cdp_setup_wizard(new_state)
 
-        # Lanzar wizard de modificación de shortcuts
+    @rx.event(background=True)
+    async def run_cdp_setup_wizard(self, enable: bool):
+        """Ejecuta el wizard de browser_setup en background para no
+        bloquear la UI mientras escanea los .lnk.
+
+        En PCs con muchas apps instaladas el escaneo puede tomar 5-30s
+        (PowerShell secuencial por cada .lnk en Desktop + Start Menu +
+        Taskbar). Async permite que el toggle responda inmediato y la
+        UI muestre 'Configurando...' mientras esto trabaja.
+        """
+        from .browser_setup import configure_all_shortcuts
+        import logging
+
         try:
-            from .browser_setup import configure_all_shortcuts
-            result = configure_all_shortcuts(enable=new_state)
-            if new_state:
+            # configure_all_shortcuts es síncrono (PowerShell + I/O), pero
+            # como estamos en background task NO bloquea la UI principal.
+            result = configure_all_shortcuts(enable=enable)
+
+            if enable:
                 if result["modified"] > 0:
-                    self.cdp_setup_message = (
+                    msg = (
                         f"✓ {result['modified']} acceso(s) directo(s) "
                         f"modificados. Cierra y reabre tu navegador para "
                         f"aplicar el cambio."
                     )
                 elif result["total"] == 0:
-                    self.cdp_setup_message = (
+                    msg = (
                         "⚠ No encontré accesos directos de navegadores "
                         "Chromium en tu PC. Activa el flag manualmente."
                     )
                 else:
-                    self.cdp_setup_message = (
+                    msg = (
                         f"✓ Los {result['total']} accesos directos ya "
                         f"tenían el flag activo."
                     )
             else:
                 if result["modified"] > 0:
-                    self.cdp_setup_message = (
+                    msg = (
                         f"✓ {result['modified']} acceso(s) directo(s) "
                         f"restaurados al estado original."
                     )
                 else:
-                    self.cdp_setup_message = "✓ Modo clásico activado."
-            if result["failed"] > 0:
-                self.cdp_setup_message += f" ({result['failed']} fallaron)"
-        except Exception as e:
-            import logging
-            logging.getLogger("ashley").warning("CDP setup failed: %s", e)
-            self.cdp_setup_message = f"Error en el wizard: {e}"
+                    msg = "✓ Modo clásico activado."
 
-        self.cdp_enabled = new_state
-        self._persist_voice()
+            if result["failed"] > 0:
+                msg += f" ({result['failed']} fallaron)"
+
+            async with self:
+                self.cdp_setup_message = msg
+                self.cdp_setup_in_progress = False
+        except Exception as e:
+            logging.getLogger("ashley").warning("CDP setup failed: %s", e)
+            async with self:
+                self.cdp_setup_message = f"Error en el wizard: {e}"
+                self.cdp_setup_in_progress = False
 
     def set_elevenlabs_key(self, key: str):
         self.elevenlabs_key = (key or "").strip()
@@ -4292,22 +4315,43 @@ def index():
                                 rx.text(State.t["settings_cdp_howto"],
                                         color="#ffaa44", font_size="10px",
                                         line_height="1.5", font_style="italic"),
-                                # Mensaje del wizard (resultado de la última
-                                # modificación de shortcuts). Se muestra solo
-                                # si hay algo que mostrar.
+                                # Estado del wizard: spinner mientras corre,
+                                # mensaje de resultado cuando termina. Sin esto
+                                # el user no sabía si la app estaba trabajando
+                                # o se había bloqueado (el escaneo puede tomar
+                                # 5-30s en PCs con muchas apps).
                                 rx.cond(
-                                    State.cdp_setup_message != "",
+                                    State.cdp_setup_in_progress,
                                     rx.box(
-                                        rx.text(State.cdp_setup_message,
+                                        rx.hstack(
+                                            rx.spinner(size="2"),
+                                            rx.text(
+                                                State.cdp_setup_message,
                                                 color="#88ddff", font_size="11px",
-                                                font_weight="500", line_height="1.5"),
+                                                font_weight="500", line_height="1.5",
+                                            ),
+                                            spacing="2", align="center",
+                                        ),
                                         bg="rgba(136,221,255,0.08)",
-                                        border="1px solid rgba(136,221,255,0.3)",
+                                        border="1px solid rgba(136,221,255,0.4)",
                                         border_radius="8px",
-                                        padding="8px 12px",
+                                        padding="10px 12px",
                                         margin_top="6px",
                                     ),
-                                    rx.box(),
+                                    rx.cond(
+                                        State.cdp_setup_message != "",
+                                        rx.box(
+                                            rx.text(State.cdp_setup_message,
+                                                    color="#88ddff", font_size="11px",
+                                                    font_weight="500", line_height="1.5"),
+                                            bg="rgba(136,221,255,0.08)",
+                                            border="1px solid rgba(136,221,255,0.3)",
+                                            border_radius="8px",
+                                            padding="8px 12px",
+                                            margin_top="6px",
+                                        ),
+                                        rx.box(),
+                                    ),
                                 ),
                                 spacing="2", align="stretch",
                             ),
