@@ -330,12 +330,13 @@ function killStrayAshleyProcesses() {
     ].join(' ');
     exec(
       `powershell -NoProfile -NonInteractive -Command "${psScript}"`,
-      // 3000ms ya es más que suficiente para que PowerShell spawne, ejecute
-      // Get-CimInstance + Stop-Process y termine. Antes 8000 nos costaba
-      // hasta 1-2s extra en arranques limpios cuando PowerShell tarda en
-      // cargar. Si al timeout no terminó, pasamos — los procesos huérfanos
-      // se mueren solos cuando los puertos los pisa el nuevo Reflex.
-      { windowsHide: true, timeout: 3000 },
+      // 1500ms — PowerShell tarda 800-1200ms en spawnar + ejecutar el query
+      // CIM en hardware estándar. Si al timeout no terminó, pasamos: los
+      // zombies que sobrevivan se mueren cuando el nuevo Reflex pisa sus
+      // puertos vía killProcessesOnPort(). Antes 3000 era safety margin
+      // exagerado que costaba 1-2s extra en cold boots limpios donde
+      // PowerShell se cargaba lento. v0.13.10: bajamos a 1500.
+      { windowsHide: true, timeout: 1500 },
       (err, stdout) => {
         if (err) {
           log(`killStrayAshleyProcesses err: ${err.message}`);

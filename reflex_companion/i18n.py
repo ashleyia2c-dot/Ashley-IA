@@ -139,6 +139,10 @@ UI = {
         "news_empty_hint":   "Ashley will drop songs, trailers, articles and news here when she finds something that matches your tastes — without interrupting your chat.",
         "news_empty_tip_title": "How to fill this",
         "news_empty_tip_body":  "Open Settings → Proactive Discovery and turn it ON. Once Ashley knows your tastes (just chat about what you like), she'll start searching on her own.",
+        # Mostrado cuando el modelo activo NO soporta web search (Ollama/OpenRouter).
+        "news_unavailable_title":  "Discovery isn't available with this model",
+        "news_unavailable_body":   "Web search is currently only supported with Grok (xAI). Other models work great for chat, vision and system actions, but they can't browse the web for songs, trailers or news.",
+        "news_unavailable_hint":   "To enable Discovery: open Settings → AI Model and switch to Grok.",
         "news_close":        "Back to chat",
         "news_clear_all":    "Clear all",
         "news_clear_confirm": "Remove all discoveries?",
@@ -156,6 +160,9 @@ UI = {
         "settings_discovery_desc":    "When ON, Ashley may occasionally search the web and share trailers, songs, articles or news that match your tastes. When OFF (default), she focuses on continuing your conversation without injecting random topics. Emotional moments always disable discovery regardless of this setting.",
         "settings_discovery_on":      "ON — Ashley shares discoveries",
         "settings_discovery_off":     "OFF — Ashley sticks to our conversation",
+        # Mostrado cuando el toggle está disabled porque el provider no soporta web search.
+        "settings_discovery_unavailable":      "Not available with",
+        "settings_discovery_unavailable_desc": "Proactive Discovery requires web search, which is currently only supported with Grok (xAI). Switch to Grok in the AI Model section above to enable this feature.",
 
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
@@ -319,6 +326,9 @@ UI = {
         "news_empty_hint":   "Ashley dejará aquí canciones, tráilers, artículos y noticias cuando encuentre algo que encaje con tus gustos — sin interrumpir el chat.",
         "news_empty_tip_title": "Cómo activarlo",
         "news_empty_tip_body":  "Abre Ajustes → Descubrimiento proactivo y actívalo. Cuando Ashley sepa tus gustos (solo charla con ella sobre lo que te gusta), empezará a buscar por su cuenta.",
+        "news_unavailable_title":  "Descubrimientos no disponibles con este modelo",
+        "news_unavailable_body":   "La búsqueda web solo funciona con Grok (xAI). Otros modelos funcionan perfectamente para chatear, ver imágenes y ejecutar acciones del sistema, pero no pueden buscar en internet canciones, tráilers ni noticias.",
+        "news_unavailable_hint":   "Para activarlo: abre Ajustes → Modelo de IA y cambia a Grok.",
         "news_close":        "Volver al chat",
         "news_clear_all":    "Borrar todo",
         "news_clear_confirm": "¿Eliminar todos los descubrimientos?",
@@ -336,6 +346,8 @@ UI = {
         "settings_discovery_desc":    "Cuando está ACTIVADO, Ashley puede buscar en internet y compartir tráilers, canciones, artículos o noticias según tus gustos. Cuando está DESACTIVADO (default), se centra en continuar la conversación sin meter temas random. En momentos emocionales el discovery se desactiva siempre, esté como esté este ajuste.",
         "settings_discovery_on":      "ACTIVADO — Ashley comparte descubrimientos",
         "settings_discovery_off":     "DESACTIVADO — Ashley sigue nuestra conversación",
+        "settings_discovery_unavailable":      "No disponible con",
+        "settings_discovery_unavailable_desc": "El descubrimiento proactivo requiere búsqueda web, que solo funciona con Grok (xAI). Cambia a Grok en la sección 'Modelo de IA' de arriba para activar esta función.",
 
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
@@ -496,6 +508,9 @@ UI = {
         "news_empty_hint":   "Ashley déposera ici des chansons, bandes-annonces, articles et actus quand elle trouve quelque chose qui colle à tes goûts — sans interrompre le chat.",
         "news_empty_tip_title": "Comment l'activer",
         "news_empty_tip_body":  "Ouvre Réglages → Découverte proactive et active-le. Une fois qu'Ashley connaît tes goûts (parle-lui de ce que tu aimes), elle commencera à chercher d'elle-même.",
+        "news_unavailable_title":  "Découvertes non disponibles avec ce modèle",
+        "news_unavailable_body":   "La recherche web n'est disponible qu'avec Grok (xAI). Les autres modèles fonctionnent très bien pour discuter, voir des images et exécuter des actions système, mais ne peuvent pas chercher sur internet des chansons, bandes-annonces ou actus.",
+        "news_unavailable_hint":   "Pour activer : ouvre Réglages → Modèle IA et passe sur Grok.",
         "news_close":        "Retour au chat",
         "news_clear_all":    "Tout effacer",
         "news_clear_confirm": "Supprimer toutes les découvertes ?",
@@ -513,6 +528,8 @@ UI = {
         "settings_discovery_desc":    "Quand ACTIVÉ, Ashley peut chercher sur le web et partager des bandes-annonces, chansons, articles ou actus liés à tes goûts. Quand DÉSACTIVÉ (défaut), elle se concentre sur la continuité de la conversation sans injecter de sujets aléatoires. En moment émotionnel, la découverte est toujours désactivée, peu importe ce réglage.",
         "settings_discovery_on":      "ACTIVÉ — Ashley partage ses découvertes",
         "settings_discovery_off":     "DÉSACTIVÉ — Ashley reste sur notre conversation",
+        "settings_discovery_unavailable":      "Non disponible avec",
+        "settings_discovery_unavailable_desc": "La découverte proactive nécessite la recherche web, qui n'est disponible qu'avec Grok (xAI). Passe sur Grok dans la section 'Modèle IA' ci-dessus pour activer cette fonctionnalité.",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",

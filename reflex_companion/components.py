@@ -867,69 +867,133 @@ def _news_panel() -> rx.Component:
                 spacing="2", align="stretch", width="100%",
                 padding_top="12px",
             ),
-            # Empty state — diseño con card + ilustración + tips, no
-            # solo un emoji solitario. Antes se sentía placeholder.
-            rx.center(
-                rx.vstack(
-                    # Hero icon con halo glow
-                    rx.box(
-                        rx.text("📰", font_size="56px"),
-                        width="100px", height="100px",
-                        display="flex",
-                        align_items="center",
-                        justify_content="center",
-                        border_radius="50%",
-                        bg="rgba(255,154,238,0.06)",
-                        border="2px solid rgba(255,154,238,0.18)",
-                        box_shadow="0 0 32px rgba(255,154,238,0.15), inset 0 0 20px rgba(255,154,238,0.05)",
-                        margin_bottom="8px",
-                    ),
-                    # Título principal
-                    rx.text(
-                        State.t["news_empty"],
-                        color="#dddddd", font_size="15px",
-                        font_weight="600", line_height="1.5",
-                        text_align="center", max_width="380px",
-                    ),
-                    # Hint en italic
-                    rx.text(
-                        State.t["news_empty_hint"],
-                        color="#888888", font_size="12px",
-                        font_style="italic", line_height="1.5",
-                        text_align="center", max_width="380px",
-                    ),
-                    # Card con tip de cómo activar
-                    rx.box(
-                        rx.hstack(
-                            rx.text("💡", font_size="18px"),
-                            rx.vstack(
-                                rx.text(
-                                    State.t["news_empty_tip_title"],
-                                    color=COLOR_PRIMARY,
-                                    font_size="12px",
-                                    font_weight="700",
-                                ),
-                                rx.text(
-                                    State.t["news_empty_tip_body"],
-                                    color="#aaaaaa",
-                                    font_size="11px",
-                                    line_height="1.4",
-                                ),
-                                spacing="1", align="start",
-                            ),
-                            spacing="3", align="start",
+            # Empty state — se divide según si el LLM activo soporta
+            # búsqueda web:
+            #   • web_search_supported=True  → empty con tip de cómo
+            #     activar Discovery en Settings (caso normal Grok).
+            #   • web_search_supported=False → mensaje explicando que el
+            #     modelo activo (Ollama / OpenRouter) no soporta web
+            #     search y por eso este panel queda vacío. Sin esto el
+            #     user piensa que es un bug — y la review en Reddit
+            #     dolería.
+            rx.cond(
+                State.web_search_supported,
+                # ── Caso normal: provider soporta web search ──
+                rx.center(
+                    rx.vstack(
+                        # Hero icon con halo glow
+                        rx.box(
+                            rx.text("📰", font_size="56px"),
+                            width="100px", height="100px",
+                            display="flex",
+                            align_items="center",
+                            justify_content="center",
+                            border_radius="50%",
+                            bg="rgba(255,154,238,0.06)",
+                            border="2px solid rgba(255,154,238,0.18)",
+                            box_shadow="0 0 32px rgba(255,154,238,0.15), inset 0 0 20px rgba(255,154,238,0.05)",
+                            margin_bottom="8px",
                         ),
-                        bg="rgba(255,154,238,0.04)",
-                        border="1px solid rgba(255,154,238,0.18)",
-                        border_radius="14px",
-                        padding="14px 18px",
-                        max_width="420px",
-                        margin_top="10px",
+                        # Título principal
+                        rx.text(
+                            State.t["news_empty"],
+                            color="#dddddd", font_size="15px",
+                            font_weight="600", line_height="1.5",
+                            text_align="center", max_width="380px",
+                        ),
+                        # Hint en italic
+                        rx.text(
+                            State.t["news_empty_hint"],
+                            color="#888888", font_size="12px",
+                            font_style="italic", line_height="1.5",
+                            text_align="center", max_width="380px",
+                        ),
+                        # Card con tip de cómo activar
+                        rx.box(
+                            rx.hstack(
+                                rx.text("💡", font_size="18px"),
+                                rx.vstack(
+                                    rx.text(
+                                        State.t["news_empty_tip_title"],
+                                        color=COLOR_PRIMARY,
+                                        font_size="12px",
+                                        font_weight="700",
+                                    ),
+                                    rx.text(
+                                        State.t["news_empty_tip_body"],
+                                        color="#aaaaaa",
+                                        font_size="11px",
+                                        line_height="1.4",
+                                    ),
+                                    spacing="1", align="start",
+                                ),
+                                spacing="3", align="start",
+                            ),
+                            bg="rgba(255,154,238,0.04)",
+                            border="1px solid rgba(255,154,238,0.18)",
+                            border_radius="14px",
+                            padding="14px 18px",
+                            max_width="420px",
+                            margin_top="10px",
+                        ),
+                        spacing="3", align="center",
                     ),
-                    spacing="3", align="center",
+                    width="100%",
+                    padding="60px 24px",
                 ),
-                width="100%",
-                padding="60px 24px",
+                # ── Caso "modelo sin web search": Ollama / OpenRouter ──
+                rx.center(
+                    rx.vstack(
+                        # Hero icon con halo (color amber/warn en lugar de rosa)
+                        rx.box(
+                            rx.text("🌐", font_size="56px"),
+                            width="100px", height="100px",
+                            display="flex",
+                            align_items="center",
+                            justify_content="center",
+                            border_radius="50%",
+                            bg="rgba(255,200,120,0.06)",
+                            border="2px solid rgba(255,200,120,0.18)",
+                            box_shadow="0 0 32px rgba(255,200,120,0.12)",
+                            margin_bottom="8px",
+                        ),
+                        rx.text(
+                            State.t["news_unavailable_title"],
+                            color="#ffd28a", font_size="15px",
+                            font_weight="600", line_height="1.5",
+                            text_align="center", max_width="420px",
+                        ),
+                        rx.text(
+                            State.t["news_unavailable_body"],
+                            color="#aaaaaa", font_size="12px",
+                            line_height="1.6",
+                            text_align="center", max_width="420px",
+                        ),
+                        # Card con la acción clara para resolverlo
+                        rx.box(
+                            rx.hstack(
+                                rx.text("⚙️", font_size="18px"),
+                                rx.text(
+                                    State.t["news_unavailable_hint"],
+                                    color="#dddddd",
+                                    font_size="12px",
+                                    font_weight="600",
+                                    line_height="1.5",
+                                ),
+                                spacing="3", align="center",
+                            ),
+                            bg="rgba(255,200,120,0.04)",
+                            border="1px solid rgba(255,200,120,0.22)",
+                            border_radius="14px",
+                            padding="14px 18px",
+                            max_width="420px",
+                            margin_top="10px",
+                        ),
+                        spacing="3", align="center",
+                    ),
+                    width="100%",
+                    padding="60px 24px",
+                ),
             ),
         ),
         spacing="2", align="stretch", width="100%",

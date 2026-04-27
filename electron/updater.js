@@ -15,6 +15,8 @@
 
 const { autoUpdater } = require('electron-updater');
 const { app, ipcMain } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
 // ─── Configuracion ────────────────────────────────────────────────────────
 
@@ -48,6 +50,59 @@ function log(msg) {
   console.log(`[${ts}] [updater] ${msg}`);
 }
 
+// ─── Helpers de disco / cleanup ───────────────────────────────────────────
+//
+// v0.13.10: añadidos para tapar gaps que vimos en el audit:
+//   • Si el download se interrumpe (user mata el proceso, network drop,
+//     disco lleno) electron-updater puede dejar archivos parciales que
+//     ocupan disco y a veces confunden el siguiente intento.
+//   • No teníamos visibilidad del disk space pre-download — si el disco
+//     está al límite el update falla en silencio.
+
+function _pendingDir() {
+  // electron-updater descarga aquí: %LOCALAPPDATA%\ashley-updater\pending\
+  const localAppData = process.env.LOCALAPPDATA || '';
+  if (!localAppData) return null;
+  return path.join(localAppData, 'ashley-updater', 'pending');
+}
+
+function _getFreeDiskSpaceMB(checkPath) {
+  // Node 18+ tiene fs.statfsSync — Electron 33 viene con Node 20.
+  try {
+    const target = checkPath || process.env.LOCALAPPDATA || 'C:\\';
+    const stats = fs.statfsSync(target);
+    return Math.floor((Number(stats.bavail) * Number(stats.bsize)) / (1024 * 1024));
+  } catch (e) {
+    return null;
+  }
+}
+
+function _cleanupPartialDownloads() {
+  // Elimina archivos .tmp / .partial / .download que quedaron de un intento
+  // anterior fallido. Idempotente — si no hay nada, no hace nada.
+  try {
+    const dir = _pendingDir();
+    if (!dir || !fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    let cleaned = 0;
+    for (const f of files) {
+      const lower = f.toLowerCase();
+      if (lower.endsWith('.tmp') || lower.endsWith('.partial') ||
+          lower.endsWith('.download')) {
+        try {
+          fs.unlinkSync(path.join(dir, f));
+          cleaned++;
+        } catch (_) { /* file in use, dejarlo */ }
+      }
+    }
+    if (cleaned > 0) {
+      log(`cleaned ${cleaned} partial download file(s) in ${dir}`);
+    }
+  } catch (e) {
+    log(`cleanup partial downloads failed: ${e.message}`);
+  }
+}
+
 // ─── Estado que exponemos al renderer ─────────────────────────────────────
 //
 // mainWindow.webContents.send('ashley-update:<evento>', payload) es como
@@ -76,6 +131,16 @@ autoUpdater.on('checking-for-update', () => {
 
 autoUpdater.on('update-available', (info) => {
   log(`update available: ${info.version} (current: ${app.getVersion()})`);
+  // Disk space check (informativo). Un installer típico de Ashley pesa
+  // ~180MB; con margen para el download + extracción pedimos >500MB libres.
+  const freeMB = _getFreeDiskSpaceMB();
+  if (freeMB !== null) {
+    log(`disk free at update target: ${freeMB} MB`);
+    if (freeMB < 500) {
+      log(`WARNING: disk space low (<500MB), download may fail`);
+      emit('disk-space-low', { freeMB });
+    }
+  }
   emit('available', {
     version: info.version,
     releaseDate: info.releaseDate,
@@ -113,10 +178,28 @@ autoUpdater.on('error', (err) => {
   //   - GitHub rate limit
   //   - Repo privado sin token
   //   - Latest.yml mal formado
+  //   - Disco lleno mid-download (ENOSPC)
+  //   - Permisos (EACCES) — raro en per-user install, posible si AV bloquea
+  //   - Conexión cortada (ECONNRESET) — deja archivo parcial
+  //   - Checksum/signature mismatch — corrupted download
   // Los logueamos pero NO crasheamos la app — el update es una feature, no
   // debe romper Ashley si falla.
-  log(`error: ${err && err.message}`);
-  emit('error', { message: err && err.message });
+  const msg = (err && err.message) || 'unknown';
+  log(`error: ${msg}`);
+
+  // v0.13.10: si el error sugiere descarga corrupta o interrumpida,
+  // limpiamos los archivos parciales para que el siguiente intento empiece
+  // limpio (sin esto, el .tmp de la sesión anterior puede confundir a
+  // electron-updater o ocupar disco innecesario).
+  const corruptionHints = ['ENOSPC', 'EACCES', 'ECONNRESET',
+                            'corrupt', 'integrity', 'sha512', 'checksum'];
+  const lower = msg.toLowerCase();
+  if (corruptionHints.some(h => lower.includes(h.toLowerCase()))) {
+    log(`error suggests partial/corrupt download — cleaning up`);
+    _cleanupPartialDownloads();
+  }
+
+  emit('error', { message: msg });
 });
 
 // ─── IPC: permite a la UI disparar acciones manuales ──────────────────────
@@ -147,6 +230,17 @@ ipcMain.handle('ashley-update:get-version', () => {
   return app.getVersion();
 });
 
+ipcMain.handle('ashley-update:get-status', () => {
+  // Status snapshot que la UI puede consultar para mostrar info del
+  // updater (versión, último download, espacio disponible). Útil para
+  // un eventual panel de "Actualización" en Settings.
+  return {
+    version: app.getVersion(),
+    lastDownloadedVersion: lastDownloadedVersion,
+    freeDiskMB: _getFreeDiskSpaceMB(),
+  };
+});
+
 // ─── Setup publico ────────────────────────────────────────────────────────
 
 /**
@@ -175,6 +269,12 @@ function setupAutoUpdater(mainWindow, opts = {}) {
 
   log(`current version: ${app.getVersion()}`);
   log(`check interval: ${CHECK_INTERVAL_MS / 1000 / 60} min`);
+
+  // v0.13.10: cleanup preventivo de archivos parciales de un intento
+  // anterior fallido. Si el user mató Ashley mid-download o se quedó sin
+  // disco, electron-updater pudo dejar .tmp residuales que confunden el
+  // siguiente intento. Empezar limpio.
+  _cleanupPartialDownloads();
 
   // Primera verificacion tras INITIAL_DELAY_MS (no bloquea el arranque)
   setTimeout(() => {

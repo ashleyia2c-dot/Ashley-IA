@@ -570,6 +570,23 @@ class State(rx.State):
         return self.llm_provider == "xai"
 
     @rx.var
+    def web_search_supported(self) -> bool:
+        """True si el provider activo soporta búsqueda web nativa.
+        Hoy solo xAI tiene web_search integrado en el SDK — OpenRouter y
+        Ollama van por el path OpenAI-compat que no expone tools.
+        Usado para gating de la UI (ocultar/explicar cuando un feature
+        que depende de web_search no está disponible)."""
+        return self.llm_provider == "xai"
+
+    @rx.var
+    def llm_provider_label(self) -> str:
+        """Label legible del provider activo (para mensajes UI tipo
+        'Not available with [Provider]')."""
+        p = self.llm_provider or "xai"
+        return {"xai": "Grok (xAI)", "openrouter": "OpenRouter",
+                "ollama": "Ollama"}.get(p, p)
+
+    @rx.var
     def is_voice_kokoro(self) -> bool:
         return self.voice_provider == "kokoro"
 
@@ -746,13 +763,17 @@ class State(rx.State):
             self.refresh_ollama_status()
         # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
         # Si voice.json viejo trae la key, la ignoramos silenciosamente.
-        # Warmup del modelo Whisper en background (no bloquea la UI)
-        try:
-            from .whisper_stt import warmup as whisper_warmup
-            whisper_warmup()
-        except Exception as _e:
-            import logging
-            logging.getLogger("ashley").warning("warming up whisper: %s", _e)
+        #
+        # v0.13.10: Whisper YA NO se warmup en on_load. Antes lanzábamos un
+        # thread background que descargaba el modelo de 75MB + lo cargaba en
+        # RAM aunque el user nunca usase voz. Ahora se carga lazy en el primer
+        # click de 🎤 (api_routes.py:/api/transcribe ya tiene "downloading"
+        # response handling para mostrar feedback). Net positive:
+        #   • Primer arranque post-install: no compite por disco con el
+        #     download del modelo + frontend compile + auto-update check
+        #   • Users que nunca usan voz: 75MB+RAM ahorrados permanentemente
+        #   • Trade-off aceptable: primer click de 🎤 tarda 3-5s (con
+        #     spinner UI), después instantáneo
         from .actions import reset_youtube_hwnd
         reset_youtube_hwnd()
         raw_messages = load_json(CHAT_FILE, [])
@@ -2789,11 +2810,16 @@ class State(rx.State):
         #   • SÍ solo si toca por tiempo (cada 4h por defecto)
         #   • NO si la última charla fue emocional (no rompamos el
         #     ambiente con noticias random)
+        #   • NO si el provider activo no soporta web_search (Ollama,
+        #     OpenRouter): sin web search Ashley no puede descubrir
+        #     nada nuevo, lanzar el discovery solo gastaría tokens.
+        from .llm_provider import supports_web_search as _supports_ws
         do_discovery = (
             _discovery_on
             and _tastes
             and should_run_discovery()
             and not emotional
+            and _supports_ws()
         )
 
         # Lanzar las dos en SECUENCIA (no en paralelo — Grok podría
@@ -3076,6 +3102,14 @@ class State(rx.State):
 
             # Gate 1: si el user desactivó el discovery proactivo, saltar.
             if not discovery_on:
+                continue
+
+            # Gate 1b: si el provider activo no soporta web_search,
+            # tampoco. La UI ya gating el toggle pero un user puede
+            # haberlo activado en xAI y luego cambiar a Ollama — la
+            # config persiste, así que respetamos en runtime también.
+            from .llm_provider import supports_web_search as _supports_ws
+            if not _supports_ws():
                 continue
 
             # Gate 2: si la última charla fue emocional, NUNCA disparar
@@ -3885,35 +3919,76 @@ def index():
 
                         # ═══════════════════════════════════════════════
                         #  DISCOVERY — Ashley busca contenido por su cuenta
+                        #
+                        #  Se divide según el provider activo:
+                        #   • web_search_supported (xAI) → toggle normal
+                        #   • web_search_supported=False (Ollama/OpenRouter)
+                        #     → toggle desactivado + nota explicando por qué.
+                        #
+                        #  Sin esto, el user en Ollama activa el toggle y
+                        #  no pasa nada — parece bug. Mostrar la limitación
+                        #  explícita es la diferencia entre "no funciona" y
+                        #  "no es compatible con este modelo, switch a Grok".
                         # ═══════════════════════════════════════════════
                         rx.box(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.text(State.t["settings_discovery_heading"],
-                                            color="#c288ff", font_weight="700", font_size="14px",
-                                            letter_spacing="0.05em"),
-                                    rx.spacer(),
-                                    rx.switch(
-                                        checked=State.discovery_enabled,
-                                        on_change=State.toggle_discovery_enabled,
-                                        size="2",
+                            rx.cond(
+                                State.web_search_supported,
+                                # ── Caso xAI: toggle activable ──
+                                rx.vstack(
+                                    rx.hstack(
+                                        rx.text(State.t["settings_discovery_heading"],
+                                                color="#c288ff", font_weight="700", font_size="14px",
+                                                letter_spacing="0.05em"),
+                                        rx.spacer(),
+                                        rx.switch(
+                                            checked=State.discovery_enabled,
+                                            on_change=State.toggle_discovery_enabled,
+                                            size="2",
+                                        ),
+                                        width="100%", align="center",
                                     ),
-                                    width="100%", align="center",
+                                    rx.text(State.t["settings_discovery_label"],
+                                            color="#ddd", font_size="13px", font_weight="500"),
+                                    rx.cond(
+                                        State.discovery_enabled,
+                                        rx.text(State.t["settings_discovery_on"],
+                                                color="#c288ff", font_size="11px",
+                                                font_weight="600"),
+                                        rx.text(State.t["settings_discovery_off"],
+                                                color="#88ffaa", font_size="11px",
+                                                font_weight="600"),
+                                    ),
+                                    rx.text(State.t["settings_discovery_desc"],
+                                            color="#888", font_size="10px", line_height="1.5"),
+                                    spacing="2", align="stretch",
                                 ),
-                                rx.text(State.t["settings_discovery_label"],
-                                        color="#ddd", font_size="13px", font_weight="500"),
-                                rx.cond(
-                                    State.discovery_enabled,
-                                    rx.text(State.t["settings_discovery_on"],
-                                            color="#c288ff", font_size="11px",
-                                            font_weight="600"),
-                                    rx.text(State.t["settings_discovery_off"],
-                                            color="#88ffaa", font_size="11px",
-                                            font_weight="600"),
+                                # ── Caso Ollama/OpenRouter: toggle disabled + nota ──
+                                rx.vstack(
+                                    rx.hstack(
+                                        rx.text(State.t["settings_discovery_heading"],
+                                                color="#888", font_weight="700", font_size="14px",
+                                                letter_spacing="0.05em"),
+                                        rx.spacer(),
+                                        rx.switch(
+                                            checked=False,
+                                            disabled=True,
+                                            size="2",
+                                        ),
+                                        width="100%", align="center",
+                                    ),
+                                    rx.hstack(
+                                        rx.text("🚫", font_size="13px"),
+                                        rx.text(
+                                            State.t["settings_discovery_unavailable"] + " " + State.llm_provider_label,
+                                            color="#ffd28a", font_size="12px",
+                                            font_weight="600",
+                                        ),
+                                        spacing="2", align="center",
+                                    ),
+                                    rx.text(State.t["settings_discovery_unavailable_desc"],
+                                            color="#888", font_size="10px", line_height="1.5"),
+                                    spacing="2", align="stretch",
                                 ),
-                                rx.text(State.t["settings_discovery_desc"],
-                                        color="#888", font_size="10px", line_height="1.5"),
-                                spacing="2", align="stretch",
                             ),
                             padding="14px 16px",
                             bg="rgba(194,136,255,0.05)",
