@@ -123,12 +123,18 @@ class State(rx.State):
     # OFF por defecto. Cuando ON, Ashley intenta primero usar el Chrome
     # DevTools Protocol (puerto localhost) para controlar el browser —
     # cierra/abre tabs por ID directo, sin SendInput, sin foco visible,
-    # sub-100ms. Requiere que el user arranque el browser con
-    # --remote-debugging-port=9222. Si CDP no responde, cae automático
-    # al path legacy (SendInput) — fallback transparente.
+    # sub-100ms. El toggle dispara el wizard de browser_setup.py que
+    # modifica los .lnk del browser para añadir el flag automáticamente.
+    # Si CDP no responde (ej: user no reinició el browser todavía), cae
+    # automático al path legacy SendInput — fallback transparente.
     # Trade-off: el puerto abierto en localhost permite a apps locales
     # controlar el browser. Risk bajo para users sin malware activo.
     cdp_enabled: bool = False
+
+    # Mensaje del último wizard de CDP (resumen de qué se modificó).
+    # Se muestra en el panel de Settings debajo del toggle. Se resetea
+    # cada vez que el toggle se acciona.
+    cdp_setup_message: str = ""
 
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
@@ -478,19 +484,69 @@ class State(rx.State):
     def toggle_cdp_enabled(self):
         """Alterna el modo browser moderno (Chrome DevTools Protocol).
 
-        Cuando ON: Ashley intenta primero conectarse a localhost:9222 (el
-        puerto que expone CDP) para controlar el browser sin SendInput.
-        Sub-100ms, sin foco visible, robust contra anti-input shields.
+        Cuando ON:
+          1. Lanza el wizard de browser_setup que ENCUENTRA todos los
+             shortcuts (.lnk) de browsers Chromium en Desktop, Start
+             Menu y Taskbar, y les añade --remote-debugging-port=9222
+             al campo Arguments. Hace backup automático en .lnk.bak.
+          2. Las próximas veces que el user abra el browser desde esos
+             shortcuts, CDP estará activo en localhost:9222.
+          3. Ashley se conecta directo via HTTP. Sub-100ms, sin foco
+             visible, robust contra anti-input shields.
 
-        Cuando OFF: usa el path legacy SendInput/keybd_event como hasta
-        ahora. Es el default — los users que activen CDP necesitan haber
-        arrancado el browser con --remote-debugging-port=9222 (un wizard
-        en futura versión lo automatizará modificando el shortcut).
+        Cuando OFF:
+          1. El wizard restaura los shortcuts desde su .bak. Quedan
+             exactamente como estaban antes (preservando args como
+             --profile-directory=Default que algunos browsers tienen).
+          2. Ashley vuelve al path legacy SendInput/keybd_event.
 
-        Si CDP está ON pero el browser no responde a localhost:9222, las
-        funciones caen automáticamente al path legacy. Sin crashes.
+        Si el user activa el toggle pero su browser ya está corriendo,
+        el cambio no surte efecto hasta que cierre y reabra el browser.
+        El mensaje de status (cdp_setup_message) lo recuerda.
+
+        Si CDP está ON pero el browser no responde a localhost:9222
+        (ej: arrancado por otro camino), play_music/close_tab caen
+        automáticamente al legacy. Sin crashes.
         """
-        self.cdp_enabled = not self.cdp_enabled
+        new_state = not self.cdp_enabled
+
+        # Lanzar wizard de modificación de shortcuts
+        try:
+            from .browser_setup import configure_all_shortcuts
+            result = configure_all_shortcuts(enable=new_state)
+            if new_state:
+                if result["modified"] > 0:
+                    self.cdp_setup_message = (
+                        f"✓ {result['modified']} acceso(s) directo(s) "
+                        f"modificados. Cierra y reabre tu navegador para "
+                        f"aplicar el cambio."
+                    )
+                elif result["total"] == 0:
+                    self.cdp_setup_message = (
+                        "⚠ No encontré accesos directos de navegadores "
+                        "Chromium en tu PC. Activa el flag manualmente."
+                    )
+                else:
+                    self.cdp_setup_message = (
+                        f"✓ Los {result['total']} accesos directos ya "
+                        f"tenían el flag activo."
+                    )
+            else:
+                if result["modified"] > 0:
+                    self.cdp_setup_message = (
+                        f"✓ {result['modified']} acceso(s) directo(s) "
+                        f"restaurados al estado original."
+                    )
+                else:
+                    self.cdp_setup_message = "✓ Modo clásico activado."
+            if result["failed"] > 0:
+                self.cdp_setup_message += f" ({result['failed']} fallaron)"
+        except Exception as e:
+            import logging
+            logging.getLogger("ashley").warning("CDP setup failed: %s", e)
+            self.cdp_setup_message = f"Error en el wizard: {e}"
+
+        self.cdp_enabled = new_state
         self._persist_voice()
 
     def set_elevenlabs_key(self, key: str):
@@ -4236,6 +4292,23 @@ def index():
                                 rx.text(State.t["settings_cdp_howto"],
                                         color="#ffaa44", font_size="10px",
                                         line_height="1.5", font_style="italic"),
+                                # Mensaje del wizard (resultado de la última
+                                # modificación de shortcuts). Se muestra solo
+                                # si hay algo que mostrar.
+                                rx.cond(
+                                    State.cdp_setup_message != "",
+                                    rx.box(
+                                        rx.text(State.cdp_setup_message,
+                                                color="#88ddff", font_size="11px",
+                                                font_weight="500", line_height="1.5"),
+                                        bg="rgba(136,221,255,0.08)",
+                                        border="1px solid rgba(136,221,255,0.3)",
+                                        border_radius="8px",
+                                        padding="8px 12px",
+                                        margin_top="6px",
+                                    ),
+                                    rx.box(),
+                                ),
                                 spacing="2", align="stretch",
                             ),
                             padding="14px 16px",
