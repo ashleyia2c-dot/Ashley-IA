@@ -1168,16 +1168,32 @@ class State(rx.State):
         Returns the result dict from ``execute_action``.
         The caller is responsible for the ``_SAFE_ACTIONS`` guard — this
         helper simply executes whatever it receives.
+
+        v0.13.15: ahora captura snapshots del estado del sistema antes
+        y después, y los pasa al action_log para auditoría posterior.
+        Si el action es de volumen y el state post no coincide con lo
+        emitido (ej: set:100 pero volume_pct=0), el log marca mismatch.
         """
         from .actions import execute_action
+        from .system_state import get_state_snapshot
+        from .action_log import log_action_result
 
         _lang = lang or self.language
+
+        # Snapshot del estado ANTES de ejecutar (captura no-bloqueante,
+        # cualquier fallo en pycaw devuelve dict con None values).
+        state_before = get_state_snapshot()
+
         result = execute_action(
             action_dict["type"], action_dict["params"],
             browser_opened=self.browser_opened,
             lang=_lang,
         )
         self.browser_opened = result.get("browser_opened", self.browser_opened)
+
+        # Snapshot DESPUÉS — capturado AHORA, sin esperar (la mayoría de
+        # acciones aplican inmediatamente; las que no, el log lo nota).
+        state_after = get_state_snapshot()
 
         if action_dict["type"] == "save_taste":
             from .tastes import load_tastes
@@ -1192,6 +1208,21 @@ class State(rx.State):
             "image": result.get("screenshot") or "",
         })
         self.save_history()
+
+        # Log estructurado — fail-safe, nunca rompe el flow.
+        try:
+            log_action_result(
+                user_intent=self._last_user_message or "",
+                action_type=action_dict["type"],
+                action_params=action_dict.get("params") or [],
+                action_description=action_dict.get("description", ""),
+                result=result.get("result", ""),
+                state_before=state_before,
+                state_after=state_after,
+            )
+        except Exception:
+            pass  # log_action_result ya logea internamente
+
         return result
 
     # ─────────────────────────────────────────
@@ -1756,6 +1787,29 @@ class State(rx.State):
             "image": "",
         }
         messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _style_inject_msg)
+
+        # ── Estado del PC (volumen, ventana activa) ──────────────
+        # v0.13.15: cuando auto_actions=ON, inyectamos un snapshot del
+        # estado del sistema. Sin esto, Ashley adivina cuando el user
+        # dice "súbele al máximo" o "bájalo a la mitad" — no sabe el
+        # punto de partida. Con esto puede decidir el `set:N` correcto.
+        # Falla silencioso si pycaw no está disponible.
+        if self.auto_actions and messages_for_llm:
+            try:
+                from .system_state import get_state_snapshot, format_state_for_prompt
+                _sys_snap = get_state_snapshot()
+                _sys_line = format_state_for_prompt(_sys_snap, lang=self.language)
+                if _sys_line:
+                    messages_for_llm.insert(max(0, len(messages_for_llm) - 1), {
+                        "role": "system_result",
+                        "content": _sys_line,
+                        "timestamp": now_iso(),
+                        "id": "_sysinj",
+                        "image": "",
+                    })
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("system state snapshot failed: %s", _e)
 
         # ── Screenshot de contexto (Ashley ve tu pantalla) ──────
         # Tomamos screenshot + lista verificada de ventanas SOLO si auto_actions

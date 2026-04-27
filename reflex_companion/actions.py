@@ -1672,6 +1672,37 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
         elif action_type == "volume":
             sub = params[0] if params else "up"
             val = params[1] if len(params) > 1 else None
+            # v0.13.15: validación de params antes de ejecutar.
+            # Antes: si Ashley emitía [action:volume:set] sin valor, llegaba
+            # a control_volume con value=None → caía al fallback "set:0" en
+            # algunos paths (silencio en lugar del valor pedido). Ahora
+            # rechazamos explícitamente antes de tocar el sistema.
+            valid_subs = {"up", "down", "mute", "unmute", "set", "max", "min"}
+            if sub not in valid_subs:
+                return {"success": False,
+                        "result": f"Acción de volumen desconocida: '{sub}'. Válidas: {', '.join(sorted(valid_subs))}.",
+                        "screenshot": None, "browser_opened": browser_opened}
+            if sub == "set":
+                # Necesita valor numérico 0-100. Si no, no ejecutamos.
+                if val is None or str(val).strip() == "":
+                    return {"success": False,
+                            "result": "Volumen 'set' necesita un valor 0-100. Ej: [action:volume:set:75].",
+                            "screenshot": None, "browser_opened": browser_opened}
+                try:
+                    iv = int(str(val).strip())
+                except (ValueError, TypeError):
+                    return {"success": False,
+                            "result": f"Volumen 'set' necesita un número 0-100, no '{val}'.",
+                            "screenshot": None, "browser_opened": browser_opened}
+                if iv < 0 or iv > 100:
+                    return {"success": False,
+                            "result": f"Volumen 'set' fuera de rango (recibido {iv}, esperado 0-100).",
+                            "screenshot": None, "browser_opened": browser_opened}
+            # Aliases conveniencia: 'max' → set:100, 'min' → set:0
+            if sub == "max":
+                sub, val = "set", "100"
+            elif sub == "min":
+                sub, val = "set", "0"
             return {"success": True, "result": control_volume(sub, val),
                     "screenshot": None, "browser_opened": browser_opened}
 
@@ -2054,7 +2085,20 @@ def describe_action(action_type: str, params: list[str], lang: str = "en") -> st
         if sub == "up":   return T["vol_up"]
         if sub == "down": return T["vol_down"]
         if sub == "mute": return T["vol_mute"]
-        if sub == "set":  return T["vol_set"].format(p=val)
+        if sub == "max":  return T["vol_set"].format(p="100")
+        if sub == "min":  return T["vol_set"].format(p="0")
+        if sub == "set":
+            # v0.13.15: si no hay valor numérico válido, mostrar warning
+            # claro en vez del str vacío genérico ("Volumen: set." era
+            # ambiguo y enmascaraba bugs de emisión del LLM).
+            try:
+                iv = int(str(val).strip())
+                if 0 <= iv <= 100:
+                    return T["vol_set"].format(p=str(iv))
+            except (ValueError, TypeError):
+                pass
+            return T.get("vol_set_invalid",
+                         f"🔊 Volumen 'set' con valor inválido: '{val}'")
         return f"🔊 {sub}"
     elif action_type == "type_text":
         text = params[0] if params else ""
