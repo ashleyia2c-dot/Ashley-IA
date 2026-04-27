@@ -1414,13 +1414,26 @@ def clip_get():
     except Exception:
         return ""
 
-# ── Abrir tab nuevo + navegar a la URL ───────────────────────
-# Ctrl+T abre tab nuevo en la misma ventana (sin crear ventana nueva)
-# Ctrl+L focaliza la barra de dirección de ese tab limpio
+# ── Reusar tab de YouTube o abrir una nueva ───────────────────
+# v0.13.21: si el título de la ventana enfocada YA tiene "YouTube",
+# significa que la pestaña activa es la que Ashley abrió antes
+# (típicamente cuando el user pide "pon otra" tras una primera
+# canción). En ese caso navegamos en la MISMA pestaña con Ctrl+L
+# en lugar de abrir tab nueva con Ctrl+T. Sin esto: la canción
+# anterior seguía sonando en su tab original y la "nueva" cargaba
+# en otra tab pero NO reproducía (audio focus + autoplay policy).
+#
+# Si NO es YouTube, mantenemos Ctrl+T para no pisar la pestaña
+# del usuario.
 prev = clip_get()
 
-hotkey(VK_CONTROL, VK_T)   # tab nuevo
-time.sleep(0.5)
+current_title = get_title(hwnd).lower()
+is_youtube_active = "youtube" in current_title
+
+if not is_youtube_active:
+    hotkey(VK_CONTROL, VK_T)   # tab nuevo solo si no era YouTube
+    time.sleep(0.5)
+
 hotkey(VK_CONTROL, VK_L)   # barra de dirección
 time.sleep(0.3)
 clip_set(url)
