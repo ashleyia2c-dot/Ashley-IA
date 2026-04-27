@@ -5,5 +5,6 @@ pyautogui
 pyperclip
 pycaw
 comtypes
+websockets
 requests
 openai>=1.50.0

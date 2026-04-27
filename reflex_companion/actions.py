@@ -1802,6 +1802,89 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "result": close_browser_tab(hint, prefer_cdp=prefer_cdp),
                     "screenshot": None, "browser_opened": new_browser}
 
+        # ─────────────────────────────────────────────
+        #  Acciones avanzadas de browser (CDP-only)
+        # ─────────────────────────────────────────────
+        # Estos action types REQUIEREN CDP. Si CDP no está activo, devuelven
+        # success=False con mensaje al user de que active "Modo browser
+        # moderno" en Settings → Acciones. Sin CDP no hay equivalente legacy
+        # para click/type_browser/read_page/scroll_page (SendInput no es lo
+        # bastante preciso para apuntar a elementos del DOM).
+
+        elif action_type in ("click", "type_browser", "read_page", "scroll_page"):
+            if not prefer_cdp:
+                msg_off = "Esta acción requiere el Modo browser moderno. Actívalo en Ajustes → Modo browser moderno."
+                return {"success": False, "result": msg_off,
+                        "screenshot": None, "browser_opened": browser_opened}
+            from . import browser_cdp as _cdp
+            if not _cdp.is_cdp_available():
+                msg_off = "El navegador no responde a CDP. Cierra y reabre el navegador para que cargue con el flag."
+                return {"success": False, "result": msg_off,
+                        "screenshot": None, "browser_opened": browser_opened}
+
+            # Determinar tab target: el primer param puede ser hint del tab,
+            # o el params[0] puede ser ya el contenido. Convención simple:
+            #   [action:click:texto]            → tab activa, click texto
+            #   [action:click:tab_hint:texto]   → tab que matchee tab_hint
+            # Mismo para type_browser. read_page/scroll_page solo usan tab.
+            if action_type == "click":
+                if len(params) >= 2:
+                    tab_target, what = params[0], params[1]
+                else:
+                    tab_target, what = "active", (params[0] if params else "")
+                if not what:
+                    return {"success": False,
+                            "result": "click necesita el texto/etiqueta del elemento.",
+                            "screenshot": None, "browser_opened": browser_opened}
+                ok, msg = _cdp.click_by_text(tab_target, what)
+                return {"success": ok, "result": msg,
+                        "screenshot": None, "browser_opened": browser_opened}
+
+            elif action_type == "type_browser":
+                # [action:type_browser:texto] → escribe en el input enfocado
+                # (o el primer input visible). Sin selector explícito por
+                # diseño — Ashley solo describe qué escribir.
+                if not params:
+                    return {"success": False,
+                            "result": "type_browser necesita el texto a escribir.",
+                            "screenshot": None, "browser_opened": browser_opened}
+                text = params[-1]  # último param es el texto
+                # Selector: si tiene 2 params, primer es el selector;
+                # si no, usamos un selector universal (input/textarea visible)
+                if len(params) >= 3:
+                    tab_target, selector, text = params[0], params[1], params[2]
+                elif len(params) == 2:
+                    tab_target, selector, text = "active", params[0], params[1]
+                else:
+                    tab_target = "active"
+                    selector = "input:not([type='hidden']), textarea"
+                ok, msg = _cdp.fill_input(tab_target, selector, text)
+                return {"success": ok, "result": msg,
+                        "screenshot": None, "browser_opened": browser_opened}
+
+            elif action_type == "read_page":
+                tab_target = params[0] if params else "active"
+                text = _cdp.get_page_text(tab_target)
+                if text is None:
+                    return {"success": False,
+                            "result": "No se pudo leer la página.",
+                            "screenshot": None, "browser_opened": browser_opened}
+                # Pasamos el texto al chat como result — Ashley lo verá
+                # en el siguiente turn y puede comentarlo en personaje.
+                preview = text[:1500] + "…" if len(text) > 1500 else text
+                return {"success": True,
+                        "result": f"Contenido de la página:\n{preview}",
+                        "screenshot": None, "browser_opened": browser_opened}
+
+            elif action_type == "scroll_page":
+                if len(params) >= 2:
+                    tab_target, direction = params[0], params[1]
+                else:
+                    tab_target, direction = "active", (params[0] if params else "down")
+                ok, msg = _cdp.scroll_page(tab_target, direction)
+                return {"success": ok, "result": msg,
+                        "screenshot": None, "browser_opened": browser_opened}
+
         else:
             return {"success": False, "result": f"Acción desconocida: '{action_type}'",
                     "screenshot": None, "browser_opened": browser_opened}
@@ -2171,4 +2254,17 @@ def describe_action(action_type: str, params: list[str], lang: str = "en") -> st
         cat  = params[0] if params else ("other" if lang == "en" else "otros")
         val  = params[1] if len(params) > 1 else ""
         return T["save_taste"].format(cat=cat, val=val)
+    # ── CDP-only actions (v0.13.25) ─────────────────────────────────
+    elif action_type == "click":
+        what = params[-1] if params else ""
+        return T.get("act_click", "🖱️ Click en: **{p}**").format(p=what)
+    elif action_type == "type_browser":
+        text = params[-1] if params else ""
+        preview = text[:60] + "…" if len(text) > 60 else text
+        return T.get("act_type_browser", "⌨️ Escribir en navegador: **{p}**").format(p=preview)
+    elif action_type == "read_page":
+        return T.get("act_read_page", "📖 Leer contenido de la página")
+    elif action_type == "scroll_page":
+        direction = params[-1] if params else "down"
+        return T.get("act_scroll_page", "↕️ Scroll: **{p}**").format(p=direction)
     return T["generic"].format(action_type=action_type, params=" ".join(params))

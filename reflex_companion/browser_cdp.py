@@ -219,3 +219,296 @@ def close_tabs_matching(hint: str, exclude: Optional[str] = None,
             closed_titles.append(t.get("title", ""))
 
     return len(closed_titles), closed_titles
+
+
+# ─────────────────────────────────────────────
+#  Funciones avanzadas vía WebSocket — Runtime.evaluate, Input
+# ─────────────────────────────────────────────
+#
+# Para click, fill input, scroll, read DOM, screenshot necesitamos hablar
+# WebSocket con el Page target específico (tab). HTTP REST no soporta
+# Runtime.evaluate ni los métodos de Input/Page. La conexión va al
+# webSocketDebuggerUrl que viene en el tab object de list_tabs().
+#
+# Estas funciones son async (websockets es asyncio-based). Los callers
+# síncronos deben envolverlas con asyncio.run() o usar executor.
+
+import asyncio
+import base64
+
+
+def _resolve_tab(target_or_id: str | dict, port: int = DEFAULT_CDP_PORT) -> Optional[dict]:
+    """Acepta un tab dict, un tab id string, o keywords como 'active'/'first'.
+    Devuelve el tab dict completo (con webSocketDebuggerUrl) o None si no
+    se encuentra."""
+    if isinstance(target_or_id, dict):
+        return target_or_id
+    target_str = str(target_or_id or "").strip().lower()
+    tabs = list_tabs(port)
+    if not tabs:
+        return None
+    if not target_str or target_str in ("active", "current", "first"):
+        return tabs[0]
+    # Buscar por id exacto, o por substring del title
+    for t in tabs:
+        if t.get("id") == target_or_id:
+            return t
+    for t in tabs:
+        if target_str in t.get("title", "").lower():
+            return t
+    return None
+
+
+async def _ws_send(ws_url: str, method: str, params: Optional[dict] = None,
+                   timeout: float = 10.0) -> Optional[dict]:
+    """Abre una conexión WebSocket al target, envía un comando CDP, espera
+    la respuesta correspondiente, cierra. Devuelve el campo 'result' de la
+    respuesta CDP o None si falló.
+
+    CDP usa request/response asincrono — cada mensaje lleva un 'id' y la
+    respuesta lo correlaciona. Como aquí mandamos un comando único por
+    conexión, usamos id=1 fijo y leemos hasta encontrar id=1 en la
+    respuesta (puede haber events intermedios que ignoramos).
+    """
+    try:
+        import websockets
+    except ImportError:
+        return None
+
+    payload = {"id": 1, "method": method}
+    if params is not None:
+        payload["params"] = params
+
+    try:
+        async with websockets.connect(ws_url, max_size=10_000_000) as ws:
+            import json as _json
+            await asyncio.wait_for(ws.send(_json.dumps(payload)), timeout=timeout)
+
+            # Leer mensajes hasta encontrar la respuesta con id=1
+            # (CDP puede enviar events asincronos en el medio).
+            deadline = asyncio.get_event_loop().time() + timeout
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    return None
+                raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                msg = _json.loads(raw)
+                if msg.get("id") == 1:
+                    return msg.get("result")
+                # Si es un error de CDP en respuesta a nuestro id
+                if "error" in msg and msg.get("id") == 1:
+                    return None
+    except Exception:
+        return None
+
+
+def _run_async(coro):
+    """Ejecuta una coroutine desde código síncrono. Si ya hay un event loop
+    corriendo, usa run_in_executor con un loop nuevo en otro thread; si
+    no, usa asyncio.run normal."""
+    try:
+        asyncio.get_running_loop()
+        # Hay loop corriendo — necesitamos ejecutar en otro thread con su
+        # propio loop para no interferir.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        # No hay loop — podemos usar asyncio.run directamente
+        return asyncio.run(coro)
+
+
+def evaluate_js(target: str | dict, expression: str,
+                 port: int = DEFAULT_CDP_PORT) -> Optional[dict]:
+    """Ejecuta un fragmento de JavaScript en el contexto de la tab.
+
+    Returns dict CDP con 'result' (el valor de retorno del JS) o None si
+    falla. El JS corre en el window global de la página — tiene acceso
+    completo al DOM como si fuera la consola DevTools del user.
+    """
+    tab = _resolve_tab(target, port)
+    if not tab or not tab.get("webSocketDebuggerUrl"):
+        return None
+    return _run_async(_ws_send(
+        tab["webSocketDebuggerUrl"],
+        "Runtime.evaluate",
+        {
+            "expression": expression,
+            "returnByValue": True,
+            "awaitPromise": True,
+        },
+    ))
+
+
+def click_by_selector(target: str | dict, css_selector: str,
+                      port: int = DEFAULT_CDP_PORT) -> tuple[bool, str]:
+    """Hace click en el primer elemento que matchee el CSS selector.
+
+    Returns (ok, mensaje). Si no encuentra el elemento, ok=False con
+    msg explicativo. Si hace click, ok=True con el title del botón
+    (si lo había) o el selector matched.
+    """
+    # Escape de comillas en el selector
+    safe_sel = css_selector.replace("\\", "\\\\").replace("'", "\\'")
+    js = f"""
+(() => {{
+    const el = document.querySelector('{safe_sel}');
+    if (!el) return {{found: false, error: 'No element matches selector'}};
+    const desc = (el.getAttribute('aria-label') || el.innerText || el.tagName).slice(0, 60);
+    el.click();
+    return {{found: true, label: desc}};
+}})()
+"""
+    res = evaluate_js(target, js, port)
+    if not res or not res.get("result"):
+        return False, "CDP no respondió"
+    val = res["result"].get("value") or {}
+    if val.get("found"):
+        return True, f"Click en: {val.get('label', '?')}"
+    return False, val.get("error", "Elemento no encontrado")
+
+
+def click_by_text(target: str | dict, text: str,
+                   port: int = DEFAULT_CDP_PORT) -> tuple[bool, str]:
+    """Hace click en el primer elemento clickeable cuyo texto/aria-label
+    contenga el `text` dado (case-insensitive).
+
+    Estrategia más universal que CSS selector — funciona en muchos sitios
+    sin selectores hardcoded. Busca en este orden:
+      1. button/[role=button] con aria-label que contenga el texto
+      2. button con innerText que contenga el texto
+      3. <a> con innerText que contenga el texto
+    """
+    safe_text = text.replace("\\", "\\\\").replace("'", "\\'")
+    js = f"""
+(() => {{
+    const target = '{safe_text}'.toLowerCase();
+    const isClickable = (el) => {{
+        if (!el) return false;
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'button' || tag === 'a') return true;
+        if (el.getAttribute('role') === 'button') return true;
+        if (el.onclick) return true;
+        return false;
+    }};
+    // 1. aria-label
+    const ariaCandidates = document.querySelectorAll('[aria-label]');
+    for (const el of ariaCandidates) {{
+        const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+        if (lbl.includes(target) && isClickable(el)) {{
+            el.click();
+            return {{found: true, label: el.getAttribute('aria-label'), method: 'aria'}};
+        }}
+    }}
+    // 2. innerText match
+    const all = document.querySelectorAll('button, a, [role="button"]');
+    for (const el of all) {{
+        const txt = (el.innerText || '').toLowerCase().trim();
+        if (txt && txt.includes(target)) {{
+            el.click();
+            return {{found: true, label: el.innerText.slice(0, 60), method: 'text'}};
+        }}
+    }}
+    return {{found: false, error: 'No clickable element matched: ' + target}};
+}})()
+"""
+    res = evaluate_js(target, js, port)
+    if not res or not res.get("result"):
+        return False, "CDP no respondió"
+    val = res["result"].get("value") or {}
+    if val.get("found"):
+        return True, f"Click en '{val.get('label', '?')}' (vía {val.get('method', '?')})"
+    return False, val.get("error", "No se encontró elemento clickeable")
+
+
+def fill_input(target: str | dict, css_selector: str, value: str,
+                port: int = DEFAULT_CDP_PORT) -> tuple[bool, str]:
+    """Escribe `value` en el campo input/textarea matched por CSS selector.
+
+    Dispara eventos input + change para que React/Vue/Angular detecten el
+    cambio (sin esto algunos sitios ignoran el valor cuando se asigna
+    directamente via JS).
+    """
+    safe_sel = css_selector.replace("\\", "\\\\").replace("'", "\\'")
+    safe_val = value.replace("\\", "\\\\").replace("'", "\\'")
+    js = f"""
+(() => {{
+    const el = document.querySelector('{safe_sel}');
+    if (!el) return {{found: false, error: 'No input matches selector'}};
+    el.focus();
+    const setter = Object.getOwnPropertyDescriptor(
+        el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+        'value'
+    ).set;
+    setter.call(el, '{safe_val}');
+    el.dispatchEvent(new Event('input', {{bubbles: true}}));
+    el.dispatchEvent(new Event('change', {{bubbles: true}}));
+    return {{found: true}};
+}})()
+"""
+    res = evaluate_js(target, js, port)
+    if not res or not res.get("result"):
+        return False, "CDP no respondió"
+    val = res["result"].get("value") or {}
+    if val.get("found"):
+        return True, "Texto escrito en el campo"
+    return False, val.get("error", "Campo no encontrado")
+
+
+def scroll_page(target: str | dict, direction: str = "down",
+                 amount: int = 800,
+                 port: int = DEFAULT_CDP_PORT) -> tuple[bool, str]:
+    """Scroll programático. direction: 'up'|'down'|'top'|'bottom'."""
+    direction = direction.lower().strip()
+    if direction == "top":
+        js = "window.scrollTo(0, 0); 'top'"
+    elif direction == "bottom":
+        js = "window.scrollTo(0, document.body.scrollHeight); 'bottom'"
+    elif direction == "up":
+        js = f"window.scrollBy(0, -{amount}); 'up {amount}'"
+    else:  # down (default)
+        js = f"window.scrollBy(0, {amount}); 'down {amount}'"
+    res = evaluate_js(target, js, port)
+    if not res or not res.get("result"):
+        return False, "CDP no respondió"
+    return True, f"Scroll {direction}"
+
+
+def get_page_text(target: str | dict, max_chars: int = 5000,
+                   port: int = DEFAULT_CDP_PORT) -> Optional[str]:
+    """Devuelve el texto visible de la página actual (innerText del body).
+
+    Truncado a max_chars para no llenar el contexto del LLM. Útil para
+    'léeme ese artículo' o 'qué dice esa página'.
+    """
+    js = f"""
+(() => {{
+    const t = document.body ? document.body.innerText : '';
+    return t.slice(0, {max_chars});
+}})()
+"""
+    res = evaluate_js(target, js, port)
+    if not res or not res.get("result"):
+        return None
+    return res["result"].get("value") or ""
+
+
+def screenshot_tab(target: str | dict,
+                    port: int = DEFAULT_CDP_PORT) -> Optional[str]:
+    """Captura screenshot de la tab (incluso si está en background).
+
+    Returns base64 PNG data URL, o None si falla. NO requiere que la tab
+    esté visible — CDP captura el DOM renderizado off-screen. Eso es
+    superior a las screenshots de pantalla completa.
+    """
+    tab = _resolve_tab(target, port)
+    if not tab or not tab.get("webSocketDebuggerUrl"):
+        return None
+    res = _run_async(_ws_send(
+        tab["webSocketDebuggerUrl"],
+        "Page.captureScreenshot",
+        {"format": "png"},
+    ))
+    if not res or "data" not in res:
+        return None
+    return f"data:image/png;base64,{res['data']}"

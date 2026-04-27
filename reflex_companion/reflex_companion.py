@@ -1523,6 +1523,10 @@ class State(rx.State):
             "recap_warning": self._detect_recap_warning(),
             "mental_state_block": self._compute_mental_state_block(user_message),
             "topic_directive": topic_directive,
+            # v0.13.25: cuando CDP está activo, prompts.py añade un bloque
+            # al system prompt explicando las nuevas acciones (click,
+            # type_browser, read_page, scroll_page).
+            "cdp_enabled": self.cdp_enabled,
         }
 
     def _detect_recap_warning(self) -> str | None:

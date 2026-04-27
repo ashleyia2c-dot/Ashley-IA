@@ -643,6 +643,10 @@ ACT_DESC = {
         "done_important": "✅ Mark as done: **{p}**",
         "save_taste":     "💝 Save taste: **[{cat}]** {val}",
         "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ Click on: **{p}**",
+        "act_type_browser":   "⌨️ Type in browser: **{p}**",
+        "act_read_page":      "📖 Read page contents",
+        "act_scroll_page":    "↕️ Scroll: **{p}**",
     },
     "es": {
         "screenshot":     "📸 Tomar una captura de tu pantalla completa",
@@ -668,6 +672,10 @@ ACT_DESC = {
         "done_important": "✅ Marcar como hecho: **{p}**",
         "save_taste":     "💝 Guardar gusto: **[{cat}]** {val}",
         "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ Click en: **{p}**",
+        "act_type_browser":   "⌨️ Escribir en navegador: **{p}**",
+        "act_read_page":      "📖 Leer contenido de la página",
+        "act_scroll_page":    "↕️ Scroll: **{p}**",
     },
     "fr": {
         "screenshot":     "📸 Prendre une capture plein écran",
@@ -693,6 +701,10 @@ ACT_DESC = {
         "done_important": "✅ Marquer comme fait : **{p}**",
         "save_taste":     "💝 Enregistrer ce goût : **[{cat}]** {val}",
         "generic":        "⚙️ {action_type} : {params}",
+        "act_click":          "🖱️ Cliquer sur : **{p}**",
+        "act_type_browser":   "⌨️ Taper dans le navigateur : **{p}**",
+        "act_read_page":      "📖 Lire le contenu de la page",
+        "act_scroll_page":    "↕️ Défiler : **{p}**",
     },
 }
 
