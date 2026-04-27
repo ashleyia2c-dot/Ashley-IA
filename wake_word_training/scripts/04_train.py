@@ -491,6 +491,33 @@ def run_training():
     print(f"Esto va a tomar varias horas. Ctrl+C para parar — checkpoints")
     print(f"intermedios se guardan en {OUTPUT_DIR}\n")
 
+    # ¿Hay features parciales de un run anterior? El --augment_clips de
+    # openwakeword skipea si encuentra positive_features_train.npy, pero
+    # NO chequea los otros 3 .npy — si una corrida previa abortó a mitad
+    # del feature computation, dejaste positive_features_train.npy pero
+    # faltan negative_features_train.npy y los _test.npy. En ese caso hay
+    # que pasar --overwrite para regenerar todos.
+    feature_dir = OUTPUT_DIR / WAKE_WORD
+    expected_features = [
+        "positive_features_train.npy",
+        "negative_features_train.npy",
+        "positive_features_test.npy",
+        "negative_features_test.npy",
+    ]
+    missing = [f for f in expected_features if not (feature_dir / f).exists()]
+    has_some = any((feature_dir / f).exists() for f in expected_features)
+    needs_overwrite = has_some and bool(missing)
+    if needs_overwrite:
+        print(f"Features parciales detectadas. Regenerando todas (faltan: {missing})")
+
+    # Importar openwakeword una vez para aplicar el patch de trim_mmap
+    # (Windows file-locking bug en np.memmap + os.remove). El patch del
+    # _torchaudio_patch.py al import no podía aplicarse aquí porque
+    # openwakeword aún no estaba cargado.
+    import openwakeword  # noqa: F401 — fuerza el load del package
+    import _torchaudio_patch
+    _torchaudio_patch._patch_openwakeword_trim_mmap()
+
     # Preservar argv original para poder restaurarlo después (defensive)
     original_argv = sys.argv[:]
     try:
@@ -501,6 +528,8 @@ def run_training():
             "--augment_clips",
             "--train_model",
         ]
+        if needs_overwrite:
+            sys.argv.append("--overwrite")
         print("Args:", " ".join(sys.argv[1:]), "\n")
         runpy.run_module("openwakeword.train", run_name="__main__")
     except SystemExit as e:
