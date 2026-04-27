@@ -514,9 +514,17 @@ def _close_window_by_hwnd(hwnd: int) -> bool:
     return False
 
 
-def play_music(query: str, browser_already_open: bool = False) -> tuple[str, bool, bool]:
+def play_music(query: str, browser_already_open: bool = False,
+                prefer_cdp: bool = False) -> tuple[str, bool, bool]:
     """
     Busca el primer video en YouTube y lo reproduce.
+
+    MODO HÍBRIDO (v0.13.25):
+      • Si prefer_cdp=True AND CDP disponible → usa CDP para abrir tab nueva.
+        Bonus: cierra la tab anterior de YouTube si existía (evita acumulación
+        que pasa con webbrowser.open). Sub-100ms, sin foco visible.
+      • Si CDP no disponible / prefer_cdp=False → cae a webbrowser.open
+        (path legacy que delega al shell handler de Windows).
     - Si ya hay una pestaña de YouTube que Ashley abrió antes → NAVEGA a la nueva URL
       en esa misma pestaña (no abre otra ni cierra nada del usuario).
     - Si no hay pestaña previa → abre una nueva pestaña (NO ventana nueva).
@@ -549,6 +557,29 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
         title = query
 
     log.warning(f"play_music: query={query!r} hwnd={_youtube_hwnd} url={video_url}")
+
+    # ── Path CDP (modo moderno opt-in) ───────────────────────────────────
+    if prefer_cdp:
+        from . import browser_cdp as _cdp
+        if _cdp.is_cdp_available():
+            try:
+                # Bonus del path CDP: cerrar la(s) tab(s) anterior(es) de
+                # YouTube antes de abrir la nueva. Esto evita la acumulación
+                # de tabs que pasa con webbrowser.open. Atomico: si falla la
+                # nueva, las anteriores ya están cerradas — caemos al fallback
+                # que abrirá una nueva limpia.
+                old_yt = _cdp.find_tabs_matching("youtube")
+                for t in old_yt:
+                    _cdp.close_tab(t["id"])
+                log.warning(f"play_music: CDP path — closed {len(old_yt)} old YouTube tab(s)")
+
+                new_t = _cdp.new_tab(video_url)
+                if new_t and new_t.get("id"):
+                    log.warning(f"play_music: CDP path — opened tab id={new_t['id']}")
+                    return f"Reproduciendo: '{title}'", True, True
+                log.warning("play_music: CDP path — new_tab returned None, falling back")
+            except Exception as _e:
+                log.warning(f"play_music: CDP path failed ({_e}), falling back to webbrowser.open")
 
     # Snapshot PRE-acción: cuántas pestañas hay en navegadores antes de actuar.
     # Usamos este conteo para verificar que la pestaña realmente se abrió.
@@ -1210,12 +1241,18 @@ sys.exit(1)
         return False
 
 
-def close_browser_tab(hint: str) -> str:
+def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
     """
     Cierra el tab del navegador cuyo título contenga `hint`.
-    0. Busca en la lista MSAA de tabs el título completo que matchee el hint.
-    1. Tab activo visible en título de ventana → PowerShell Ctrl+W.
-    2. Tab de fondo → PowerShell cicla tabs con Ctrl+Tab y cierra.
+
+    MODO HÍBRIDO (v0.13.25):
+      • Si prefer_cdp=True AND el browser tiene Chrome DevTools Protocol activo
+        en localhost:9222 → usa CDP HTTP API. Cierra por ID, sin SendInput,
+        sin foco visible, sub-100ms.
+      • Si CDP no está disponible o prefer_cdp=False → cae al path legacy:
+        0. Busca en la lista MSAA de tabs el título completo que matchee el hint.
+        1. Tab activo visible en título de ventana → PowerShell Ctrl+W.
+        2. Tab de fondo → PowerShell cicla tabs con Ctrl+PageDown y cierra.
 
     IMPORTANTE: nunca hace WM_CLOSE sobre la ventana del navegador, aunque
     `_youtube_hwnd` esté seteado. Desde que `play_music` reutiliza la ventana
@@ -1226,8 +1263,36 @@ def close_browser_tab(hint: str) -> str:
     import ctypes, logging
     user32 = ctypes.windll.user32
     log = logging.getLogger("ashley.tabs")
+    global _youtube_hwnd  # se modifica en ambos paths (CDP y legacy)
 
-    global _youtube_hwnd
+    # ── Path CDP (modo moderno opt-in) ───────────────────────────────────
+    if prefer_cdp:
+        from . import browser_cdp as _cdp
+        if _cdp.is_cdp_available():
+            try:
+                matches = _cdp.find_tabs_matching(hint)
+                log.warning(f"close_browser_tab: CDP path — found {len(matches)} match(es) for hint={hint!r}")
+                if not matches:
+                    return f"No encontré ninguna pestaña con '{hint}' abierta."
+                closed_titles = []
+                for t in matches:
+                    if _cdp.close_tab(t["id"]):
+                        closed_titles.append(t.get("title", ""))
+                if not closed_titles:
+                    return f"No pude cerrar la pestaña '{hint}'."
+                if "youtube" in hint.lower():
+                    _youtube_hwnd = 0
+                if len(closed_titles) == 1:
+                    return f"Pestaña '{hint}' cerrada."
+                return f"{len(closed_titles)} pestañas cerradas con '{hint}' en el título."
+            except Exception as _e:
+                log.warning(f"close_browser_tab: CDP path failed ({_e}), falling back to legacy")
+                # Cae al path legacy abajo
+
+    # ── Path legacy (SendInput / keybd_event) ────────────────────────────
+    # Mantenido como fallback porque (a) el user puede no tener CDP activado,
+    # (b) Firefox no soporta CDP, (c) si CDP falla por algún motivo
+    # transitorio, el legacy aún puede funcionar.
 
     key = hint.lower().strip()
     log.warning(f"close_browser_tab: hint={hint!r} key={key!r}")
@@ -1551,11 +1616,22 @@ def press_key(key: str) -> str:
 
 # ── Ejecutor central ──────────────────────────────────────────────────────────
 
-def execute_action(action_type: str, params: list[str], browser_opened: bool = False, lang: str = "en") -> dict:
+def execute_action(action_type: str, params: list[str], browser_opened: bool = False,
+                    lang: str = "en", prefer_cdp: bool = False) -> dict:
     """
     Ejecuta la acción pedida por Ashley.
     Devuelve: { success: bool, result: str, screenshot: str | None, browser_opened: bool }
-    El parámetro `lang` afecta a los mensajes de resultado visibles al usuario.
+
+    Args:
+      action_type: tipo de acción ("play_music", "close_tab", etc.)
+      params: lista de strings con los parámetros del tag
+      browser_opened: estado actual del browser (para optimizaciones)
+      lang: afecta a los mensajes de resultado visibles al usuario
+      prefer_cdp: v0.13.25 — si True, intenta primero el path moderno
+                  Chrome DevTools Protocol para acciones de browser
+                  (play_music, close_tab). Si CDP no está disponible o
+                  falla, cae al path legacy SendInput. Default False
+                  (opt-in via Settings → Acciones → Modo moderno browser).
     """
     try:
         if action_type == "screenshot":
@@ -1577,7 +1653,11 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
             # disculpa de Ashley en personaje cuando la canción no se
             # reproduce. Antes siempre se devolvía success=True aunque
             # play_music hubiera devuelto un mensaje 'Error: ...'.
-            msg, new_flag, success = play_music(" ".join(params), browser_already_open=browser_opened)
+            msg, new_flag, success = play_music(
+                " ".join(params),
+                browser_already_open=browser_opened,
+                prefer_cdp=prefer_cdp,
+            )
             return {"success": success, "result": msg,
                     "screenshot": None, "browser_opened": new_flag}
 
@@ -1718,7 +1798,8 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
         elif action_type == "close_tab":
             hint = params[0] if params else "activo"
             new_browser = False if "youtube" in hint.lower() else browser_opened
-            return {"success": True, "result": close_browser_tab(hint),
+            return {"success": True,
+                    "result": close_browser_tab(hint, prefer_cdp=prefer_cdp),
                     "screenshot": None, "browser_opened": new_browser}
 
         else:

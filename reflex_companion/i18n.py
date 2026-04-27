@@ -164,6 +164,14 @@ UI = {
         "settings_discovery_unavailable":      "Not available with",
         "settings_discovery_unavailable_desc": "Proactive Discovery requires web search, which is currently only supported with Grok (xAI). Switch to Grok in the AI Model section above to enable this feature.",
 
+        # Modern browser mode (CDP)
+        "settings_cdp_heading": "🌐 Modern browser mode (advanced)",
+        "settings_cdp_label":   "Use Chrome DevTools Protocol for tab control",
+        "settings_cdp_on":      "ON — Ashley controls the browser via CDP",
+        "settings_cdp_off":     "OFF — Ashley uses keyboard simulation (legacy)",
+        "settings_cdp_desc":    "When ON, Ashley talks directly to the browser through localhost:9222 (no keyboard simulation, no visible tab cycling, sub-100ms). Falls back to legacy mode automatically if the browser doesn't respond. Trade-off: any local app could connect to that port — risk is low for users without active malware.",
+        "settings_cdp_howto":   "How to use: close your browser completely and reopen it with the flag --remote-debugging-port=9222. Easiest way: edit your Chrome/Edge/Brave shortcut and append the flag to the Target field.",
+
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
         "settings_elevenlabs_placeholder": "sk_... (leave empty to use free voice)",
@@ -349,6 +357,14 @@ UI = {
         "settings_discovery_unavailable":      "No disponible con",
         "settings_discovery_unavailable_desc": "El descubrimiento proactivo requiere búsqueda web, que solo funciona con Grok (xAI). Cambia a Grok en la sección 'Modelo de IA' de arriba para activar esta función.",
 
+        # Modo browser moderno (CDP)
+        "settings_cdp_heading": "🌐 Modo browser moderno (avanzado)",
+        "settings_cdp_label":   "Usar Chrome DevTools Protocol para controlar pestañas",
+        "settings_cdp_on":      "ACTIVADO — Ashley controla el navegador vía CDP",
+        "settings_cdp_off":     "DESACTIVADO — Ashley usa simulación de teclado (clásico)",
+        "settings_cdp_desc":    "Cuando está ACTIVADO, Ashley se conecta directamente al navegador en localhost:9222 — sin simulación de teclas, sin pestañas cambiando visiblemente, sub-100ms. Cae automático al modo clásico si el navegador no responde. Trade-off: cualquier app local podría conectarse a ese puerto — riesgo bajo si no tienes malware activo.",
+        "settings_cdp_howto":   "Cómo usarlo: cierra el navegador completamente y reábrelo con el flag --remote-debugging-port=9222. Lo más fácil: edita el acceso directo de Chrome/Edge/Brave y añade el flag al campo 'Destino'.",
+
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
         "settings_elevenlabs_hint": "Consigue tu clave en elevenlabs.io → Profile → API Keys. Se guarda solo en tu equipo.",
@@ -530,6 +546,14 @@ UI = {
         "settings_discovery_off":     "DÉSACTIVÉ — Ashley reste sur notre conversation",
         "settings_discovery_unavailable":      "Non disponible avec",
         "settings_discovery_unavailable_desc": "La découverte proactive nécessite la recherche web, qui n'est disponible qu'avec Grok (xAI). Passe sur Grok dans la section 'Modèle IA' ci-dessus pour activer cette fonctionnalité.",
+
+        # Mode navigateur moderne (CDP)
+        "settings_cdp_heading": "🌐 Mode navigateur moderne (avancé)",
+        "settings_cdp_label":   "Utiliser Chrome DevTools Protocol pour le contrôle des onglets",
+        "settings_cdp_on":      "ACTIVÉ — Ashley contrôle le navigateur via CDP",
+        "settings_cdp_off":     "DÉSACTIVÉ — Ashley utilise la simulation clavier (classique)",
+        "settings_cdp_desc":    "Quand ACTIVÉ, Ashley parle directement au navigateur via localhost:9222 — pas de simulation clavier, pas d'onglets visibles qui défilent, sub-100ms. Bascule automatiquement au mode classique si le navigateur ne répond pas. Compromis : n'importe quelle app locale pourrait se connecter à ce port — risque faible sans malware actif.",
+        "settings_cdp_howto":   "Comment l'utiliser : ferme complètement le navigateur et rouvre-le avec le flag --remote-debugging-port=9222. Le plus facile : édite le raccourci de Chrome/Edge/Brave et ajoute le flag au champ 'Cible'.",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
@@ -866,6 +890,11 @@ def load_voice_config() -> dict:
         # random. Cuando el user lo activa, Ashley vuelve a buscar cosas
         # en internet según los gustos (trailers, noticias, canciones...).
         "discovery_enabled": False,
+        # Modo browser moderno (CDP, v0.13.25): default OFF. Cuando ON,
+        # Ashley intenta usar el Chrome DevTools Protocol para controlar
+        # el browser sin SendInput. Requiere arrancar el browser con el
+        # flag --remote-debugging-port=9222.
+        "cdp_enabled": False,
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -892,6 +921,7 @@ def load_voice_config() -> dict:
             "voicevox_url": str(data.get("voicevox_url", "http://localhost:50021")) or "http://localhost:50021",
             "voicevox_speaker": str(data.get("voicevox_speaker", "1")) or "1",
             "discovery_enabled": bool(data.get("discovery_enabled", False)),
+            "cdp_enabled": bool(data.get("cdp_enabled", False)),
         }
     except Exception:
         return default
@@ -908,7 +938,8 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       kokoro_voice: str = "af_bella",
                       voicevox_url: str = "http://localhost:50021",
                       voicevox_speaker: str = "1",
-                      discovery_enabled: bool = False) -> None:
+                      discovery_enabled: bool = False,
+                      cdp_enabled: bool = False) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -930,6 +961,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "voicevox_url": str(voicevox_url or "http://localhost:50021"),
             "voicevox_speaker": str(voicevox_speaker or "1"),
             "discovery_enabled": bool(discovery_enabled),
+            "cdp_enabled": bool(cdp_enabled),
         })
     except Exception as e:
         import logging

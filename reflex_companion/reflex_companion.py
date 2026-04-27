@@ -119,6 +119,17 @@ class State(rx.State):
     # si el último mensaje del user fue emocional.
     discovery_enabled: bool = False
 
+    # ── Modo browser moderno (CDP, v0.13.25) ────────────
+    # OFF por defecto. Cuando ON, Ashley intenta primero usar el Chrome
+    # DevTools Protocol (puerto localhost) para controlar el browser —
+    # cierra/abre tabs por ID directo, sin SendInput, sin foco visible,
+    # sub-100ms. Requiere que el user arranque el browser con
+    # --remote-debugging-port=9222. Si CDP no responde, cae automático
+    # al path legacy (SendInput) — fallback transparente.
+    # Trade-off: el puerto abierto en localhost permite a apps locales
+    # controlar el browser. Risk bajo para users sin malware activo.
+    cdp_enabled: bool = False
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -360,6 +371,7 @@ class State(rx.State):
             voicevox_url=self.voicevox_url,
             voicevox_speaker=self.voicevox_speaker,
             discovery_enabled=self.discovery_enabled,
+            cdp_enabled=self.cdp_enabled,
         )
 
     def toggle_discovery_enabled(self):
@@ -462,6 +474,24 @@ class State(rx.State):
         encima de cualquier otra ventana. El cambio se aplica en el wrapper
         Electron via MutationObserver sobre data-pin."""
         self.pin_on_top = not self.pin_on_top
+
+    def toggle_cdp_enabled(self):
+        """Alterna el modo browser moderno (Chrome DevTools Protocol).
+
+        Cuando ON: Ashley intenta primero conectarse a localhost:9222 (el
+        puerto que expone CDP) para controlar el browser sin SendInput.
+        Sub-100ms, sin foco visible, robust contra anti-input shields.
+
+        Cuando OFF: usa el path legacy SendInput/keybd_event como hasta
+        ahora. Es el default — los users que activen CDP necesitan haber
+        arrancado el browser con --remote-debugging-port=9222 (un wizard
+        en futura versión lo automatizará modificando el shortcut).
+
+        Si CDP está ON pero el browser no responde a localhost:9222, las
+        funciones caen automáticamente al path legacy. Sin crashes.
+        """
+        self.cdp_enabled = not self.cdp_enabled
+        self._persist_voice()
 
     def set_elevenlabs_key(self, key: str):
         self.elevenlabs_key = (key or "").strip()
@@ -758,6 +788,8 @@ class State(rx.State):
         self.voicevox_speaker = vcfg.get("voicevox_speaker", "1") or "1"
         # Discovery proactivo (v0.13) — default OFF
         self.discovery_enabled = bool(vcfg.get("discovery_enabled", False))
+        # v0.13.25: modo browser moderno (CDP) — opt-in
+        self.cdp_enabled = bool(vcfg.get("cdp_enabled", False))
         # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
         if self.llm_provider == "ollama":
             self.refresh_ollama_status()
@@ -1188,6 +1220,7 @@ class State(rx.State):
             action_dict["type"], action_dict["params"],
             browser_opened=self.browser_opened,
             lang=_lang,
+            prefer_cdp=self.cdp_enabled,  # v0.13.25
         )
         self.browser_opened = result.get("browser_opened", self.browser_opened)
 
@@ -3292,6 +3325,7 @@ class State(rx.State):
                                     action["type"], action["params"],
                                     browser_opened=self.browser_opened,
                                     lang=lang,
+                                    prefer_cdp=self.cdp_enabled,
                                 )
                                 self.browser_opened = result.get("browser_opened", self.browser_opened)
                                 if action["type"] == "save_taste":
@@ -4160,6 +4194,53 @@ def index():
                             padding="14px 16px",
                             bg="rgba(194,136,255,0.05)",
                             border="1px solid rgba(194,136,255,0.2)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
+                        #  MODO BROWSER MODERNO (CDP, v0.13.25)
+                        #  Toggle opt-in para usar Chrome DevTools Protocol
+                        #  en lugar de SendInput cuando Ashley controla
+                        #  pestañas. Más rápido, sin foco visible, robust
+                        #  contra anti-input shields. Requiere arrancar el
+                        #  browser con --remote-debugging-port=9222.
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.text(State.t["settings_cdp_heading"],
+                                            color="#88ddff", font_weight="700", font_size="14px",
+                                            letter_spacing="0.05em"),
+                                    rx.spacer(),
+                                    rx.switch(
+                                        checked=State.cdp_enabled,
+                                        on_change=State.toggle_cdp_enabled,
+                                        size="2",
+                                    ),
+                                    width="100%", align="center",
+                                ),
+                                rx.text(State.t["settings_cdp_label"],
+                                        color="#ddd", font_size="13px", font_weight="500"),
+                                rx.cond(
+                                    State.cdp_enabled,
+                                    rx.text(State.t["settings_cdp_on"],
+                                            color="#88ddff", font_size="11px",
+                                            font_weight="600"),
+                                    rx.text(State.t["settings_cdp_off"],
+                                            color="#88ffaa", font_size="11px",
+                                            font_weight="600"),
+                                ),
+                                rx.text(State.t["settings_cdp_desc"],
+                                        color="#888", font_size="10px", line_height="1.5"),
+                                rx.text(State.t["settings_cdp_howto"],
+                                        color="#ffaa44", font_size="10px",
+                                        line_height="1.5", font_style="italic"),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(136,221,255,0.04)",
+                            border="1px solid rgba(136,221,255,0.2)",
                             border_radius="10px",
                             width="100%",
                         ),
