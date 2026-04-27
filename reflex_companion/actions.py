@@ -587,14 +587,31 @@ def play_music(query: str, browser_already_open: bool = False) -> tuple[str, boo
         return f"Reproduciendo: '{title}'", True
 
     # Caso 2: conteo igual pero navegamos una pestaña existente. Buscar un
-    # título que contenga algo del query o 'youtube' entre las pestañas.
+    # título que contenga PALABRAS DEL QUERY entre las pestañas.
+    # v0.13.24: antes el match era too lax — bastaba con que cualquier tab
+    # tuviera 'youtube' en el título para reportar success, aunque la
+    # navegación de la nueva URL hubiera fallado (focus loss). Ahora
+    # requerimos match con palabras del query nuevo: si el title de
+    # alguna tab contiene una palabra significativa de la canción
+    # solicitada, asumimos que la navegación tomó efecto. Si no →
+    # caer a 'navigation no tomó' y reportar honesto.
     if navigated and post_count >= 0:
         q_lower = query.lower()
         q_words = [w for w in q_lower.split() if len(w) > 3]
-        for t in post_tabs:
-            t_lower = t.lower()
-            if "youtube" in t_lower or any(w in t_lower for w in q_words):
-                return f"Reproduciendo: '{title}'", True
+        if q_words:
+            for t in post_tabs:
+                t_lower = t.lower()
+                if any(w in t_lower for w in q_words):
+                    return f"Reproduciendo: '{title}'", True
+            log.warning(
+                f"play_music: navigated=True but NO tab matches query "
+                f"words {q_words} — navigation likely silently failed"
+            )
+        else:
+            # Query sin palabras significativas — fallback al check viejo
+            for t in post_tabs:
+                if "youtube" in t.lower():
+                    return f"Reproduciendo: '{title}'", True
 
     # Caso 3: no podemos verificar que la pestaña apareció. Ser honesto:
     # MSAA no responde → no sabemos si fue éxito. Antes devolvíamos
@@ -1344,6 +1361,23 @@ user32.SetForegroundWindow(hwnd)
 if fg_tid and fg_tid != my_tid:
     user32.AttachThreadInput(my_tid, fg_tid, False)
 time.sleep(0.6)
+
+# v0.13.24: VERIFICACIÓN DE FOCO. Windows 10/11 bloquea
+# SetForegroundWindow cada vez más estricto — si nuestro proceso no
+# tenía foreground activation rights, la llamada arriba no logra el
+# foco real, y todos los Ctrl+Tab/Ctrl+L que mandemos después caerán
+# en otra app (la que sí tenga foco). Resultado: el browser no recibe
+# las teclas, la URL no se navega, pero el script termina exit 0
+# fingiendo éxito. Ahora verificamos honestamente.
+actual_fg = user32.GetForegroundWindow()
+if actual_fg != hwnd:
+    print(
+        f"ERROR: focus did not actually move to target hwnd "
+        f"(actual_fg={actual_fg}, target={hwnd}). Aborting so caller "
+        f"can fall back to webbrowser.open.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 print("FOCUSED: " + get_title(hwnd), file=sys.stderr)
 
