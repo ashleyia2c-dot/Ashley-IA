@@ -1496,9 +1496,17 @@ def _volume_pycaw(action: str, value: Optional[str]) -> str:
         vol.SetMute(not muted, None)
         return "Audio silenciado." if not muted else "Audio activado."
     elif action == "set" and value:
-        lv = max(0.0, min(1.0, int(value) / 100))
+        # v0.13.17: defense-in-depth. execute_action() ya valida value
+        # como int 0-100 antes de llegar aquí, pero protección extra por
+        # si alguna ruta evita ese chequeo (e.g. llamada directa desde
+        # tests u otro código).
+        try:
+            iv = int(str(value).strip())
+        except (ValueError, TypeError):
+            return f"Volumen 'set' con valor no numérico: '{value}' (esperado 0-100)."
+        lv = max(0.0, min(1.0, iv / 100))
         vol.SetMasterVolumeLevelScalar(lv, None)
-        return f"Volumen establecido al {value}%."
+        return f"Volumen establecido al {iv}%."
     return f"Acción de volumen desconocida: '{action}'"
 
 
@@ -1739,14 +1747,36 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "type_in":
+            # v0.13.17: validar que window y text NO sean vacíos. Antes:
+            # type_in con params=[] enviaba focus_window("") + type_text("")
+            # que es no-op, pero devolvía success=True con mensaje misleading
+            # "Ventana '' activada → Texto escrito (0 caracteres)". Ahora
+            # rechazamos limpio para que el log capture el problema.
             window = params[0] if params else ""
             text   = params[1] if len(params) > 1 else ""
+            if not window.strip():
+                return {"success": False,
+                        "result": "type_in necesita el nombre de la ventana como primer parámetro.",
+                        "screenshot": None, "browser_opened": browser_opened}
+            if not text.strip():
+                return {"success": False,
+                        "result": "type_in necesita el texto a escribir como segundo parámetro.",
+                        "screenshot": None, "browser_opened": browser_opened}
             return {"success": True, "result": type_in_window(window, text),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "write_to_app":
+            # v0.13.17: misma protección que type_in.
             app  = params[0] if params else ""
             text = params[1] if len(params) > 1 else ""
+            if not app.strip():
+                return {"success": False,
+                        "result": "write_to_app necesita el nombre de la app como primer parámetro.",
+                        "screenshot": None, "browser_opened": browser_opened}
+            if not text.strip():
+                return {"success": False,
+                        "result": "write_to_app necesita el texto a escribir como segundo parámetro.",
+                        "screenshot": None, "browser_opened": browser_opened}
             return {"success": True, "result": write_to_app(app, text),
                     "screenshot": None, "browser_opened": browser_opened}
 
@@ -1770,11 +1800,19 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "save_taste":
+            # v0.13.17: si falta el valor, devolver success=False (antes
+            # devolvía success=True con un mensaje "Error: falta el valor"
+            # — flag y mensaje contradictorios. El log no podía distinguir
+            # entre tastes guardados de verdad y los rechazados).
             from .tastes import add_taste
             categoria = params[0] if params else "otros"
             valor     = params[1] if len(params) > 1 else ""
-            msg = add_taste(categoria, valor) if valor else "Error: falta el valor."
-            return {"success": True, "result": msg, "screenshot": None, "browser_opened": browser_opened}
+            if not valor.strip():
+                return {"success": False,
+                        "result": "save_taste necesita un valor (segundo parámetro).",
+                        "screenshot": None, "browser_opened": browser_opened}
+            return {"success": True, "result": add_taste(categoria, valor),
+                    "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "focus_window":
             return {"success": True, "result": focus_window(params[0] if params else ""),
