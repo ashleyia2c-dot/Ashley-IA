@@ -2030,15 +2030,15 @@ class State(rx.State):
                 self._apply_affection_delta(ft_aff)
                 self.mood = ft_mood
                 self.current_response = ""
-                    ts3 = now_iso()
-                    self.messages.append({
-                        "role": "assistant", "content": _clean_display_fn(ft_clean),
-                        "timestamp": ts3, "id": f"a-{ts3}", "image": "",
-                    })
-                    self.save_history()
-                except Exception as e:
-                    self._handle_grok_error(e, "action_blocked_followup")
-                yield
+                ts3 = now_iso()
+                self.messages.append({
+                    "role": "assistant", "content": _clean_display_fn(ft_clean),
+                    "timestamp": ts3, "id": f"a-{ts3}", "image": "",
+                })
+                self.save_history()
+            except Exception as e:
+                self._handle_grok_error(e, "action_blocked_followup")
+            yield
 
     # ─────────────────────────────────────────
     #  Envío de mensajes
