@@ -4456,6 +4456,75 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
+                        #  WAKE WORD (always-on listening, v0.14.0)
+                        #  Toggle opt-in para que Ashley escuche
+                        #  continuamente y arranque grabación al oír su
+                        #  nombre. Audio 100% local — no sale del PC.
+                        #  PASO 4 de la integración: la UI ya existe pero
+                        #  el detector NO está conectado al lifecycle.
+                        #  El status_message guía al user (modelo no
+                        #  instalado / deps faltan / OK) hasta que el
+                        #  lifecycle se cierre tras el training.
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.text(State.t["settings_wakeword_heading"],
+                                            color="#ffaaee", font_weight="700", font_size="14px",
+                                            letter_spacing="0.05em"),
+                                    rx.spacer(),
+                                    rx.switch(
+                                        checked=State.wake_word_enabled,
+                                        on_change=State.toggle_wake_word_enabled,
+                                        size="2",
+                                    ),
+                                    width="100%", align="center",
+                                ),
+                                rx.text(State.t["settings_wakeword_label"],
+                                        color="#ddd", font_size="13px", font_weight="500"),
+                                rx.cond(
+                                    State.wake_word_enabled,
+                                    rx.text(State.t["settings_wakeword_on"],
+                                            color="#ffaaee", font_size="11px",
+                                            font_weight="600"),
+                                    rx.text(State.t["settings_wakeword_off"],
+                                            color="#88ffaa", font_size="11px",
+                                            font_weight="600"),
+                                ),
+                                rx.text(State.t["settings_wakeword_desc"],
+                                        color="#888", font_size="10px", line_height="1.5"),
+                                rx.text(State.t["settings_wakeword_howto"],
+                                        color="#ffaa44", font_size="10px",
+                                        line_height="1.5", font_style="italic"),
+                                # Status message: vacío cuando OFF; cuando
+                                # se activa, dice "no model installed" o
+                                # "deps missing" o "OK". Permite al user
+                                # entender por qué activar el toggle no
+                                # tiene efecto todavía (paso 5 cierra esto).
+                                rx.cond(
+                                    State.wake_word_status_message != "",
+                                    rx.box(
+                                        rx.text(State.wake_word_status_message,
+                                                color="#ffaaee", font_size="11px",
+                                                font_weight="500", line_height="1.5"),
+                                        bg="rgba(255,170,238,0.08)",
+                                        border="1px solid rgba(255,170,238,0.3)",
+                                        border_radius="8px",
+                                        padding="8px 12px",
+                                        margin_top="6px",
+                                    ),
+                                    rx.box(),
+                                ),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(255,170,238,0.04)",
+                            border="1px solid rgba(255,170,238,0.2)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
                         #  VOICE PROVIDER — WebSpeech / ElevenLabs / Kokoro / VoiceVox
                         # ═══════════════════════════════════════════════
                         rx.box(
