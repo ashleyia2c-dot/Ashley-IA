@@ -1147,8 +1147,17 @@ time.sleep(0.6)
 # ── Teclado via keybd_event ──────────────────────
 KEYEVENTF_KEYUP = 0x0002
 VK_CONTROL = 0x11
-VK_TAB     = 0x09
+VK_NEXT    = 0x22  # Page Down — usamos esto en lugar de Ctrl+Tab
 VK_W       = 0x57
+
+# Por qué Ctrl+Page Down y no Ctrl+Tab:
+# Opera GX (y opcionalmente Opera/Chrome con cierta config) tiene activado
+# por defecto "Ciclar entre las 2 últimas pestañas activas" con Ctrl+Tab.
+# Eso significa que Ctrl+Tab solo alterna entre 2 pestañas (la actual y la
+# última que tuvo foco), nunca recorre todas. Resultado: el cycling no
+# encuentra tabs de fondo aunque existan.
+# Ctrl+Page Down es el secuencial siempre-a-la-derecha y NO está afectado
+# por esa configuración. Confirmado empíricamente con Opera GX 2026-04-27.
 
 def hotkey(*vks):
     for vk in vks:           user32.keybd_event(vk, 0, 0, 0); time.sleep(0.05)
@@ -1163,13 +1172,13 @@ if hint in title_now:
     print("CLOSED_ACTIVE", file=sys.stderr)
     sys.exit(0)
 
-# ── Ciclar tabs ──────────────────────────────────
+# ── Ciclar tabs (Ctrl+Page Down secuencial) ──────
 start_title = title_now
 MAX_TABS = 40
 
 for i in range(MAX_TABS):
-    hotkey(VK_CONTROL, VK_TAB)
-    time.sleep(1.0)
+    hotkey(VK_CONTROL, VK_NEXT)
+    time.sleep(0.8)
     title = get_title(hwnd).lower()
     print(f"TAB {i+1}: {title}", file=sys.stderr)
     if hint in title:
