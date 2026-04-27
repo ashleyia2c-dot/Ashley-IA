@@ -510,13 +510,28 @@ def run_training():
     if needs_overwrite:
         print(f"Features parciales detectadas. Regenerando todas (faltan: {missing})")
 
-    # Importar openwakeword una vez para aplicar el patch de trim_mmap
-    # (Windows file-locking bug en np.memmap + os.remove). El patch del
-    # _torchaudio_patch.py al import no podía aplicarse aquí porque
-    # openwakeword aún no estaba cargado.
-    import openwakeword  # noqa: F401 — fuerza el load del package
-    import _torchaudio_patch
-    _torchaudio_patch._patch_openwakeword_trim_mmap()
+    # NOTA: el fix del Windows file-lock en trim_mmap está aplicado
+    # DIRECTAMENTE en venv/.../openwakeword/data.py.
+
+    # Inyectar fake `k2` module para evitar que speechbrain.integrations.k2_fsa
+    # explote durante imports. La cadena del bug es:
+    #   runpy carga openwakeword.train
+    #   → openwakeword.data
+    #   → torch_audiomentations
+    #   → torchmetrics.functional.image.arniqa
+    #   → torchvision (carga inicial)
+    #   → torch.library.register_fake("torchvision::nms")
+    #   → inspect.getframeinfo()
+    #   → inspect.getmodule()
+    #   → hasattr(speechbrain.LazyModule, '__file__')  ← activa el lazy
+    #   → speechbrain intenta `import k2`
+    #   → ModuleNotFoundError 'k2'
+    # Como nuestro flow NO usa k2, le damos un módulo vacío que pasa el
+    # import. speechbrain.integrations.k2_fsa quedará "imported but useless",
+    # que es exactamente lo que queremos.
+    if "k2" not in sys.modules:
+        import types
+        sys.modules["k2"] = types.ModuleType("k2")
 
     # Preservar argv original para poder restaurarlo después (defensive)
     original_argv = sys.argv[:]
