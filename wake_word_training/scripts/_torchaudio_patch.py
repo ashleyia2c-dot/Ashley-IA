@@ -97,7 +97,11 @@ def apply():
     _load_with_soundfile._is_soundfile_patch = True
     torchaudio.load = _load_with_soundfile
     _log.info("torchaudio.load monkey-patched to use soundfile (avoiding torchcodec)")
-    _patch_openwakeword_trim_mmap()
+    # NO llamamos _patch_openwakeword_trim_mmap aquí porque:
+    # (a) sobreescribiría el fix directo aplicado a venv/.../data.py
+    # (b) la función _patch en este módulo tiene exactamente el mismo
+    #     código del fix directo, así que llamarla es redundante
+    # El fix de trim_mmap vive solo en venv/.../openwakeword/data.py
 
 
 def _patch_openwakeword_trim_mmap():
