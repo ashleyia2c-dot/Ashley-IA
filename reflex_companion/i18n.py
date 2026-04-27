@@ -937,6 +937,10 @@ def load_voice_config() -> dict:
         # el browser sin SendInput. Requiere arrancar el browser con el
         # flag --remote-debugging-port=9222.
         "cdp_enabled": False,
+        # Wake word always-on listening (v0.14.0): default OFF. Cuando ON,
+        # Ashley mantiene un loop de mic en background con el modelo local
+        # ashley.onnx — al oír "Ashley" arranca grabación STT sola.
+        "wake_word_enabled": False,
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -964,6 +968,7 @@ def load_voice_config() -> dict:
             "voicevox_speaker": str(data.get("voicevox_speaker", "1")) or "1",
             "discovery_enabled": bool(data.get("discovery_enabled", False)),
             "cdp_enabled": bool(data.get("cdp_enabled", False)),
+            "wake_word_enabled": bool(data.get("wake_word_enabled", False)),
         }
     except Exception:
         return default
@@ -981,7 +986,8 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       voicevox_url: str = "http://localhost:50021",
                       voicevox_speaker: str = "1",
                       discovery_enabled: bool = False,
-                      cdp_enabled: bool = False) -> None:
+                      cdp_enabled: bool = False,
+                      wake_word_enabled: bool = False) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -1004,6 +1010,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "voicevox_speaker": str(voicevox_speaker or "1"),
             "discovery_enabled": bool(discovery_enabled),
             "cdp_enabled": bool(cdp_enabled),
+            "wake_word_enabled": bool(wake_word_enabled),
         })
     except Exception as e:
         import logging

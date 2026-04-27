@@ -142,6 +142,27 @@ class State(rx.State):
     # se quedaba colgada (a veces tarda 5-30s en PCs con muchas apps).
     cdp_setup_in_progress: bool = False
 
+    # ── Wake word (always-on listening, v0.14.0) ────────────
+    # OFF por defecto. Cuando ON, Ashley mantiene un loop de mic en
+    # background buscando la palabra "Ashley". Cuando la oye, dispara
+    # el flujo de grabación STT existente sin que el user toque nada.
+    # Requiere:
+    #   - Modelo entrenado en `reflex_companion/wake_word/ashley.onnx`
+    #     (ver wake_word_training/ para el pipeline)
+    #   - Deps: openwakeword + sounddevice (~10 MB total, opt-in install)
+    # Privacidad: el modelo corre 100% local en CPU. El audio NO sale
+    # del PC hasta que el wake word dispara la grabación.
+    # ESTADO ACTUAL: el flag persiste en voice.json pero todavía NO
+    # arranca/para el detector — eso entra en el commit que cierra
+    # el lifecycle (después del training real del modelo). Activar el
+    # toggle hoy = solo cambia el setting, sin efecto runtime.
+    wake_word_enabled: bool = False
+
+    # Mensaje informativo para el panel Settings — typically "modelo
+    # no instalado", "deps faltan" o "OK escuchando". Se setea cuando
+    # el toggle se acciona; vacío significa que aún no se intentó.
+    wake_word_status_message: str = ""
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -384,6 +405,7 @@ class State(rx.State):
             voicevox_speaker=self.voicevox_speaker,
             discovery_enabled=self.discovery_enabled,
             cdp_enabled=self.cdp_enabled,
+            wake_word_enabled=self.wake_word_enabled,
         )
 
     def toggle_discovery_enabled(self):
@@ -579,6 +601,61 @@ class State(rx.State):
             async with self:
                 self.cdp_setup_message = f"Error en el wizard: {e}"
                 self.cdp_setup_in_progress = False
+
+    def toggle_wake_word_enabled(self):
+        """Alterna el modo wake word (escucha siempre 'Ashley').
+
+        ESTADO ACTUAL (paso 3 de la integración wake word):
+        Este handler SOLO flip el flag y persiste — no arranca/para el
+        detector todavía. El runtime de Ashley sigue idéntico al backup
+        `stable-pre-wakeword`. Esto deja el toggle visible en la UI
+        para que podamos diseñar y testear la UX, pero sin riesgo de
+        romper nada hasta que el modelo entrenado esté en su sitio.
+
+        El lifecycle real (instanciar WakeWordDetector, conectar callback
+        a start_recording, manejar pause/resume durante grabación manual)
+        entra en un commit separado DESPUÉS de:
+          1. Lanzar el training (wake_word_training/scripts/04_train.py)
+          2. Validar FRR/FAR con scripts/05_test.py
+          3. Copiar el .onnx a reflex_companion/wake_word/ashley.onnx
+
+        Mientras tanto, el handler también setea wake_word_status_message
+        con un texto explicativo si el user activa sin tener el modelo
+        — feedback honesto en vez de fallo silencioso.
+        """
+        from pathlib import Path
+        new_state = not self.wake_word_enabled
+        self.wake_word_enabled = new_state
+
+        if new_state:
+            # Verificación honesta: ¿está el modelo? ¿están las deps?
+            # El user puede activar igualmente — el flag persiste — pero
+            # le decimos qué falta para que el lifecycle empiece a funcionar
+            # cuando esté todo listo.
+            from . import wake_word as _ww
+            deps_ok, deps_reason = _ww.is_available()
+            model_path = Path(__file__).resolve().parent / "wake_word" / "ashley.onnx"
+            model_present = model_path.exists()
+
+            if not model_present:
+                self.wake_word_status_message = self.t.get(
+                    "settings_wakeword_no_model",
+                    "Wake word model not installed yet.",
+                )
+            elif not deps_ok:
+                self.wake_word_status_message = self.t.get(
+                    "settings_wakeword_no_deps",
+                    "Wake word dependencies missing.",
+                )
+            else:
+                # Caso happy: ambos presentes. Hoy NO arrancamos el detector
+                # (eso es paso 5). Solo confirmamos que cuando el lifecycle
+                # se conecte, el sistema está listo.
+                self.wake_word_status_message = "OK"
+        else:
+            self.wake_word_status_message = ""
+
+        self._persist_voice()
 
     def set_elevenlabs_key(self, key: str):
         self.elevenlabs_key = (key or "").strip()
@@ -877,6 +954,10 @@ class State(rx.State):
         self.discovery_enabled = bool(vcfg.get("discovery_enabled", False))
         # v0.13.25: modo browser moderno (CDP) — opt-in
         self.cdp_enabled = bool(vcfg.get("cdp_enabled", False))
+        # v0.14.0: wake word always-on listening — opt-in. El flag persiste
+        # pero el lifecycle no se conecta hasta el commit que cierra la
+        # integración (ver toggle_wake_word_enabled).
+        self.wake_word_enabled = bool(vcfg.get("wake_word_enabled", False))
         # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
         if self.llm_provider == "ollama":
             self.refresh_ollama_status()
