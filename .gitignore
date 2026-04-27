@@ -62,3 +62,14 @@ Thumbs.db
 
 # ───────── Claude Code ─────────
 .claude/
+
+# ───────── Wake word training (datasets grandes + repo externo) ─────────
+# Solo commiteamos README.md, requirements.txt, setup.bat y scripts/.
+# Los datasets descargados (rir, background, validation features) y los
+# modelos generados (.onnx/.tflite, ~50-300 MB cada uno) se regeneran
+# corriendo scripts/04_train.py.
+wake_word_training/data/
+wake_word_training/output/
+wake_word_training/models/
+wake_word_training/piper-sample-generator/
+wake_word_training/ashley.yaml

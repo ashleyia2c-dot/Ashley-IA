@@ -1,0 +1,48 @@
+# Wake word training deps — separadas del venv principal de Ashley para
+# no contaminar la app con paquetes de ML pesados (torch CUDA, datasets).
+#
+# IMPORTANTE: PyTorch se instala APARTE con el comando específico para tu
+# versión de CUDA. Ver README.md sección "Setup ambiente". No lo añadas
+# aquí porque pip resolvería contra la versión CPU-only del PyPI.
+#
+# Versions pinneadas a 2026-04 stable. Si hay incompatibilities con la
+# RTX 5060 (Blackwell, muy nueva), probar versiones más recientes.
+
+# Wake word framework
+openwakeword>=0.6.0
+
+# TTS para generar samples sintéticos de "ashley"
+piper-tts>=1.2.0
+
+# Audio processing + augmentation
+librosa>=0.10.1
+soundfile>=0.12.1
+audiomentations>=0.36.0
+
+# Data + utils
+numpy>=1.26.0
+# scipy<1.15 — `acoustics` (dep transitivo de openwakeword.train) usa
+# scipy.special.sph_harm que fue REMOVIDO en scipy 1.17. Hasta que
+# acoustics se actualice, hay que pinnear.
+scipy>=1.12.0,<1.15
+pandas>=2.1.0
+tqdm>=4.66.0
+requests>=2.31.0
+pyyaml>=6.0
+
+# Captura de mic para testing fase 6
+sounddevice>=0.4.6
+
+# Para tflite export al final
+tensorflow>=2.15.0  # solo para exportar el modelo final, no para training
+
+# === Deps transitivas de openwakeword.train ===
+# Estas NO están en el `install_requires` de openwakeword (porque el package
+# pretende ser ligero para inferencia), pero el training las necesita.
+torchinfo>=1.8.0
+torchmetrics>=1.0.0
+mutagen>=1.47.0
+acoustics>=0.2.6
+pronouncing>=0.3.0
+torch_audiomentations>=0.12.0
+speechbrain>=1.0.0
