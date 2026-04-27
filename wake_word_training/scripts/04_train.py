@@ -339,43 +339,92 @@ def _generate_validation_features_from_librispeech():
 def ensure_rir_and_background():
     """RIR (Room Impulse Response) + background audio para augmentation.
 
-    openwakeword recomienda:
-      - RIR: MIT IR Survey o BUT_ReverbDB
-      - Background: FMA (Free Music Archive) o AudioSet
+    Descarga automática si los dirs están vacíos:
+      - RIR: OpenSLR-26 sim_rir_16k.zip (~170 MB → ~248 RIR de 16 kHz)
+      - Background: ESC-50 (~600 MB → 2000 audios de 5s, 50 categorías
+        ambient: TV, música, calle, conversación, etc.)
 
-    Como esos datasets pesan mucho (>5GB), usamos un subset razonable:
-    descargamos sólo unos 50 RIR + 200 clips de background. Suficiente para una
-    primera iteración. Si los números de FAR salen mal, descargar datasets
-    completos manualmente y meterlos en data/rir/ y data/background/.
+    Total descarga: ~770 MB. Es lo que diferencia un modelo wake-word
+    aceptable (FAR<1/h con TV de fondo) de uno frágil (FAR>5/h).
     """
     RIR_DIR.mkdir(parents=True, exist_ok=True)
     BG_DIR.mkdir(parents=True, exist_ok=True)
 
-    rir_count = len(list(RIR_DIR.glob("*.wav")))
-    bg_count = len(list(BG_DIR.glob("*.wav")))
+    rir_count = len(list(RIR_DIR.rglob("*.wav")))
+    bg_count = len(list(BG_DIR.rglob("*.wav")))
 
-    if rir_count >= 10 and bg_count >= 10:
+    if rir_count >= 50 and bg_count >= 50:
         print(f"OK RIR ({rir_count}) y background ({bg_count}) presentes")
         return
 
-    if rir_count < 10 or bg_count < 10:
-        print()
-        print(f"WARNING: pocos RIR/background ({rir_count} rir, {bg_count} bg)")
-        print("Para un training de calidad necesitas ~50+ de cada uno.")
-        print("Recomendación:")
-        print("  RIR:  https://www.openslr.org/26/  (Aachen IR Database)")
-        print("  BG:   https://github.com/karolpiczak/ESC-50  (ambient sounds)")
-        print(f"  Mete los .wav en {RIR_DIR} y {BG_DIR}")
-        print()
-        # Dejamos seguir — openwakeword se las apaña con poco background, sólo
-        # bajará la calidad del augmentation.
+    print(f"RIR/background insuficientes ({rir_count} rir, {bg_count} bg). "
+          f"Descargando datasets...")
+
+    # ── RIR: OpenSLR-26 sim_rir_16k ─────────────────────────────────────
+    if rir_count < 50:
+        rir_zip = DATA_DIR / "sim_rir_16k.zip"
+        if not rir_zip.exists() or rir_zip.stat().st_size < 100_000_000:
+            print("\nDescargando sim_rir_16k.zip (~170 MB)...")
+            try:
+                _download(
+                    "https://openslr.elda.org/resources/26/sim_rir_16k.zip",
+                    rir_zip,
+                )
+            except Exception as e:
+                print(f"WARNING: RIR download failed: {e}")
+                print("Continuando sin RIR — modelo final será más frágil.")
+                rir_zip = None
+
+        if rir_zip and rir_zip.exists():
+            print("Extrayendo RIRs...")
+            import zipfile
+            with zipfile.ZipFile(rir_zip) as z:
+                z.extractall(RIR_DIR)
+            rir_count = len(list(RIR_DIR.rglob("*.wav")))
+            print(f"OK extraídos {rir_count} RIR a {RIR_DIR}")
+
+    # ── Background: ESC-50 ──────────────────────────────────────────────
+    if bg_count < 50:
+        esc50_zip = DATA_DIR / "ESC-50.zip"
+        if not esc50_zip.exists() or esc50_zip.stat().st_size < 500_000_000:
+            print("\nDescargando ESC-50 (~600 MB)...")
+            try:
+                _download(
+                    "https://github.com/karolpiczak/ESC-50/archive/refs/heads/master.zip",
+                    esc50_zip,
+                )
+            except Exception as e:
+                print(f"WARNING: ESC-50 download failed: {e}")
+                print("Continuando sin background — modelo final será más frágil.")
+                esc50_zip = None
+
+        if esc50_zip and esc50_zip.exists():
+            print("Extrayendo ESC-50...")
+            import zipfile
+            with zipfile.ZipFile(esc50_zip) as z:
+                # ESC-50 zip tiene los .wav en ESC-50-master/audio/
+                for member in z.namelist():
+                    if member.endswith(".wav") and "/audio/" in member:
+                        # Flatten al directorio BG_DIR
+                        target = BG_DIR / Path(member).name
+                        if not target.exists():
+                            with z.open(member) as src, open(target, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+            bg_count = len(list(BG_DIR.glob("*.wav")))
+            print(f"OK extraídos {bg_count} clips de background a {BG_DIR}")
+
+    final_rir = len(list(RIR_DIR.rglob("*.wav")))
+    final_bg = len(list(BG_DIR.rglob("*.wav")))
+    print(f"\nTotal: {final_rir} RIR + {final_bg} background")
+    if final_rir < 50 or final_bg < 50:
+        print("WARNING: Aún pocos archivos. Modelo final puede tener FAR alto.")
 
 
 def write_config():
     """Escribe ashley.yaml con la config para openwakeword.train."""
-    n_samples = 4000  # cuántos clips positivos generar (más = mejor pero más tiempo)
-    n_samples_val = 500
-    steps = 50000  # pasos de entrenamiento
+    n_samples = 8000  # 2x del run inicial — más voces sintéticas = mejor recall
+    n_samples_val = 1000
+    steps = 50000  # auto_train hace seq 1 (steps) + seq 2 (steps/10) + seq 3 (steps/100)
 
     config = f"""# OpenWakeWord training config para "Ashley"
 # Generado por scripts/04_train.py — no editar a mano
@@ -407,7 +456,9 @@ n_samples_val: {n_samples_val}
 tts_batch_size: 50
 
 # === Augmentation ===
-augmentation_rounds: 1
+# 2 rounds = cada clip se augmenta 2x con distintas combinaciones de RIR
+# y background. Crítico para que el modelo sea robusto a TV/música/eco.
+augmentation_rounds: 2
 augmentation_batch_size: 16
 rir_paths:
   - "{RIR_DIR.as_posix()}"
@@ -418,7 +469,13 @@ background_paths_duplication_rate:
 
 # === Training ===
 steps: {steps}
-batch_n_per_class: 256
+# batch_n_per_class debe ser un dict mapeando label → cantidad por batch.
+# Las labels son las keys de feature_data_files (que train.py rellena con
+# 'positive' y 'adversarial_negative'). Los valores controlan el balance:
+# 128/128 = 1:1 ratio positivos vs negativos en cada batch.
+batch_n_per_class:
+  positive: 128
+  adversarial_negative: 128
 max_negative_weight: 1500
 target_false_positives_per_hour: 0.5
 
@@ -627,9 +684,12 @@ def main():
     # Verificar output. openwakeword exporta DOS archivos:
     #   - ashley.onnx  (formato preferido para integrar en Ashley app —
     #                   onnxruntime ya está en el venv principal)
-    #   - ashley.tflite (formato alternativo, requiere tflite_runtime)
-    onnx_path = OUTPUT_DIR / WAKE_WORD / f"{WAKE_WORD}.onnx"
-    tflite_path = OUTPUT_DIR / WAKE_WORD / f"{WAKE_WORD}.tflite"
+    #   - ashley.tflite (formato alternativo, requiere tflite_runtime
+    #                   — y `onnx_tf` para la conversión, que en 2026
+    #                   tiene incompatibilidades con tensorflow 2.21)
+    # Nota: openwakeword guarda en OUTPUT_DIR (no OUTPUT_DIR/WAKE_WORD).
+    onnx_path = OUTPUT_DIR / f"{WAKE_WORD}.onnx"
+    tflite_path = OUTPUT_DIR / f"{WAKE_WORD}.tflite"
 
     print()
     print("=== Output ===")
