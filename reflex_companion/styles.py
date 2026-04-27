@@ -24,18 +24,66 @@ def global_styles():
     background: transparent !important;
   }}
 
-  /* v0.13.13: Radix Select dropdown content debe estar SIEMPRE
-     encima de cualquier overlay o panel. Sin esto, en el panel de
-     Settings la lista de modelos quedaba parcialmente tapada por
-     el bloque de "Descubrimiento proactivo" justo debajo (los
-     bloques tienen su propio stacking context y el portal de
-     Radix podía caer detrás dependiendo de cómo Reflex/Next.js
-     lo ubique en el DOM). 9999 es seguro — está por encima del
-     portal típico (~1500) y debajo de cualquier modal del
-     navegador. */
+  /* v0.13.13/14: Radix Select / Popover dropdowns DENTRO del panel
+     de Settings (que tiene overflow:auto + glass-morphism translúcido)
+     se renderizaban SIN fondo opaco — el dropdown abría sobre el
+     siguiente bloque pero su transparencia hacía que viéramos el
+     texto del bloque a través de los options. La solución de solo
+     z-index no bastaba: aunque estuvieran encima, sin fondo se
+     veía igual de mal.
+     Fix definitivo: z-index extremo + background opaco oscuro +
+     borde + sombra. Targeting amplio para cubrir todos los popups
+     de Radix (Select, Popover, DropdownMenu) — el bug del fondo
+     transparente afecta a todos por igual cuando viven dentro de
+     un container con overflow. */
   [data-radix-popper-content-wrapper],
-  [data-radix-select-content] {{
-    z-index: 9999 !important;
+  [data-radix-select-content],
+  [data-radix-popover-content],
+  [data-radix-dropdown-menu-content],
+  [data-radix-menu-content],
+  .rt-SelectContent,
+  .rt-PopoverContent,
+  .rt-DropdownMenuContent,
+  .rt-BaseMenuContent {{
+    z-index: 99999 !important;
+    background: #18181f !important;
+    border: 1px solid rgba(255, 154, 238, 0.18) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7),
+                0 0 0 1px rgba(255, 154, 238, 0.05) !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+  }}
+
+  /* Items individuales — fondo transparente por defecto sobre el
+     fondo oscuro del wrapper. Cuando se hover/highlight, color rosa
+     sutil para feedback visual. */
+  [data-radix-select-item],
+  [data-radix-dropdown-menu-item],
+  [data-radix-menu-item],
+  .rt-SelectItem,
+  .rt-DropdownMenuItem {{
+    background: transparent !important;
+    color: #ddd !important;
+    padding: 8px 12px !important;
+    cursor: pointer !important;
+  }}
+
+  [data-radix-select-item][data-highlighted],
+  [data-radix-dropdown-menu-item][data-highlighted],
+  [data-radix-menu-item][data-highlighted],
+  .rt-SelectItem:hover,
+  .rt-DropdownMenuItem:hover {{
+    background: rgba(255, 154, 238, 0.12) !important;
+    color: #fff !important;
+    outline: none !important;
+  }}
+
+  /* El item seleccionado (con check) — destacar con color primario */
+  [data-radix-select-item][data-state="checked"],
+  .rt-SelectItem[data-state="checked"] {{
+    background: rgba(255, 154, 238, 0.18) !important;
+    color: {COLOR_PRIMARY} !important;
+    font-weight: 600 !important;
   }}
 
   /* ── Animaciones ─────────────────────────────────────── */
