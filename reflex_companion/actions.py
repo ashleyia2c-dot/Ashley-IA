@@ -1351,6 +1351,7 @@ print("FOCUSED: " + get_title(hwnd), file=sys.stderr)
 INPUT_KEYBOARD  = 1
 KEYEVENTF_KEYUP = 0x0002
 VK_CONTROL = 0x11
+VK_TAB = 0x09  # v0.13.23: ciclar tabs para localizar YouTube
 VK_T  = 0x54
 VK_L  = 0x4C
 VK_A  = 0x41
@@ -1414,26 +1415,49 @@ def clip_get():
     except Exception:
         return ""
 
-# ── Reusar tab de YouTube o abrir una nueva ───────────────────
-# v0.13.21: si el título de la ventana enfocada YA tiene "YouTube",
-# significa que la pestaña activa es la que Ashley abrió antes
-# (típicamente cuando el user pide "pon otra" tras una primera
-# canción). En ese caso navegamos en la MISMA pestaña con Ctrl+L
-# en lugar de abrir tab nueva con Ctrl+T. Sin esto: la canción
-# anterior seguía sonando en su tab original y la "nueva" cargaba
-# en otra tab pero NO reproducía (audio focus + autoplay policy).
+# ── Localizar la tab de YouTube o abrir una nueva ─────────────
+# v0.13.23: estrategia en 3 niveles (cuesta más en código pero
+# cubre los 3 escenarios reales sin romper ninguno):
 #
-# Si NO es YouTube, mantenemos Ctrl+T para no pisar la pestaña
-# del usuario.
+#  1. Si la tab activa de la ventana ya es YouTube → navegar ahí
+#     directo con Ctrl+L (caso "user pide otra y la tab del
+#     primer play sigue activa"). Sin ciclar — instantáneo.
+#
+#  2. Si la tab activa NO es YouTube → ciclar Ctrl+Tab buscando
+#     una tab cuyo título contenga "youtube" (caso "user cambió
+#     manualmente a otra tab entre el primer y segundo play").
+#     Max MAX_TAB_CYCLES iteraciones para no quedarnos en bucle
+#     si el navegador tiene muchas tabs.
+#
+#  3. Si después de ciclar no la encuentra → abrir tab nueva
+#     con Ctrl+T (caso "user cerró la tab de YouTube").
+#
+# v0.13.21 solo cubría el caso 1; el caso 2 caía a 'abrir nueva
+# tab' y la canción no se cambiaba (autoplay bloqueado por
+# audio focus de la tab anterior).
 prev = clip_get()
 
-current_title = get_title(hwnd).lower()
-is_youtube_active = "youtube" in current_title
+MAX_TAB_CYCLES = 10
+found_youtube = False
 
-if not is_youtube_active:
-    hotkey(VK_CONTROL, VK_T)   # tab nuevo solo si no era YouTube
+# Caso 1: la tab activa ya es YouTube
+if "youtube" in get_title(hwnd).lower():
+    found_youtube = True
+else:
+    # Caso 2: ciclar tabs buscando YouTube
+    for _ in range(MAX_TAB_CYCLES):
+        hotkey(VK_CONTROL, VK_TAB)
+        time.sleep(0.18)  # tiempo para que el browser cambie y refresque title
+        if "youtube" in get_title(hwnd).lower():
+            found_youtube = True
+            break
+
+# Caso 3: no se encontró tab de YouTube → abrir nueva
+if not found_youtube:
+    hotkey(VK_CONTROL, VK_T)
     time.sleep(0.5)
 
+# Navegar a la URL en la tab activa (sea la encontrada o la nueva)
 hotkey(VK_CONTROL, VK_L)   # barra de dirección
 time.sleep(0.3)
 clip_set(url)
