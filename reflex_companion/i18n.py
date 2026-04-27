@@ -172,6 +172,16 @@ UI = {
         "settings_cdp_desc":    "When ON, Ashley talks directly to the browser through localhost:9222 (no keyboard simulation, no visible tab cycling, sub-100ms). Falls back to legacy mode automatically if the browser doesn't respond. Trade-off: any local app could connect to that port — risk is low for users without active malware.",
         "settings_cdp_howto":   "Activating this toggle automatically modifies your browser's shortcuts (Chrome/Edge/Brave/Opera...) to add the required flag. Originals are backed up — turning OFF restores them exactly. After activating, close and reopen your browser for the change to take effect.",
 
+        # Wake word (always-on listening, opt-in)
+        "settings_wakeword_heading": "🎙 Wake word (always-on listening)",
+        "settings_wakeword_label":   "Listen for 'Ashley' continuously",
+        "settings_wakeword_on":      "ON — say 'Ashley' to talk hands-free",
+        "settings_wakeword_off":     "OFF — press the mic button to talk",
+        "settings_wakeword_desc":    "When ON, Ashley keeps the mic open in the background and triggers recording when she hears her name. The detection model is local (~5 MB), runs on CPU, and audio NEVER leaves your computer until you speak the wake word. False activations are tuned to be <1 per hour with TV/music in the background.",
+        "settings_wakeword_howto":   "Say 'Ashley' clearly near the mic. After the chime, speak your message normally. The detector pauses automatically while you're typing or holding the mic button, and resumes afterwards.",
+        "settings_wakeword_no_model": "Wake word model not installed yet. The training pipeline lives in wake_word_training/ — once trained (~3-4 h on a CUDA GPU), copy the .onnx to reflex_companion/wake_word/ashley.onnx.",
+        "settings_wakeword_no_deps":  "Wake word dependencies missing. Run: pip install openwakeword sounddevice",
+
         # Optional (ElevenLabs)
         "settings_elevenlabs_label": "ElevenLabs API key",
         "settings_elevenlabs_placeholder": "sk_... (leave empty to use free voice)",
@@ -365,6 +375,16 @@ UI = {
         "settings_cdp_desc":    "Cuando está ACTIVADO, Ashley se conecta directamente al navegador en localhost:9222 — sin simulación de teclas, sin pestañas cambiando visiblemente, sub-100ms. Cae automático al modo clásico si el navegador no responde. Trade-off: cualquier app local podría conectarse a ese puerto — riesgo bajo si no tienes malware activo.",
         "settings_cdp_howto":   "Al activar este toggle Ashley modifica automáticamente los accesos directos de tu navegador (Chrome/Edge/Brave/Opera...) para añadir el flag necesario. Los originales se guardan en backup — al desactivar se restauran tal cual estaban. Después de activar, cierra y reabre tu navegador para que el cambio tenga efecto.",
 
+        # Wake word (escucha siempre, opt-in)
+        "settings_wakeword_heading": "🎙 Palabra clave (escucha siempre)",
+        "settings_wakeword_label":   "Escuchar 'Ashley' continuamente",
+        "settings_wakeword_on":      "ACTIVADO — di 'Ashley' para hablar sin tocar nada",
+        "settings_wakeword_off":     "DESACTIVADO — pulsa el botón del mic para hablar",
+        "settings_wakeword_desc":    "Cuando está ACTIVADO, Ashley mantiene el mic abierto en background y arranca la grabación cuando oye su nombre. El modelo de detección es local (~5 MB), corre en CPU, y el audio NUNCA sale de tu PC hasta que digas la palabra clave. Las activaciones falsas se ajustan a <1 por hora con TV/música de fondo.",
+        "settings_wakeword_howto":   "Di 'Ashley' claro cerca del mic. Tras el sonido de aviso, di tu mensaje normal. El detector se pausa solo mientras escribes o aprietas el botón del mic, y se reanuda después.",
+        "settings_wakeword_no_model": "El modelo de wake word aún no está instalado. El pipeline de entrenamiento está en wake_word_training/ — una vez entrenado (~3-4 h en GPU CUDA), copia el .onnx a reflex_companion/wake_word/ashley.onnx.",
+        "settings_wakeword_no_deps":  "Faltan dependencias de wake word. Ejecuta: pip install openwakeword sounddevice",
+
         "settings_elevenlabs_label": "Clave de ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (déjalo vacío para voz gratuita)",
         "settings_elevenlabs_hint": "Consigue tu clave en elevenlabs.io → Profile → API Keys. Se guarda solo en tu equipo.",
@@ -554,6 +574,16 @@ UI = {
         "settings_cdp_off":     "DÉSACTIVÉ — Ashley utilise la simulation clavier (classique)",
         "settings_cdp_desc":    "Quand ACTIVÉ, Ashley parle directement au navigateur via localhost:9222 — pas de simulation clavier, pas d'onglets visibles qui défilent, sub-100ms. Bascule automatiquement au mode classique si le navigateur ne répond pas. Compromis : n'importe quelle app locale pourrait se connecter à ce port — risque faible sans malware actif.",
         "settings_cdp_howto":   "Activer ce toggle modifie automatiquement les raccourcis de ton navigateur (Chrome/Edge/Brave/Opera...) pour ajouter le flag requis. Les originaux sont sauvegardés — désactiver les restaure exactement. Après activation, ferme et rouvre ton navigateur pour appliquer le changement.",
+
+        # Wake word (écoute permanente, opt-in)
+        "settings_wakeword_heading": "🎙 Mot de réveil (écoute permanente)",
+        "settings_wakeword_label":   "Écouter 'Ashley' en continu",
+        "settings_wakeword_on":      "ACTIVÉ — dis 'Ashley' pour parler sans rien toucher",
+        "settings_wakeword_off":     "DÉSACTIVÉ — appuie sur le bouton du micro pour parler",
+        "settings_wakeword_desc":    "Quand ACTIVÉ, Ashley garde le micro ouvert en arrière-plan et démarre l'enregistrement quand elle entend son nom. Le modèle de détection est local (~5 Mo), tourne sur CPU, et l'audio ne quitte JAMAIS ton ordinateur tant que tu n'as pas dit le mot de réveil. Les fausses activations sont calibrées à <1 par heure avec TV/musique en arrière-plan.",
+        "settings_wakeword_howto":   "Dis 'Ashley' clairement près du micro. Après le bip, parle normalement. Le détecteur se met en pause automatiquement quand tu tapes ou tiens le bouton du micro, et reprend ensuite.",
+        "settings_wakeword_no_model": "Le modèle de mot de réveil n'est pas encore installé. Le pipeline d'entraînement est dans wake_word_training/ — une fois entraîné (~3-4 h sur GPU CUDA), copie le .onnx dans reflex_companion/wake_word/ashley.onnx.",
+        "settings_wakeword_no_deps":  "Dépendances de mot de réveil manquantes. Exécute : pip install openwakeword sounddevice",
 
         "settings_elevenlabs_label": "Clé ElevenLabs",
         "settings_elevenlabs_placeholder": "sk_... (laisse vide pour voix gratuite)",
