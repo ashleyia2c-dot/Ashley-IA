@@ -73,3 +73,4 @@ wake_word_training/output/
 wake_word_training/models/
 wake_word_training/piper-sample-generator/
 wake_word_training/ashley.yaml
+wake_word_training/logs/
