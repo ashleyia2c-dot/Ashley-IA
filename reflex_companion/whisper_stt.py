@@ -64,8 +64,58 @@ def load_error() -> Optional[str]:
     return _model_error
 
 
+def _ensure_model_local(model_size: str, cache_dir: str) -> str:
+    """Asegura que el modelo está físicamente descargado en disk con
+    archivos REALES (no symlinks). Devuelve el path local listo para
+    pasarse a WhisperModel(...).
+
+    Necesario porque huggingface_hub usa symlinks entre `snapshots/` y
+    `blobs/` por default. En Windows los symlinks requieren modo
+    Developer o admin — sin esos privilegios, los archivos en
+    `snapshots/` quedan vacíos (0 bytes) y faster-whisper no puede
+    cargar el modelo aunque YA esté descargado en `blobs/`.
+    Resultado: re-descarga en cada arranque de la app.
+
+    Forzamos `local_dir_use_symlinks=False` → copies reales que
+    funcionan sin privilegios. Idempotente: si los archivos ya están
+    completos, snapshot_download es no-op (~100ms para verificar).
+    """
+    import os as _os
+
+    # faster-whisper usa el repo "Systran/faster-whisper-{size}"
+    repo_id = f"Systran/faster-whisper-{model_size}"
+    local_dir = _os.path.join(cache_dir, f"models--{repo_id.replace('/', '--')}-direct")
+
+    # Si la carpeta ya tiene los archivos esperados con tamaño >0,
+    # asumimos que está bien y skipeamos el download check.
+    expected = ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")
+    have_all = all(
+        _os.path.exists(_os.path.join(local_dir, f)) and
+        _os.path.getsize(_os.path.join(local_dir, f)) > 0
+        for f in expected
+    )
+    if have_all:
+        return local_dir
+
+    # Descargar (o completar) sin symlinks
+    from huggingface_hub import snapshot_download
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        local_dir_use_symlinks=False,  # ← key fix para Windows
+    )
+    return local_dir
+
+
 def _load_model():
-    """Carga (y descarga si hace falta) el modelo Whisper."""
+    """Carga (y descarga si hace falta) el modelo Whisper.
+
+    En Windows: forzamos download a una carpeta plana sin symlinks
+    para que el modelo persista entre reinicios de la app. Sin esto,
+    huggingface_hub crea symlinks que Windows rellena con 0 bytes y
+    faster-whisper re-descarga cada vez (bug visible al user como
+    "siempre sale el banner de descargando").
+    """
     global _model, _model_loading, _model_error
     with _model_lock:
         if _model is not None:
@@ -74,12 +124,27 @@ def _load_model():
         _model_error = None
     try:
         from faster_whisper import WhisperModel
-        mdl = WhisperModel(
-            _MODEL_SIZE,
-            device=_DEVICE,
-            compute_type=_COMPUTE_TYPE,
-            download_root=_cache_dir(),
-        )
+
+        cache_dir = _cache_dir()
+        # Pre-download con copies (no symlinks). Devuelve path local plano.
+        try:
+            local_path = _ensure_model_local(_MODEL_SIZE, cache_dir)
+            mdl = WhisperModel(
+                local_path,  # path local directo, no model_size
+                device=_DEVICE,
+                compute_type=_COMPUTE_TYPE,
+            )
+        except Exception:
+            # Fallback al path original (download_root con symlinks).
+            # Si el user tiene Developer Mode o admin, esto funciona.
+            # Si no, primer arranque OK pero re-download cada vez.
+            mdl = WhisperModel(
+                _MODEL_SIZE,
+                device=_DEVICE,
+                compute_type=_COMPUTE_TYPE,
+                download_root=cache_dir,
+            )
+
         with _model_lock:
             _model = mdl
             _model_loading = False
