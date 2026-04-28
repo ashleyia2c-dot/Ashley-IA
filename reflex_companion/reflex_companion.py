@@ -163,6 +163,12 @@ class State(rx.State):
     # el toggle se acciona; vacío significa que aún no se intentó.
     wake_word_status_message: str = ""
 
+    # ── Manual de usuario (v0.14.0) ────────────
+    # Dialog modal que se abre con el botón ❓ del header. Documenta
+    # todas las features de Ashley, privacidad, tokens, y cómo
+    # activar/desactivar cada cosa. Estado per-session (no persiste).
+    manual_open: bool = False
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -602,37 +608,36 @@ class State(rx.State):
                 self.cdp_setup_message = f"Error en el wizard: {e}"
                 self.cdp_setup_in_progress = False
 
+    def open_manual(self):
+        """Abre el dialog del manual de usuario."""
+        self.manual_open = True
+
+    def close_manual(self):
+        """Cierra el dialog del manual."""
+        self.manual_open = False
+
     def toggle_wake_word_enabled(self):
         """Alterna el modo wake word (escucha siempre 'Ashley').
 
-        ESTADO ACTUAL (paso 3 de la integración wake word):
-        Este handler SOLO flip el flag y persiste — no arranca/para el
-        detector todavía. El runtime de Ashley sigue idéntico al backup
-        `stable-pre-wakeword`. Esto deja el toggle visible en la UI
-        para que podamos diseñar y testear la UX, pero sin riesgo de
-        romper nada hasta que el modelo entrenado esté en su sitio.
+        Lifecycle real (paso 5 de la integración):
+        - Cuando ON: verifica modelo + deps, arranca el detector global
+          (singleton del proceso, fuera del State), y dispara el
+          bg listener loop que polea el bridge → cuando hay detección,
+          ejecuta `rx.call_script("ashleyVoice._startRecording()")` que
+          arranca la grabación STT del JS frontend.
+        - Cuando OFF: para el detector y libera el mic.
 
-        El lifecycle real (instanciar WakeWordDetector, conectar callback
-        a start_recording, manejar pause/resume durante grabación manual)
-        entra en un commit separado DESPUÉS de:
-          1. Lanzar el training (wake_word_training/scripts/04_train.py)
-          2. Validar FRR/FAR con scripts/05_test.py
-          3. Copiar el .onnx a reflex_companion/wake_word/ashley.onnx
-
-        Mientras tanto, el handler también setea wake_word_status_message
-        con un texto explicativo si el user activa sin tener el modelo
-        — feedback honesto en vez de fallo silencioso.
+        Si modelo/deps faltan, el flag persiste pero el detector no
+        arranca — el user ve el status_message explicando qué falta.
         """
         from pathlib import Path
         new_state = not self.wake_word_enabled
         self.wake_word_enabled = new_state
 
         if new_state:
-            # Verificación honesta: ¿está el modelo? ¿están las deps?
-            # El user puede activar igualmente — el flag persiste — pero
-            # le decimos qué falta para que el lifecycle empiece a funcionar
-            # cuando esté todo listo.
             from . import wake_word as _ww
+            from . import wake_word_lifecycle as _lifecycle
+
             deps_ok, deps_reason = _ww.is_available()
             model_path = Path(__file__).resolve().parent / "wake_word" / "ashley.onnx"
             model_present = model_path.exists()
@@ -648,14 +653,95 @@ class State(rx.State):
                     "Wake word dependencies missing.",
                 )
             else:
-                # Caso happy: ambos presentes. Hoy NO arrancamos el detector
-                # (eso es paso 5). Solo confirmamos que cuando el lifecycle
-                # se conecte, el sistema está listo.
-                self.wake_word_status_message = "OK"
+                # Happy path: arranca el detector real
+                ok, reason = _lifecycle.start_detector(
+                    model_path=str(model_path),
+                    threshold=0.65,  # más estricto que default 0.5 — preferimos
+                                     # que pidas repetir antes que activarse solo
+                    cooldown_seconds=1.5,
+                    use_vad=True,
+                )
+                if ok:
+                    self.wake_word_status_message = "OK escuchando"
+                    self._persist_voice()
+                    # Lanzar el bg listener que polea el bridge
+                    return State.run_wake_word_listener
+                self.wake_word_status_message = f"Error: {reason}"
         else:
+            from . import wake_word_lifecycle as _lifecycle
+            _lifecycle.stop_detector()
             self.wake_word_status_message = ""
 
         self._persist_voice()
+
+    def _maybe_start_wake_word_detector_on_load(self):
+        """Arranca el detector al cargar la app si el flag persistido
+        es True y el modelo + deps están presentes. Idempotente — si
+        algo falta, deja el flag a True (silently) para que cuando el
+        user instale el modelo, la próxima apertura lo detecte.
+
+        Yieldea el bg listener para que el polling arranque.
+        """
+        from pathlib import Path
+        from . import wake_word as _ww
+        from . import wake_word_lifecycle as _lifecycle
+
+        deps_ok, deps_reason = _ww.is_available()
+        model_path = Path(__file__).resolve().parent / "wake_word" / "ashley.onnx"
+        model_present = model_path.exists()
+
+        if not (model_present and deps_ok):
+            self.wake_word_status_message = self.t.get(
+                "settings_wakeword_no_model" if not model_present
+                else "settings_wakeword_no_deps",
+                "",
+            )
+            return
+
+        ok, reason = _lifecycle.start_detector(
+            model_path=str(model_path),
+            threshold=0.65,
+            cooldown_seconds=1.5,
+            use_vad=True,
+        )
+        if ok:
+            self.wake_word_status_message = "OK escuchando"
+            yield State.run_wake_word_listener
+        else:
+            self.wake_word_status_message = f"Error: {reason}"
+
+    @rx.event(background=True)
+    async def run_wake_word_listener(self):
+        """Background loop que polea el bridge cada 200ms y dispara
+        grabación cuando hay detección.
+
+        Termina solo cuando self.wake_word_enabled vuelve a False, así
+        que matar el toggle también mata este loop. La latencia poll-
+        to-recording es 0–200ms, imperceptible para el user.
+        """
+        import asyncio
+        from . import wake_word_bridge as _bridge
+
+        while True:
+            # Sale del loop cuando el user desactiva el toggle
+            async with self:
+                if not self.wake_word_enabled:
+                    return
+
+            await asyncio.sleep(0.2)
+
+            detected, score = _bridge.poll_detection()
+            if detected:
+                # Disparar grabación en el frontend.
+                # `ashleyVoice` es el objeto JS global expuesto por
+                # assets/ashley_voice.js. _startRecording() ya existe y
+                # maneja todo (getUserMedia, MediaRecorder, VAD auto-stop,
+                # POST a /api/transcribe, push del texto al chat).
+                async with self:
+                    yield rx.call_script(
+                        "if (window.ashleyVoice && window.ashleyVoice._startRecording) "
+                        "{ window.ashleyVoice._startRecording(); }"
+                    )
 
     def set_elevenlabs_key(self, key: str):
         self.elevenlabs_key = (key or "").strip()
@@ -954,9 +1040,11 @@ class State(rx.State):
         self.discovery_enabled = bool(vcfg.get("discovery_enabled", False))
         # v0.13.25: modo browser moderno (CDP) — opt-in
         self.cdp_enabled = bool(vcfg.get("cdp_enabled", False))
-        # v0.14.0: wake word always-on listening — opt-in. El flag persiste
-        # pero el lifecycle no se conecta hasta el commit que cierra la
-        # integración (ver toggle_wake_word_enabled).
+        # v0.14.0: wake word always-on listening — opt-in. Si el flag
+        # persistido es True, arrancamos el detector automáticamente
+        # al cargar la app — el user no debería tener que re-toggle
+        # cada vez que abra Ashley. El bg listener se dispara al final
+        # de on_load (ver yield al final).
         self.wake_word_enabled = bool(vcfg.get("wake_word_enabled", False))
         # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
         if self.llm_provider == "ollama":
@@ -1020,6 +1108,14 @@ class State(rx.State):
         if not self.facts and self.messages:
             self._initial_fact_extraction()
         self._maybe_create_diary_entry()
+
+        # Auto-start del wake word detector si el flag persistido es True.
+        # Esto evita que el user tenga que re-toggle cada vez que abre la
+        # app. Si falta el modelo o las deps, _maybe_start_wake_word_detector
+        # falla limpio y el flag queda True (próxima vez que el user instale
+        # el modelo, la próxima apertura lo detecta y arranca).
+        if self.wake_word_enabled:
+            yield from self._maybe_start_wake_word_detector_on_load()
         yield
         # ── Startup engagement (discovery o follow-up) ─────────────────────
         #
@@ -3668,6 +3764,7 @@ from .components import (  # noqa: E402
     _ashley_portrait_panel, _pill_btn, _pill_btn_orange, _header_quick_menu,
     _news_panel, _news_pill_with_badge,
     license_gate,
+    manual_button, manual_dialog,
 )
 
 # ── Estilos globales (extraídos a styles.py) ──
@@ -3800,8 +3897,9 @@ def index():
 
     # ── Header bar ───────────────────────────────────────────
     header = rx.hstack(
-        # Branding
+        # Branding (top-left) + botón ❓ del manual de usuario
         rx.hstack(
+            manual_button(),  # ❓ — abre el dialog del manual
             rx.text("◈", font_size="20px", color=COLOR_PRIMARY,
                     style={"textShadow": "0 0 12px rgba(255,154,238,0.6)"}),
             rx.text("Ashley", font_size="17px", font_weight="800",
@@ -3976,6 +4074,9 @@ def index():
     # y on_submit del gate re-dispara on_load sin necesidad de reload.
     main_ui = rx.fragment(
         page,
+
+        # ── Manual de usuario ──────────────────────────────────
+        manual_dialog(),
 
         # ── Diálogo de recuerdos ──────────────────────────────
         rx.dialog.root(

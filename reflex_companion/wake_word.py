@@ -153,15 +153,35 @@ class WakeWordDetector:
         model_path: str | Path,
         threshold: float = DEFAULT_THRESHOLD,
         cooldown_seconds: float = COOLDOWN_SECONDS,
+        use_vad: bool = True,
+        vad_threshold: float = 0.3,
     ):
+        """Crea el detector. Configuración:
+
+        Args:
+            model_path: ruta al .onnx (o .tflite) entrenado
+            threshold: score mínimo del wake word (default 0.5)
+            cooldown_seconds: tiempo mínimo entre detecciones consecutivas
+            use_vad: si True, filtra audio con Voice Activity Detection
+                antes de pasar al wake word. Reduce false positives en
+                silencio/ruido ambiente sin coste de recall (la voz humana
+                tiene VAD score alto consistentemente). openwakeword
+                provee silero_vad.onnx que se usa automáticamente.
+            vad_threshold: score mínimo del VAD para procesar el chunk
+                (0.0–1.0). 0.3 es buen default — speech típico marca
+                >0.5, ruido <0.1.
+        """
         self.model_path = Path(model_path)
         self.threshold = float(threshold)
         self.cooldown_seconds = float(cooldown_seconds)
+        self.use_vad = bool(use_vad)
+        self.vad_threshold = float(vad_threshold)
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._callback: Optional[DetectionCallback] = None
         self._last_detection_at: float = 0.0
+        self._paused: bool = False  # set True during manual recording
         self._lock = threading.Lock()
 
     @property
@@ -202,6 +222,24 @@ class WakeWordDetector:
             t.join(timeout=timeout)
         return not (t is not None and t.is_alive())
 
+    def pause(self) -> None:
+        """Pausa el loop sin matar el thread. Mientras está paused, los
+        chunks de audio se descartan (no se procesan ni disparan callback).
+        Usado durante grabación manual del user — el JS captura el mic
+        con MediaRecorder y no queremos que el wake word también consume
+        recursos ni dispare un STT-en-medio-de-STT.
+        """
+        self._paused = True
+
+    def resume(self) -> None:
+        """Reanuda el loop después de un pause(). El detector vuelve a
+        procesar chunks normalmente."""
+        self._paused = False
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
     # ─────────────────────────────────────
     #  Loop interno (thread separado)
     # ─────────────────────────────────────
@@ -221,17 +259,24 @@ class WakeWordDetector:
 
         framework = _inference_framework_for(self.model_path)
         try:
+            # vad_threshold > 0 activa el filtrado interno de openwakeword
+            # con silero_vad.onnx (~3 MB, ya descargado al training).
+            # Cuando el VAD score < threshold, openwakeword devuelve 0.0
+            # automáticamente sin invocar el modelo wake word — gratis FP
+            # reduction en ambient noise.
             model = Model(
                 wakeword_models=[str(self.model_path)],
                 inference_framework=framework,
+                vad_threshold=self.vad_threshold if self.use_vad else 0.0,
             )
         except Exception as e:
             log.warning("Wake word model failed to load (framework=%s): %s",
                         framework, e)
             return
 
-        log.info("Wake word detector started (model=%s, threshold=%.2f)",
-                 self.model_path.name, self.threshold)
+        log.info("Wake word detector started (model=%s, threshold=%.2f, vad=%s)",
+                 self.model_path.name, self.threshold,
+                 f"on@{self.vad_threshold}" if self.use_vad else "off")
 
         try:
             with sd.InputStream(
@@ -249,6 +294,12 @@ class WakeWordDetector:
                     except Exception as e:
                         log.warning("Mic read error: %s — retrying", e)
                         time.sleep(0.1)
+                        continue
+
+                    # Si el detector está pausado (user grabando manual),
+                    # consumimos el audio para no overflowear el stream
+                    # pero no lo procesamos ni disparamos callback.
+                    if self._paused:
                         continue
 
                     # data shape: (CHUNK_SAMPLES, 1). Aplanamos.

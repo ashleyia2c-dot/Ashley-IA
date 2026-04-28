@@ -1142,3 +1142,139 @@ def license_gate() -> rx.Component:
         height="100vh",
         bg="#0a0a0a",
     )
+
+
+# ─────────────────────────────────────────────
+#  Manual de usuario — dialog modal con accordion
+# ─────────────────────────────────────────────
+
+def _manual_section_item(section: dict) -> rx.Component:
+    """Una sección del manual = un AccordionItem colapsable.
+    section = {"id": str, "icon": str, "title": str, "content_md": str}
+    """
+    return rx.accordion.item(
+        header=rx.hstack(
+            rx.text(section["icon"], font_size="18px"),
+            rx.text(section["title"],
+                    color="#ddd", font_weight="600", font_size="14px"),
+            spacing="3", align="center", width="100%",
+        ),
+        content=rx.box(
+            rx.markdown(
+                section["content_md"],
+                color="#ccc",
+                font_size="13px",
+                line_height="1.7",
+            ),
+            padding="12px 16px 16px 16px",
+        ),
+        value=section["id"],
+    )
+
+
+def _manual_body(manual: dict) -> rx.Component:
+    """Renderiza el body completo del manual desde un dict de
+    manual_content.MANUAL[lang]. Se evalúa en Python al definir el
+    componente — Reflex maneja los 3 idiomas via rx.match en el caller.
+    """
+    return rx.vstack(
+        rx.heading(
+            manual["title"],
+            color="#ff9aee",
+            font_size="20px",
+            font_weight="700",
+            letter_spacing="0.02em",
+        ),
+        rx.markdown(
+            manual["intro"],
+            color="#ccc",
+            font_size="13px",
+            line_height="1.7",
+        ),
+        rx.divider(border_color="rgba(255,154,238,0.2)"),
+        rx.accordion.root(
+            *[_manual_section_item(s) for s in manual["sections"]],
+            collapsible=True,
+            type="multiple",
+            variant="ghost",
+            color_scheme="pink",
+            width="100%",
+        ),
+        spacing="3",
+        align="stretch",
+        width="100%",
+    )
+
+
+def manual_dialog() -> rx.Component:
+    """Dialog modal del manual de usuario. Se abre con el botón ❓ del
+    header. El contenido cambia con el idioma del state via rx.match —
+    los 3 árboles (EN/ES/FR) se compilan al inicio pero solo el activo
+    se monta gracias al diff de Reflex."""
+    State = _get_state()
+
+    # Lazy import del contenido — no es necesario al cargar el módulo
+    from .manual_content import get_manual
+
+    en_body = _manual_body(get_manual("en"))
+    es_body = _manual_body(get_manual("es"))
+    fr_body = _manual_body(get_manual("fr"))
+
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.box(
+                rx.match(
+                    State.language,
+                    ("es", es_body),
+                    ("fr", fr_body),
+                    en_body,  # default: EN
+                ),
+                max_height="70vh",
+                overflow_y="auto",
+                padding="4px",
+            ),
+            rx.flex(
+                rx.spacer(),
+                rx.dialog.close(
+                    rx.button(
+                        "✕",
+                        on_click=State.close_manual,
+                        size="2",
+                        variant="soft",
+                        color_scheme="gray",
+                    ),
+                ),
+                margin_top="12px",
+            ),
+            max_width="640px",
+            bg="#18181f",
+            border="1px solid rgba(255,154,238,0.18)",
+            border_radius="14px",
+            padding="24px",
+        ),
+        open=State.manual_open,
+        on_open_change=State.set_manual_open,
+    )
+
+
+def manual_button() -> rx.Component:
+    """Botón ❓ que abre el manual. Se coloca en el header (top-left)."""
+    State = _get_state()
+    return rx.tooltip(
+        rx.button(
+            "❓",
+            on_click=State.open_manual,
+            size="2",
+            variant="ghost",
+            color_scheme="pink",
+            cursor="pointer",
+            font_size="18px",
+            padding="6px 10px",
+        ),
+        content=rx.match(
+            State.language,
+            ("es", "Manual de usuario"),
+            ("fr", "Manuel utilisateur"),
+            "User manual",
+        ),
+    )

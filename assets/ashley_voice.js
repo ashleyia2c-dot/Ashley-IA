@@ -179,6 +179,10 @@
         this._updateMicState();
         log('MediaRecorder.start() called successfully. state:', this.mediaRecorder.state);
 
+        // Pausar wake word detector mientras grabamos manual. El backend
+        // ignora silently si el detector no estaba corriendo (idempotente).
+        this._wakeWordPause();
+
         // ── VAD: auto-stop tras 4s de silencio después de hablar ──
         this._startVAD();
       } catch (e) {
@@ -204,6 +208,37 @@
         this.isListening = false;
         this._updateMicState();
       }
+      // Reanudar el wake word detector cuando termine la grabación manual.
+      // Lo llamamos en _stopRecording (no en onstop) porque el user puede
+      // pulsar stop sin que onstop se haya disparado todavía — preferimos
+      // resume early que tarde.
+      this._wakeWordResume();
+    },
+
+    // ── Wake word pause/resume hooks ────────────────────────
+    // El backend Python tiene un detector de wake word que escucha "Ashley"
+    // en background. Cuando el user pulsa el botón mic para grabar manual,
+    // pausamos el detector para que no compita por el mic ni dispare un
+    // STT-en-medio-de-STT. Idempotente: si el detector no está activo,
+    // los endpoints son no-op (devuelven {"ok": true}).
+    async _wakeWordPause() {
+      try {
+        const port = this._getApiPort();
+        await fetch(`http://localhost:${port}/api/wake_word/pause`,
+                    { method: 'POST', cache: 'no-store' });
+      } catch (_e) { /* silent — no crítico */ }
+    },
+    async _wakeWordResume() {
+      try {
+        const port = this._getApiPort();
+        await fetch(`http://localhost:${port}/api/wake_word/resume`,
+                    { method: 'POST', cache: 'no-store' });
+      } catch (_e) { /* silent — no crítico */ }
+    },
+    _getApiPort() {
+      // Mismo patrón que el resto de fetches en este file — Electron pasa
+      // ASHLEY_BACKEND_PORT via window injection, dev usa puerto default.
+      return (window.ASHLEY_BACKEND_PORT || window.location.port || 17800);
     },
 
     // ─── VAD: Voice Activity Detection ─────────────────────

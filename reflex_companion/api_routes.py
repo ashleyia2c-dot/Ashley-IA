@@ -309,6 +309,30 @@ async def _tts_endpoint(request):
             status_code=500))
 
 
+async def _wake_word_pause(request):
+    """POST /api/wake_word/pause — pausa el detector mientras el JS hace
+    grabación manual. Idempotente — si no está corriendo, no-op."""
+    from .wake_word_lifecycle import pause_detector
+    try:
+        pause_detector()
+        return _with_cors(_StarletteJSON({"ok": True}))
+    except Exception as e:
+        return _with_cors(_StarletteJSON({"ok": False, "error": str(e)},
+                                          status_code=500))
+
+
+async def _wake_word_resume(request):
+    """POST /api/wake_word/resume — reanuda el detector después de que
+    la grabación manual termine."""
+    from .wake_word_lifecycle import resume_detector
+    try:
+        resume_detector()
+        return _with_cors(_StarletteJSON({"ok": True}))
+    except Exception as e:
+        return _with_cors(_StarletteJSON({"ok": False, "error": str(e)},
+                                          status_code=500))
+
+
 def register_routes(app):
     """Insert API routes at the BEGINNING of the Starlette router.
     Include OPTIONS methods for CORS preflight."""
@@ -318,3 +342,7 @@ def register_routes(app):
         "/api/whisper/status", _whisper_status_endpoint, methods=["GET", "OPTIONS"]))
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/tts", _tts_endpoint, methods=["POST", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/wake_word/pause", _wake_word_pause, methods=["POST", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/wake_word/resume", _wake_word_resume, methods=["POST", "OPTIONS"]))

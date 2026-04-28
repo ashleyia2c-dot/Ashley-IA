@@ -274,6 +274,134 @@ def test_cooldown_prevents_double_trigger(tmp_path, monkeypatch):
     assert len(received) == 1, f"Esperado 1 callback con cooldown, hubo {len(received)}"
 
 
+def test_pause_blocks_callback(tmp_path, monkeypatch):
+    """Cuando el detector está paused, los chunks se descartan y el
+    callback NO se invoca aunque el modelo daría score alto."""
+    _patch_audio_libs(monkeypatch, [{"ashley": 0.9}] * 5)
+
+    model_path = tmp_path / "ashley.tflite"
+    model_path.write_bytes(b"\x00" * 100)
+
+    received = []
+    det = wake_word.WakeWordDetector(model_path=model_path, threshold=0.5)
+
+    # Pausar ANTES de start para evitar race con el primer chunk
+    det.pause()
+    assert det.is_paused
+
+    ok, reason = det.start(callback=lambda s: received.append(s))
+    assert ok, reason
+
+    time.sleep(0.3)
+    det.stop()
+
+    # Ningún callback debería haber disparado
+    assert received == [], f"Esperado 0 con pause activo, hubo {len(received)}"
+
+
+def test_resume_restores_callback(tmp_path, monkeypatch):
+    """resume() después de pause() permite que el callback vuelva a
+    dispararse en chunks subsiguientes."""
+    _patch_audio_libs(monkeypatch, [{"ashley": 0.9}] * 20)
+
+    model_path = tmp_path / "ashley.tflite"
+    model_path.write_bytes(b"\x00" * 100)
+
+    received_event = threading.Event()
+    received = []
+
+    def on_detect(score):
+        received.append(score)
+        received_event.set()
+
+    det = wake_word.WakeWordDetector(
+        model_path=model_path, threshold=0.5, cooldown_seconds=0.0,
+    )
+    ok, reason = det.start(callback=on_detect)
+    assert ok, reason
+
+    det.pause()
+    assert det.is_paused
+    det.resume()
+    assert not det.is_paused
+
+    assert received_event.wait(timeout=2.0), "Callback no se invocó tras resume"
+    det.stop()
+    assert len(received) >= 1
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  wake_word_bridge — comunicación detector → State
+# ══════════════════════════════════════════════════════════════════════
+
+def test_bridge_initial_state():
+    """Sin signal, poll devuelve (False, 0.0)."""
+    from reflex_companion import wake_word_bridge as bridge
+    bridge.reset()
+    detected, score = bridge.poll_detection()
+    assert detected is False
+    assert score == 0.0
+
+
+def test_bridge_signal_then_poll():
+    """Después de signal, primer poll devuelve (True, score)."""
+    from reflex_companion import wake_word_bridge as bridge
+    bridge.reset()
+    bridge.signal_detection(0.85)
+    detected, score = bridge.poll_detection()
+    assert detected is True
+    assert abs(score - 0.85) < 0.001
+
+
+def test_bridge_poll_is_consuming():
+    """Segundo poll consecutivo devuelve (False, ...) — la detección
+    se consumió."""
+    from reflex_companion import wake_word_bridge as bridge
+    bridge.reset()
+    bridge.signal_detection(0.7)
+    bridge.poll_detection()  # consume
+    detected, _ = bridge.poll_detection()
+    assert detected is False
+
+
+def test_bridge_thread_safety():
+    """signal desde otro thread llega al poller del thread principal."""
+    from reflex_companion import wake_word_bridge as bridge
+    bridge.reset()
+
+    def signal_after():
+        time.sleep(0.05)
+        bridge.signal_detection(0.92)
+
+    t = threading.Thread(target=signal_after)
+    t.start()
+
+    # Poll loop hasta detección o timeout
+    detected = False
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        d, s = bridge.poll_detection()
+        if d:
+            detected = True
+            assert abs(s - 0.92) < 0.001
+            break
+        time.sleep(0.01)
+
+    t.join()
+    assert detected, "Signal del thread no llegó al poller"
+
+
+def test_bridge_count_increments():
+    """detection_count() devuelve el total acumulado."""
+    from reflex_companion import wake_word_bridge as bridge
+    bridge.reset()
+    initial = bridge.detection_count()
+    bridge.signal_detection(0.5)
+    bridge.signal_detection(0.6)
+    bridge.signal_detection(0.7)
+    assert bridge.detection_count() == initial + 3
+
+
 def test_stop_returns_quickly(tmp_path, monkeypatch):
     """stop() debe parar el thread en pocos cientos de ms — no quedarse
     colgado esperando un read del mic. El stop_event se chequea cada
