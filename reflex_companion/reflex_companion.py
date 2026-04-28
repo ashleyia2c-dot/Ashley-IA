@@ -616,6 +616,12 @@ class State(rx.State):
         """Cierra el dialog del manual."""
         self.manual_open = False
 
+    def set_manual_open(self, value: bool):
+        """Setter explícito para el dialog. Lo necesita
+        rx.dialog.root(on_open_change=...) — Reflex deprecó los
+        auto-setters en 0.8.9 y los remueve en 0.9.0."""
+        self.manual_open = bool(value)
+
     def toggle_wake_word_enabled(self):
         """Alterna el modo wake word (escucha siempre 'Ashley').
 
