@@ -38,6 +38,23 @@ from datetime import datetime, timezone
 
 
 # ─────────────────────────────────────────────
+#  Speculative dispatch storage (module-level)
+# ─────────────────────────────────────────────
+#
+# Reflex State no permite atributos undeclared (raise "must be declared
+# before they can be set"). Los threads del speculative dispatch
+# necesitan compartir state per-instancia con el flow del state, así que
+# guardamos un dict module-level keyed por id(state). Lifecycle:
+#   - _streaming_loop arranca: _SPECULATIVE_BY_STATE[id(self)] = {}
+#   - _maybe_dispatch_speculative añade entries al slot
+#   - _finalize_response hace pop(id(self)) — consumes y libera memoria
+# Si el state object muere antes de finalize (caso raro), la entry queda
+# huérfana hasta que otro state con el mismo id() la sobrescriba —
+# memory leak acotado y no observable.
+_SPECULATIVE_BY_STATE: dict[int, dict] = {}
+
+
+# ─────────────────────────────────────────────
 #  Helpers pre-state
 # ─────────────────────────────────────────────
 
@@ -1497,6 +1514,13 @@ class State(rx.State):
         if not actions_so_far:
             return
 
+        # Reflex State no permite atributos undeclared (raise "must be
+        # declared before they can be set"). Storage del speculative
+        # dispatch se mantiene en un dict module-level keyed por id(self).
+        # Limpieza explícita en _streaming_loop al inicio + en
+        # _finalize_response (pop) para no leak.
+        slot = _SPECULATIVE_BY_STATE.setdefault(id(self), {})
+
         # Snapshot — los threads usan estos valores, no self
         browser_opened = self.browser_opened
         cdp_enabled = self.cdp_enabled
@@ -1505,7 +1529,7 @@ class State(rx.State):
 
         for a in actions_so_far:
             key = (a["type"], tuple(a.get("params") or []))
-            if key in self._speculative_dispatched:
+            if key in slot:
                 continue
 
             is_safe = a["type"] in _SAFE_ACTIONS
@@ -1517,7 +1541,7 @@ class State(rx.State):
             # Reservar slot inmediatamente para evitar dispatch duplicado
             # en el siguiente chunk de stream (parsing es idempotente).
             result_holder: dict = {"result": None}
-            self._speculative_dispatched[key] = (None, result_holder)
+            slot[key] = (None, result_holder)
 
             def _worker(
                 action_t=a["type"],
@@ -1546,11 +1570,11 @@ class State(rx.State):
                 t = threading.Thread(target=_worker, daemon=True,
                                      name=f"speculative-{a['type']}")
                 t.start()
-                self._speculative_dispatched[key] = (t, result_holder)
+                slot[key] = (t, result_holder)
             except Exception:
                 # Si threading falla por algún motivo raro, removemos el
                 # slot para que finalize ejecute la acción normalmente.
-                self._speculative_dispatched.pop(key, None)
+                slot.pop(key, None)
 
     def _execute_and_record_action(self, action_dict, lang=None):
         """Execute an action, update state, append a system_result message
@@ -1640,8 +1664,11 @@ class State(rx.State):
         empty_count = 0
 
         # Reset el state de speculative dispatch para este turno.
+        # Reflex State no acepta atributos undeclared — guardamos en un
+        # dict module-level keyed por id(self). Limpiamos al inicio aquí
+        # y al final en _finalize_response (pop).
         # Map: (action_type, tuple(params)) -> (thread, result_holder dict)
-        self._speculative_dispatched = {}
+        _SPECULATIVE_BY_STATE[id(self)] = {}
 
         # Timing diagnóstico — útil para diagnosticar lags reportados por
         # el user. Logs van a ashley.timing logger (visible en stderr/log).
@@ -1691,7 +1718,7 @@ class State(rx.State):
         _timing_log.warning(
             "stream done: total=%.2fs, TTFT=%s, chars=%d, speculative=%d",
             _t_total, _ttft_str, len(accumulated),
-            len(self._speculative_dispatched),
+            len(_SPECULATIVE_BY_STATE.get(id(self), {})),
         )
         yield
 
@@ -2425,7 +2452,9 @@ class State(rx.State):
         # disparado threads daemon para algunas acciones IO-bound mientras
         # Grok aún streameaba. Si lo hizo, el thread ya terminó (o casi)
         # cuando llegamos aquí. Reusamos su resultado para no doble-ejecutar.
-        specs = getattr(self, "_speculative_dispatched", {}) or {}
+        # pop() también limpia el slot — evita memory leak por estados
+        # que ya no se usan.
+        specs = _SPECULATIVE_BY_STATE.pop(id(self), {}) or {}
         for current_action in (all_actions or []):
             _is_safe = current_action["type"] in _SAFE_ACTIONS
             if self.auto_actions or _is_safe:
