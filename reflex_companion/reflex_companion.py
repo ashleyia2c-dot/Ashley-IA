@@ -2733,38 +2733,22 @@ class State(rx.State):
         # el plan no terminó. Le damos un follow-up automático para que
         # vea el [system_result] y emita el siguiente paso.
         # Cap: 2 iteraciones extras (3 turns total) por mensaje del user.
-        last_user = self._last_user_message or ""
+        # Señal puramente numérica — sin parser de texto del user.
+        # Si Ashley ejecutó EXACTAMENTE 1 acción exitosa, le damos un
+        # turno extra para que VEA el [system_result] y decida si el
+        # plan está completo o falta algo. El LLM mismo es la
+        # heurística: si emite tag, ejecutamos; si solo texto, listo.
+        # Cuando emite 2+ acciones de una, asumimos plan ya cubierto.
         any_failed = any(not r["result"].get("success", True) for r in executed_results)
         executed_count = len(executed_results)
         should_continue = (
-            executed_count >= 1
-            and not any_failed  # failures ya disparan apology que también itera
+            executed_count == 1
+            and not any_failed  # failures ya disparan apology (también itera)
             and self._auto_iter_count < 2
-            and self._user_message_implies_multi_step(last_user)
         )
         if should_continue:
             self._auto_iter_count += 1
             yield from self._stream_action_continuation(executed_results)
-
-    def _user_message_implies_multi_step(self, user_msg: str) -> bool:
-        """Heurística: ¿el mensaje del user sugiere más de una acción?
-
-        Cuenta verbos de acción del set existente _USER_ACTION_VERBS. Si
-        hay 2 o más matches, asumimos plan multi-step. Heurística genérica
-        — no listas de phrases concretas, solo el conteo del vocabulario
-        que ya tenemos centralizado en parsing.py.
-        """
-        if not user_msg:
-            return False
-        text = user_msg.lower()
-        from .parsing import _USER_ACTION_VERBS
-        matches = 0
-        for v in _USER_ACTION_VERBS:
-            if v in text:
-                matches += 1
-                if matches >= 2:
-                    return True
-        return False
 
     def _stream_action_continuation(self, executed_results: list[dict]):
         """Dispara un turn automático de Grok cuando el plan multi-step
