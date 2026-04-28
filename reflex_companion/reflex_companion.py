@@ -186,6 +186,15 @@ class State(rx.State):
     # activar/desactivar cada cosa. Estado per-session (no persiste).
     manual_open: bool = False
 
+    # ── Agentic loop counter (v0.14.3) ────────
+    # Cuántos turnos auto-continue lleva el plan actual. Cuando una
+    # acción falla o Ashley necesita verificar un paso intermedio,
+    # disparamos un nuevo turn de Grok que puede emitir más acciones.
+    # Cap a 2 para evitar bucles infinitos (3 iteraciones totales:
+    # original + 2 follow-ups). Reset a 0 al inicio de cada mensaje
+    # del user.
+    _auto_iter_count: int = 0
+
     # ── Notificaciones Windows (cuando la ventana está minimizada) ──────
     notifications_enabled: bool = True
     # Pin on top: cuando ON, la ventana se mantiene encima de todo (útil
@@ -1843,6 +1852,18 @@ class State(rx.State):
                 "🔊 TTS (voix) : " + ("ACTIVÉ" if self.tts_enabled else "DÉSACTIVÉ")
             )
             capabilities.append("")
+            if self.auto_actions:
+                capabilities.append(
+                    "[BOUCLE DE FEEDBACK] Après chaque action que tu émets, "
+                    "le système te renvoie un message [system_result] avec "
+                    "ce qui s'est passé. Lis-le pour vérifier si ton plan a "
+                    "fonctionné. Si une action échoue, le système te donne "
+                    "automatiquement un autre tour pour ajuster — émets le "
+                    "pas suivant, ou dis au patron qu'il te faut son aide. "
+                    "Pense avant d'agir : tu peux vérifier le contenu d'une "
+                    "page avant de la toucher si tu as cette capacité active."
+                )
+            capabilities.append("")
             capabilities.append(
                 "IMPORTANT : n'offre PAS de faire des choses que tu ne peux pas. "
                 "Si Actions est DÉSACTIVÉ, ne dis pas \"je te l'ouvre\" — dis "
@@ -1875,6 +1896,18 @@ class State(rx.State):
             capabilities.append(f"🗣 Natural (voice mode): {'ON — no gestures, pure dialogue.' if self.voice_mode else 'OFF — gestures between *asterisks* are active.'}")
             capabilities.append(f"🔊 TTS (voice output): {'ON' if self.tts_enabled else 'OFF'}")
             capabilities.append("")
+            if self.auto_actions:
+                capabilities.append(
+                    "[FEEDBACK LOOP] After every action you emit, the system "
+                    "sends you a [system_result] message with what happened. "
+                    "Read it to verify whether your plan worked. If an "
+                    "action fails, the system automatically gives you "
+                    "another turn to adjust — emit the next step, or tell "
+                    "the boss you need his help. Think before you act: you "
+                    "can check page content before touching it if that "
+                    "capability is on."
+                )
+            capabilities.append("")
             capabilities.append("IMPORTANT: Do NOT offer to do things you can't do. If Actions is OFF, don't say 'I'll open that for you' — say 'Activate ⚡ Actions and I can do that.'")
             capabilities.append("Do NOT offer to send messages, emails, or contact people — you cannot do that.")
             capabilities.append("Do NOT interpret notifications, popups, or small UI text from the screenshot — if you can't read it with 100% certainty, do NOT mention it. Don't invent names, times, or messages you 'think you see'.")
@@ -1896,6 +1929,18 @@ class State(rx.State):
             )
             capabilities.append(f"🗣 Natural (modo voz): {'ACTIVADO — sin gestos, diálogo puro.' if self.voice_mode else 'DESACTIVADO — gestos entre *asteriscos* activos.'}")
             capabilities.append(f"🔊 TTS (voz): {'ACTIVADO' if self.tts_enabled else 'DESACTIVADO'}")
+            capabilities.append("")
+            if self.auto_actions:
+                capabilities.append(
+                    "[BUCLE DE FEEDBACK] Después de cada acción que emites, "
+                    "el sistema te devuelve un mensaje [system_result] con "
+                    "lo que pasó. Léelo para verificar si tu plan funcionó. "
+                    "Si una acción falla, el sistema te da automáticamente "
+                    "otro turno para ajustar — emite el siguiente paso, o "
+                    "dile al jefe que necesitas su ayuda. Piensa antes de "
+                    "actuar: puedes verificar contenido de una página antes "
+                    "de tocarla si tienes esa capacidad activa."
+                )
             capabilities.append("")
             capabilities.append("IMPORTANTE: NO ofrezcas hacer cosas que no puedes. Si Acciones está DESACTIVADO, no digas 'te lo abro' — di 'Activa ⚡ Acciones y puedo hacerlo.'")
             capabilities.append("NO ofrezcas enviar mensajes, emails ni contactar a personas — no puedes hacer eso.")
@@ -2748,6 +2793,11 @@ class State(rx.State):
 
         self.messages.append(self._prepare_user_message(user_message))
         self._last_user_message = user_message
+        # Reset del agentic loop counter — empieza un nuevo plan.
+        # El counter se incrementa en cada follow-up automático y
+        # corta a 2 iteraciones extras (3 turns total) para evitar
+        # bucles infinitos.
+        self._auto_iter_count = 0
         # Contador persistente firmado (para política de reembolso).
         # Se mantiene fuera del try/except para que un fallo en stats NO
         # bloquee el envío del mensaje.
@@ -4018,7 +4068,13 @@ class State(rx.State):
             apology_text = self._last_response
             ap_clean, ap_mood = self._extract_mood(apology_text)
             ap_clean, ap_aff = self._extract_affection(ap_clean)
-            ap_clean, _ = self._extract_action(ap_clean)
+            # v0.14.3 — agentic loop: si Ashley emite una NUEVA acción en
+            # su respuesta a este fallo, la ejecutamos en lugar de
+            # descartarla. Eso le permite reintentar / ajustar el plan
+            # / pedir info adicional automáticamente, sin que el user
+            # tenga que mandar otro mensaje. Cap a 2 iteraciones extras
+            # (3 turns total) para evitar bucles si el LLM se atasca.
+            ap_clean, follow_action = self._extract_action(ap_clean)
             self._apply_affection_delta(ap_aff)
             self.mood = ap_mood
             self.current_response = ""
@@ -4031,6 +4087,25 @@ class State(rx.State):
                 "image": "",
             })
             self.save_history()
+
+            # Agentic continuation: si Ashley reaccionó al fallo emitiendo
+            # otra action y aún tenemos presupuesto de iteraciones,
+            # ejecutamos esa action y, si falla también, recursivamente
+            # disparamos otra apology que puede emitir el siguiente paso.
+            # Si tiene success → el loop termina ahí.
+            if follow_action is not None and self._auto_iter_count < 2:
+                self._auto_iter_count += 1
+                _is_safe = follow_action["type"] in _SAFE_ACTIONS
+                if self.auto_actions or _is_safe:
+                    follow_result = self._execute_and_record_action(follow_action)
+                    yield
+                    if not follow_result.get("success", True):
+                        # Encadenamos: el siguiente apology puede emitir
+                        # un nuevo paso. Recursión natural acotada por
+                        # el counter.
+                        yield from self._stream_action_failure_apology(
+                            follow_action, follow_result["result"],
+                        )
         except Exception as e:
             self._handle_grok_error(e, "action_failure_apology")
         yield
