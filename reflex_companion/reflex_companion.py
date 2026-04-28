@@ -1329,6 +1329,36 @@ class State(rx.State):
         else:
             save_json(FACTS_FILE, self.facts)
 
+    def delete_fact(self, hecho: str):
+        """Borra UN fact específico de la memoria por su texto.
+
+        Usado desde el botón ❌ en cada fila del dialog 📋. Si hay
+        duplicados (raro — el dedup de _apply_new_facts evita texto
+        idéntico), borra todos los matches.
+
+        Persistencia: save_json es atómico con backup → si Ashley
+        re-extrae facts del historial después, el fact borrado puede
+        volver. Para borrado permanente sin re-extracción, el user
+        debe ALSO borrar el mensaje del chat history que disparó el
+        fact (no implementado todavía — un button 🗑 en cada chat
+        bubble sería el siguiente paso).
+        """
+        if not hecho:
+            return
+        self.facts = [f for f in self.facts if f.get("hecho") != hecho]
+        save_json(FACTS_FILE, self.facts)
+
+    def clear_all_facts(self):
+        """Borra TODAS las memorias del jefe. Idempotente. Operación
+        destructiva — el dialog UI debe pedir confirm antes de llamar.
+
+        No borra el chat history — solo el fact storage. Si el user
+        sigue conversando con Ashley, el _periodic_fact_extraction
+        puede repoblar facts a partir de mensajes ya en el historial.
+        Para wipe total, el user debe borrar el chat también."""
+        self.facts = []
+        save_json(FACTS_FILE, self.facts)
+
     # ─────────────────────────────────────────
     #  Mood helpers
     # ─────────────────────────────────────────
@@ -4391,10 +4421,53 @@ def index():
                         rx.tabs.trigger(State.t["mem_tab_achievements"], value="achievements"),
                     ),
                     rx.tabs.content(
-                        rx.box(
-                            rx.vstack(rx.foreach(State.facts, fact_item),
-                                      align="stretch", spacing="0"),
-                            height=MEMORY_HEIGHT, overflow_y="auto", padding="16px",
+                        rx.vstack(
+                            rx.box(
+                                rx.vstack(rx.foreach(State.facts, fact_item),
+                                          align="stretch", spacing="0"),
+                                flex="1", overflow_y="auto", padding="16px",
+                            ),
+                            # Botón "borrar todas las memorias" al pie del tab.
+                            # Confirm via dialog AlertDialog para evitar wipe
+                            # accidental — la memoria es valiosa.
+                            rx.alert_dialog.root(
+                                rx.alert_dialog.trigger(
+                                    rx.button(
+                                        rx.text("🗑 ", as_="span"),
+                                        rx.text(State.t["mem_clear_all"], as_="span"),
+                                        size="2",
+                                        variant="soft",
+                                        color_scheme="red",
+                                        cursor="pointer",
+                                        width="100%",
+                                    ),
+                                ),
+                                rx.alert_dialog.content(
+                                    rx.alert_dialog.title(State.t["mem_clear_all_confirm_title"]),
+                                    rx.alert_dialog.description(
+                                        State.t["mem_clear_all_confirm_body"],
+                                        color="#ccc", font_size="13px",
+                                    ),
+                                    rx.flex(
+                                        rx.alert_dialog.cancel(
+                                            rx.button(State.t["cancel"],
+                                                      variant="soft", color_scheme="gray"),
+                                        ),
+                                        rx.alert_dialog.action(
+                                            rx.button(
+                                                State.t["mem_clear_all_confirm_ok"],
+                                                on_click=State.clear_all_facts,
+                                                color_scheme="red",
+                                            ),
+                                        ),
+                                        spacing="3", justify="end", margin_top="16px",
+                                    ),
+                                    bg="#18181f",
+                                    border="1px solid rgba(255,100,120,0.3)",
+                                ),
+                            ),
+                            padding="0 16px 12px 16px", spacing="2",
+                            height=MEMORY_HEIGHT,
                         ),
                         value="facts",
                     ),

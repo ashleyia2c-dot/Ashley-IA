@@ -2165,6 +2165,22 @@ def get_system_state() -> str:
         browser_tabs = active_titles  # fallback: solo pestaña activa
 
     lines: list[str] = []
+    # Nota observacional al inicio: este bloque es CONTEXTO interno para
+    # que Ashley elija la acción correcta (qué proceso cerrar, qué pestaña
+    # tocar, etc.). No es un guion para que lo recite al jefe.
+    # Approach por feedback del user: lenguaje positivo en función ("usa
+    # esto para X"), sin listas tipo "no menciones Y", "no enumeres Z" —
+    # los LLMs imitan reglas negativas y terminan haciendo lo contrario.
+    lines.append(
+        "[Estado actual del PC del jefe — visión interna tuya]"
+    )
+    lines.append(
+        "Esto es lo que ves para poder elegir bien qué acción emitir y "
+        "responder con criterio. Compártelo con el jefe SOLO si te pregunta "
+        "específicamente o si una pieza concreta es relevante para lo que "
+        "ya estabais hablando. La conversación la guía él, no la lista."
+    )
+    lines.append("")
     if apps:
         lines.append("Ventanas abiertas (título | proceso):")
         for title, proc in apps[:25]:
@@ -2176,10 +2192,11 @@ def get_system_state() -> str:
         lines.append("Pestañas del navegador:")
         for t in browser_tabs[:20]:
             lines.append(f"  - \"{t}\"")
-    if not lines:
+    if len(lines) <= 3:
+        # Solo el header + la nota — sin contenido real
         return "No se detectaron ventanas abiertas."
     lines.append("")
-    lines.append("Nota: Para cerrar usa close_window con un fragmento del título o nombre del proceso.")
+    lines.append("Para cerrar usa close_window con un fragmento del título o nombre del proceso.")
     lines.append("Para cerrar una pestaña del navegador usa close_tab con un fragmento del título.")
     return "\n".join(lines)
 

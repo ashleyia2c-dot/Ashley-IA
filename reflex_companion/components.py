@@ -194,6 +194,7 @@ def thinking_indicator():
 # ─────────────────────────────────────────────
 
 def fact_item(f: dict[str, str]):
+    State = _get_state()
     return rx.hstack(
         rx.box(
             rx.text(f["categoria"], font_size="10px", font_weight="bold", color=COLOR_PRIMARY),
@@ -208,6 +209,21 @@ def fact_item(f: dict[str, str]):
             rx.box(
                 rx.text("★" + f["importancia"], font_size="10px", color=COLOR_STATUS_WRITING),
                 bg=COLOR_BG_INPUT, padding="2px 8px", border_radius="99px",
+            ),
+            # Botón ❌ — borra este fact específico. Útil cuando Ashley
+            # insiste con un tema que el user prefiere olvidar (un dato
+            # personal, una preferencia obsoleta, lo que sea).
+            rx.tooltip(
+                rx.button(
+                    "✕",
+                    on_click=State.delete_fact(f["hecho"]),
+                    size="1",
+                    variant="ghost",
+                    color_scheme="gray",
+                    cursor="pointer",
+                    style={"opacity": "0.5", "_hover": {"opacity": "1", "color": "#ff6688"}},
+                ),
+                content="Borrar este recuerdo",
             ),
             spacing="1",
         ),

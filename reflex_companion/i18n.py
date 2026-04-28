@@ -59,6 +59,11 @@ UI = {
         "mem_tastes_empty":   "No tastes saved yet.",
         "mem_tastes_hint":    "Tell Ashley what you like and she'll remember.",
         "mem_close":          "Close",
+        "mem_clear_all":      "Clear all memories",
+        "mem_clear_all_confirm_title": "Clear ALL memories?",
+        "mem_clear_all_confirm_body": "This will permanently delete every fact Ashley has stored about you. The chat history is NOT touched — Ashley may rebuild some facts as you keep talking. Use this if her memories drift in a direction you don't like.",
+        "mem_clear_all_confirm_ok": "Yes, clear them all",
+        "cancel":             "Cancel",
 
         # Action dialog
         "act_title":          "Ashley wants to act",
@@ -270,6 +275,11 @@ UI = {
         "mem_tastes_empty":   "Sin gustos guardados aún.",
         "mem_tastes_hint":    "Cuéntale a Ashley lo que te gusta y ella lo recordará.",
         "mem_close":          "Cerrar",
+        "mem_clear_all":      "Borrar todas las memorias",
+        "mem_clear_all_confirm_title": "¿Borrar TODAS las memorias?",
+        "mem_clear_all_confirm_body": "Esto borra permanentemente cada cosa que Ashley ha guardado sobre ti. El chat NO se toca — Ashley puede reconstruir algunos hechos según sigas hablando con ella. Úsalo si sus recuerdos se han desviado en una dirección que no te gusta.",
+        "mem_clear_all_confirm_ok": "Sí, borrar todo",
+        "cancel":             "Cancelar",
 
         "act_title":          "Ashley quiere actuar",
         "act_intro":          "Ashley propone realizar la siguiente acción en tu PC:",
@@ -470,6 +480,11 @@ UI = {
         "mem_tastes_empty":   "Aucun goût enregistré pour l'instant.",
         "mem_tastes_hint":    "Dis à Ashley ce que tu aimes et elle s'en souviendra.",
         "mem_close":          "Fermer",
+        "mem_clear_all":      "Effacer tous les souvenirs",
+        "mem_clear_all_confirm_title": "Effacer TOUS les souvenirs ?",
+        "mem_clear_all_confirm_body": "Cela supprime de façon permanente tout ce qu'Ashley a stocké sur toi. L'historique du chat n'est PAS touché — Ashley peut reconstruire certains faits en continuant de parler. Utilise ceci si ses souvenirs ont dérivé dans une direction que tu n'aimes pas.",
+        "mem_clear_all_confirm_ok": "Oui, tout effacer",
+        "cancel":             "Annuler",
 
         "act_title":          "Ashley veut agir",
         "act_intro":          "Ashley propose de réaliser l'action suivante sur ton PC :",
