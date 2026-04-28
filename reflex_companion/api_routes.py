@@ -333,6 +333,57 @@ async def _wake_word_resume(request):
                                           status_code=500))
 
 
+async def _wake_word_debug(request):
+    """GET /api/wake_word/debug — devuelve estado completo del detector.
+
+    Útil para diagnosticar:
+      - ¿está corriendo? (is_running)
+      - ¿está paused por grabación manual? (is_paused)
+      - ¿cuántas detecciones hubo desde el arranque? (detection_count)
+      - ¿el modelo .onnx existe y carga? (model_path, model_present)
+    """
+    from .wake_word_lifecycle import is_running, is_paused
+    from .wake_word_bridge import detection_count
+    from . import wake_word as _ww
+    from pathlib import Path
+
+    try:
+        deps_ok, deps_reason = _ww.is_available()
+        model_path = Path(__file__).resolve().parent / "wake_word" / "ashley.onnx"
+        return _with_cors(_StarletteJSON({
+            "is_running": is_running(),
+            "is_paused": is_paused(),
+            "detection_count": detection_count(),
+            "model_path": str(model_path),
+            "model_present": model_path.exists(),
+            "deps_ok": deps_ok,
+            "deps_reason": deps_reason or None,
+        }))
+    except Exception as e:
+        return _with_cors(_StarletteJSON({"error": str(e)}, status_code=500))
+
+
+async def _wake_word_test_trigger(request):
+    """POST /api/wake_word/test_trigger — dispara una "detección" sintética.
+
+    Diagnóstico: si esto arranca grabación en el frontend, el flujo
+    bridge → State bg listener → JS funciona — el problema (si lo hay)
+    está en el detector ↔ mic. Si no arranca, hay un bug en el wiring.
+    """
+    from .wake_word_bridge import signal_detection
+    try:
+        signal_detection(0.99)  # score sintético alto
+        return _with_cors(_StarletteJSON({
+            "ok": True,
+            "message": "Synthetic detection signaled. The bg listener "
+                       "should pick this up within 200ms and trigger "
+                       "the recording in the frontend.",
+        }))
+    except Exception as e:
+        return _with_cors(_StarletteJSON({"ok": False, "error": str(e)},
+                                          status_code=500))
+
+
 def register_routes(app):
     """Insert API routes at the BEGINNING of the Starlette router.
     Include OPTIONS methods for CORS preflight."""
@@ -346,3 +397,8 @@ def register_routes(app):
         "/api/wake_word/pause", _wake_word_pause, methods=["POST", "OPTIONS"]))
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/wake_word/resume", _wake_word_resume, methods=["POST", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/wake_word/debug", _wake_word_debug, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/wake_word/test_trigger", _wake_word_test_trigger,
+        methods=["POST", "OPTIONS"]))

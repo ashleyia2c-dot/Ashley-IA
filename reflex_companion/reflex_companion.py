@@ -662,8 +662,12 @@ class State(rx.State):
                 # Happy path: arranca el detector real
                 ok, reason = _lifecycle.start_detector(
                     model_path=str(model_path),
-                    threshold=0.5,   # el modelo ya está calibrado conservador
-                                     # por max_negative_weight=5000 en training
+                    threshold=0.4,   # bajado de 0.5 — el modelo está
+                                     # calibrado conservador por
+                                     # max_negative_weight=5000, así que
+                                     # un threshold permisivo NO sube FP
+                                     # significativamente pero sí ayuda
+                                     # al recall en mics flojos
                     cooldown_seconds=1.5,
                     use_vad=True,
                 )
@@ -706,8 +710,7 @@ class State(rx.State):
 
         ok, reason = _lifecycle.start_detector(
             model_path=str(model_path),
-            threshold=0.5,   # el modelo está calibrado conservador por
-                             # max_negative_weight=5000 en training
+            threshold=0.4,   # mismo razonamiento que toggle_wake_word_enabled
             cooldown_seconds=1.5,
             use_vad=True,
         )
@@ -740,14 +743,15 @@ class State(rx.State):
             detected, score = _bridge.poll_detection()
             if detected:
                 # Disparar grabación en el frontend.
-                # `ashleyVoice` es el objeto JS global expuesto por
-                # assets/ashley_voice.js. _startRecording() ya existe y
+                # `AshleyVoice` (con A mayúscula) es el objeto JS global
+                # expuesto por assets/ashley_voice.js línea ~746
+                # (window.AshleyVoice = V). _startRecording() existe y
                 # maneja todo (getUserMedia, MediaRecorder, VAD auto-stop,
                 # POST a /api/transcribe, push del texto al chat).
                 async with self:
                     yield rx.call_script(
-                        "if (window.ashleyVoice && window.ashleyVoice._startRecording) "
-                        "{ window.ashleyVoice._startRecording(); }"
+                        "if (window.AshleyVoice && window.AshleyVoice._startRecording) "
+                        "{ window.AshleyVoice._startRecording(); }"
                     )
 
     def set_elevenlabs_key(self, key: str):

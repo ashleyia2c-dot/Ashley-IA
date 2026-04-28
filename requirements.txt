@@ -8,3 +8,21 @@ comtypes
 websockets
 requests
 openai>=1.50.0
+
+# ── Voice / Wake word (v0.14.0) ──────────────────────────────
+# Estas deps tienen que estar instaladas para que el user final
+# tenga voz + wake word out-of-the-box. NO debe descargar nada
+# tras instalar el .exe — todo va bundled en el venv via electron-builder.
+
+# Whisper STT (lazy-loaded en primer click de 🎤):
+faster-whisper>=1.0.0
+
+# Wake word inference + mic capture:
+openwakeword>=0.6.0
+sounddevice>=0.5.0
+soundfile>=0.12.1
+
+# librosa: resampling cuando el mic devuelve sr ≠ 16kHz. Pesada (~80 MB
+# con sus deps numba/llvmlite). Si abulta demasiado el installer,
+# alternativa scipy.signal.resample_poly (ya en numpy/scipy stack).
+librosa>=0.10.1
