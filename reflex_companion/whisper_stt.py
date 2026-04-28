@@ -1,15 +1,20 @@
 """
 whisper_stt.py — Speech-to-Text local con faster-whisper.
 
-Transcribe audio a texto usando el modelo 'base' multilingüe.
-El modelo se descarga la primera vez (~75 MB) y se cachea en
-%APPDATA%\\ashley\\models\\whisper\\ (o equivalente en otros sistemas).
+Transcribe audio a texto usando un modelo multilingüe local. El modelo
+se descarga la primera vez y se cachea en %APPDATA%\\ashley\\models\\
+whisper\\ (o equivalente en otros sistemas).
 
 Puntos clave:
   • Lazy loading: el modelo no se carga hasta la primera transcripción
   • Thread-safe: hay un Lock para evitar cargas paralelas
-  • int8 compute type: máxima velocidad con mínima pérdida de precisión
-  • VAD filter activo: ignora silencios al principio/final
+  • Audio gain normalization PRE-Whisper: susurros (-30dB) se promocionan
+    a -20dB target, lo que ayuda a que Whisper los procese como speech
+    normal en lugar de filtrarlos como ruido
+  • VAD filter activo con threshold bajo (0.3) para no cortar susurros
+  • Modelo y device configurables via env vars (ASHLEY_WHISPER_MODEL,
+    ASHLEY_WHISPER_DEVICE) — para que power users puedan subir a medium
+    o usar GPU sin tocar código.
 """
 
 import os
@@ -18,10 +23,16 @@ import threading
 from typing import Optional
 
 
-# Modelo y configuración
-_MODEL_SIZE = "small"          # ~245 MB multilingüe, alta precisión (~96%)
-_COMPUTE_TYPE = "int8"         # CPU optimizado
-_DEVICE = "cpu"                # CPU por defecto (GPU requiere setup extra)
+# Configuración por defecto. Override via env vars:
+#   ASHLEY_WHISPER_MODEL=tiny|base|small|medium|large-v3|large-v3-turbo
+#   ASHLEY_WHISPER_DEVICE=cpu|cuda  (cuda requiere CUDA + cuDNN instalados)
+#   ASHLEY_WHISPER_COMPUTE=int8|int8_float16|float16|float32
+_MODEL_SIZE = os.getenv("ASHLEY_WHISPER_MODEL", "small")
+_DEVICE = os.getenv("ASHLEY_WHISPER_DEVICE", "cpu")
+_COMPUTE_TYPE = os.getenv(
+    "ASHLEY_WHISPER_COMPUTE",
+    "int8" if _DEVICE == "cpu" else "float16",
+)
 
 _model = None
 _model_lock = threading.Lock()
@@ -80,6 +91,112 @@ def _load_model():
         raise
 
 
+# Gain normalization target. -20 dBFS RMS es típico de speech humano normal.
+# Susurros tienen RMS ~-30 a -40 dBFS. Si normalizamos a -20, Whisper procesa
+# el susurro con la misma "energía" que voz normal y la transcribe mejor.
+_TARGET_RMS_DBFS = -20.0
+# Cap de gain — no amplificamos más de 25 dB (eso es ya 18x el volumen).
+# Más allá empieza a meter ruido del propio mic. 25 dB es buen techo.
+_MAX_GAIN_DB = 25.0
+
+
+def _decode_audio_to_numpy(audio_path: str):
+    """Decodifica un archivo de audio (cualquier formato que ffmpeg lea —
+    webm/opus, mp3, wav, ogg, m4a) a un numpy array float32 mono.
+
+    Returns (audio_np, sample_rate) o (None, None) si falla. Usa PyAV
+    que viene bundled como wheel (sin requerir ffmpeg en el sistema)
+    y es el mismo decoder que faster-whisper usa internamente.
+    """
+    try:
+        import av
+        import numpy as np
+    except ImportError:
+        return None, None
+
+    try:
+        container = av.open(audio_path)
+        try:
+            audio_stream = next(
+                s for s in container.streams if s.type == "audio"
+            )
+        except StopIteration:
+            container.close()
+            return None, None
+
+        sr = audio_stream.codec_context.sample_rate or audio_stream.rate
+        # Decodificar todos los frames y concatenar a un solo array
+        chunks = []
+        for frame in container.decode(audio_stream):
+            arr = frame.to_ndarray()
+            # PyAV puede devolver shape (channels, samples) o (1, samples)
+            if arr.ndim > 1:
+                arr = arr.mean(axis=0)  # mono
+            chunks.append(arr.astype(np.float32, copy=False))
+        container.close()
+
+        if not chunks:
+            return None, None
+        audio = np.concatenate(chunks)
+        # PyAV típicamente da int16 — normalizamos a [-1, 1] float
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        if audio.max() > 1.5 or audio.min() < -1.5:
+            # Probablemente int range — normalize
+            audio = audio / 32768.0
+        return audio, sr
+    except Exception:
+        return None, None
+
+
+def _normalize_audio_gain(audio_path: str) -> str:
+    """Lee el audio, calcula su RMS, y lo amplifica al target si está bajo.
+
+    Devuelve el path al archivo normalizado (un .wav nuevo si normalizamos,
+    o el path original si no era necesario o no pudimos decodificar).
+    Funciona con webm/opus (formato típico de MediaRecorder en Chrome/
+    Electron) gracias a PyAV.
+    """
+    try:
+        import math
+        import numpy as np
+        import soundfile as sf
+    except ImportError:
+        return audio_path
+
+    audio, sr = _decode_audio_to_numpy(audio_path)
+    if audio is None or len(audio) == 0:
+        return audio_path
+
+    # RMS y su dBFS (full-scale = 0 dBFS = clip)
+    rms = float(np.sqrt(np.mean(audio ** 2)))
+    if rms < 1e-6:
+        # Audio silencioso — no normalizamos (sería amplificar puro ruido)
+        return audio_path
+    rms_dbfs = 20.0 * math.log10(rms)
+
+    # ¿Hace falta amplificar?
+    gain_db = _TARGET_RMS_DBFS - rms_dbfs
+    if gain_db <= 0:
+        # El audio ya está al target (o más alto) — no tocar
+        return audio_path
+    gain_db = min(gain_db, _MAX_GAIN_DB)
+    gain_linear = 10.0 ** (gain_db / 20.0)
+
+    amplified = audio * gain_linear
+    # Soft-clip con tanh: smooth, preserva señal mejor que hard clip a [-1,1]
+    amplified = np.tanh(amplified)
+
+    # Guardar como .wav (subtype PCM_16 es universal). soundfile escribe
+    # WAV sin necesitar ffmpeg.
+    out_path = audio_path + ".normalized.wav"
+    try:
+        sf.write(out_path, amplified, sr, subtype="PCM_16")
+        return out_path
+    except Exception:
+        return audio_path
+
+
 def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
     """
     Transcribe audio (webm / wav / mp3 / ogg) a texto.
@@ -101,15 +218,26 @@ def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
         f.write(audio_bytes)
         temp_path = f.name
 
+    # Pre-procesado: amplificar audio bajo (susurros) al rango de speech
+    # normal antes de pasar a Whisper. Si el audio ya está alto, no toca
+    # nada — devuelve el path original.
+    normalized_path = _normalize_audio_gain(temp_path)
+
     try:
         segments, info = model.transcribe(
-            temp_path,
+            normalized_path,
             language=language if language in ("en", "es") else None,
             beam_size=5,              # 5 = precisión alta (1 era rápido pero impreciso)
             vad_filter=True,          # salta silencios
             vad_parameters={
+                # Threshold bajo (0.3) para no cortar susurros — el VAD
+                # default de Silero es 0.5 y a esa exigencia los
+                # susurros normalizados pueden seguir siendo "silencio".
+                "threshold": 0.3,
                 "min_silence_duration_ms": 500,   # antes 300 — cortaba palabras
-                "speech_pad_ms": 200,             # pad alrededor del habla detectada
+                "speech_pad_ms": 300,             # +100ms pad antes/después
+                                                  # — protege bordes en
+                                                  # frases cortas tipo "sí"
             },
             initial_prompt="Ashley, jefe, boss.",  # ayuda a reconocer palabras clave
         )
@@ -120,10 +248,11 @@ def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
                 parts.append(t)
         return " ".join(parts).strip()
     finally:
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
+        for p in {temp_path, normalized_path}:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
 
 
 def warmup():
