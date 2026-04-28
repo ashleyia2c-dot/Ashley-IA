@@ -1468,6 +1468,89 @@ class State(rx.State):
     #  Action execution helper
     # ─────────────────────────────────────────
 
+    def _maybe_dispatch_speculative(self, accumulated_text: str):
+        """Speculative action dispatch durante el streaming.
+
+        Mientras Grok aún streamea su respuesta, vamos parseando el texto
+        acumulado buscando tags `[action:...]` ya CERRADOS. Cuando vemos
+        uno nuevo, lanzamos su `execute_action` en un thread daemon — la
+        acción IO-bound (open_app, play_music, close_tab, browser CDP)
+        empieza a ejecutarse YA, en paralelo con el resto del stream.
+
+        Cuando _finalize_response llega y procesa las acciones, las que ya
+        estaban dispatched simplemente esperan al thread (típicamente ya
+        completado) y reutilizan el resultado, sin re-ejecutar.
+
+        Net wall-clock: para flujos como "abre browser y pon X video",
+        las 2 acciones se solapan con el stream — pasamos de
+        stream(4s) + open_app(2s) + play_music(2s) = 8s a max(stream, IO).
+
+        Solo dispatchamos acciones que serían ejecutables en este turno
+        (auto_actions ON o acción SAFE). Si auto_actions OFF + non-safe,
+        _finalize_response se encarga de mostrar el "blocked" hint.
+
+        Thread snapshot: capturamos browser_opened, cdp_enabled, language
+        en variables locales — los threads NO deben tocar self.* porque
+        Reflex State no es thread-safe.
+        """
+        from .parsing import extract_all_actions as _extract_all
+        from .actions import execute_action as _exec_action
+        import threading
+
+        _, actions_so_far = _extract_all(accumulated_text)
+        if not actions_so_far:
+            return
+
+        # Snapshot — los threads usan estos valores, no self
+        browser_opened = self.browser_opened
+        cdp_enabled = self.cdp_enabled
+        auto_actions = self.auto_actions
+        lang = self.language
+
+        for a in actions_so_far:
+            key = (a["type"], tuple(a.get("params") or []))
+            if key in self._speculative_dispatched:
+                continue
+
+            is_safe = a["type"] in _SAFE_ACTIONS
+            if not (auto_actions or is_safe):
+                # No es ejecutable — finalize mostrará el toggle hint.
+                # NO la marcamos como dispatched así finalize la procesa.
+                continue
+
+            # Reservar slot inmediatamente para evitar dispatch duplicado
+            # en el siguiente chunk de stream (parsing es idempotente).
+            result_holder: dict = {"result": None}
+            self._speculative_dispatched[key] = (None, result_holder)
+
+            def _worker(
+                action_t=a["type"],
+                params=list(a.get("params") or []),
+                holder=result_holder,
+                _bo=browser_opened,
+                _cdp=cdp_enabled,
+                _lang=lang,
+            ):
+                try:
+                    holder["result"] = _exec_action(
+                        action_t, params,
+                        browser_opened=_bo,
+                        lang=_lang,
+                        prefer_cdp=_cdp,
+                    )
+                except Exception as e:
+                    holder["result"] = {
+                        "success": False,
+                        "result": f"Error speculative: {e}",
+                        "screenshot": None,
+                        "browser_opened": _bo,
+                    }
+
+            t = threading.Thread(target=_worker, daemon=True,
+                                 name=f"speculative-{a['type']}")
+            t.start()
+            self._speculative_dispatched[key] = (t, result_holder)
+
     def _execute_and_record_action(self, action_dict, lang=None):
         """Execute an action, update state, append a system_result message
         and save history.
@@ -1543,10 +1626,21 @@ class State(rx.State):
         Iterates *generator* (expected to yield text chunks), accumulates
         them, periodically updates ``self.current_response`` for the UI,
         and stores the full raw result in ``self._last_response``.
+
+        v0.14.1: Speculative action dispatch — cada vez que actualizamos
+        el UI buffer, parseamos las acciones ya cerradas y disparamos
+        las IO-bound en threads daemon. Esto desacopla el wall-clock
+        del stream del wall-clock de las acciones (browser launch,
+        YouTube search, etc) y reduce significativamente el tiempo
+        percibido por el user.
         """
         accumulated = ""
         chunk_count = 0
         empty_count = 0
+
+        # Reset el state de speculative dispatch para este turno.
+        # Map: (action_type, tuple(params)) -> (thread, result_holder dict)
+        self._speculative_dispatched = {}
 
         for text in generator:
             if not text:
@@ -1563,10 +1657,14 @@ class State(rx.State):
 
             if chunk_count % STREAM_CHUNK_SIZE == 0:
                 self.current_response = self._clean_display(accumulated)
+                # Speculative dispatch — acciones cerradas se ejecutan ya
+                self._maybe_dispatch_speculative(accumulated)
                 yield
 
         self.current_response = self._clean_display(accumulated)
         self._last_response = accumulated
+        # Última oportunidad para acciones que aparecieron justo al final
+        self._maybe_dispatch_speculative(accumulated)
         yield
 
     def _build_prompt_context(self, user_message: str = "") -> dict:
@@ -2237,11 +2335,47 @@ class State(rx.State):
         # paramos el loop y mostramos el toggle hint UNA VEZ (en lugar de
         # spamear N bubbles de "actívame el toggle").
         blocked_action = None
+        # v0.14.1: speculative dispatch — _streaming_loop pudo haber
+        # disparado threads daemon para algunas acciones IO-bound mientras
+        # Grok aún streameaba. Si lo hizo, el thread ya terminó (o casi)
+        # cuando llegamos aquí. Reusamos su resultado para no doble-ejecutar.
+        specs = getattr(self, "_speculative_dispatched", {}) or {}
         for current_action in (all_actions or []):
             _is_safe = current_action["type"] in _SAFE_ACTIONS
             if self.auto_actions or _is_safe:
                 # Modo libre o acción segura — ejecutar sin pedir permiso
-                result = self._execute_and_record_action(current_action)
+                key = (current_action["type"], tuple(current_action.get("params") or []))
+                spec = specs.get(key)
+                if spec is not None:
+                    # Pre-dispatched durante stream — esperar al thread
+                    thread, holder = spec
+                    if thread is not None:
+                        thread.join(timeout=3.0)
+                    pre_result = holder.get("result")
+                    if pre_result is not None:
+                        # Reusar el resultado del thread + replicar el
+                        # state mgmt que _execute_and_record_action haría
+                        result = pre_result
+                        self.browser_opened = result.get(
+                            "browser_opened", self.browser_opened,
+                        )
+                        if current_action["type"] == "save_taste":
+                            from .tastes import load_tastes
+                            self.tastes = load_tastes()
+                        ts = now_iso()
+                        self.messages.append({
+                            "role": "system_result",
+                            "content": result["result"],
+                            "timestamp": ts,
+                            "id": f"sys-{ts}",
+                            "image": result.get("screenshot") or "",
+                        })
+                        self.save_history()
+                    else:
+                        # Thread no terminó a tiempo — fallback al path normal
+                        result = self._execute_and_record_action(current_action)
+                else:
+                    result = self._execute_and_record_action(current_action)
                 result_text = result["result"]
                 yield
 
