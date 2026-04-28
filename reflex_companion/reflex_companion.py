@@ -1792,6 +1792,19 @@ class State(rx.State):
                 + (actions_on_fr if self.auto_actions else actions_off_fr)
             )
             capabilities.append(
+                "🌐 Mode navigateur moderne (CDP) : "
+                + (
+                    "ACTIVÉ — tu peux cliquer sur des éléments, taper dans "
+                    "des champs, lire le contenu et faire défiler les pages "
+                    "du navigateur."
+                    if self.cdp_enabled
+                    else "DÉSACTIVÉ — tu ne peux qu'ouvrir/fermer des onglets. "
+                    "Si le patron te demande de cliquer/taper/lire dans une "
+                    "page web, dis-lui d'activer 🌐 Mode navigateur moderne "
+                    "dans Ajustes."
+                )
+            )
+            capabilities.append(
                 "🗣 Naturel (mode voix) : "
                 + ("ACTIVÉ — pas de gestes, pur dialogue." if self.voice_mode
                    else "DÉSACTIVÉ — gestes entre *astérisques* actifs.")
@@ -1818,6 +1831,17 @@ class State(rx.State):
         elif self.language == "en":
             capabilities.append("=== YOUR ACTIVE CAPABILITIES ===")
             capabilities.append(f"⚡ Actions (PC control & awareness): {'ON — you CAN see the boss open windows/tabs, take screenshots, and act on his PC (open apps, close tabs, control volume, etc.).' if self.auto_actions else 'OFF — you are BLIND to the boss PC. You cannot see his windows, tabs, or screen. You cannot control anything. If the boss asks you to open/close/see something, tell him to activate the ⚡ Actions toggle first.'}")
+            capabilities.append(
+                "🌐 Modern browser mode (CDP): "
+                + (
+                    "ON — you can click elements, type in fields, read page "
+                    "contents, and scroll inside the browser."
+                    if self.cdp_enabled
+                    else "OFF — you can only open/close tabs. If the boss "
+                    "asks you to click/type/read inside a web page, tell him "
+                    "to activate 🌐 Modern browser mode in Settings."
+                )
+            )
             capabilities.append(f"🗣 Natural (voice mode): {'ON — no gestures, pure dialogue.' if self.voice_mode else 'OFF — gestures between *asterisks* are active.'}")
             capabilities.append(f"🔊 TTS (voice output): {'ON' if self.tts_enabled else 'OFF'}")
             capabilities.append("")
@@ -1827,6 +1851,19 @@ class State(rx.State):
         else:  # es
             capabilities.append("=== TUS CAPACIDADES ACTIVAS ===")
             capabilities.append(f"⚡ Acciones (control y visión del PC): {'ACTIVADO — PUEDES ver las ventanas/pestañas que tiene abiertas el jefe, tomar capturas de pantalla y actuar en su PC (abrir apps, cerrar pestañas, controlar volumen, etc.).' if self.auto_actions else 'DESACTIVADO — estás CIEGA respecto al PC del jefe. No ves sus ventanas, ni sus pestañas, ni su pantalla. No puedes controlar nada. Si el jefe te pide abrir/cerrar/ver algo, dile que active el toggle ⚡ Acciones primero.'}")
+            capabilities.append(
+                "🌐 Modo browser moderno (CDP): "
+                + (
+                    "ACTIVADO — puedes hacer click en elementos, escribir en "
+                    "campos, leer contenido y scrollear páginas dentro del "
+                    "navegador."
+                    if self.cdp_enabled
+                    else "DESACTIVADO — solo puedes abrir/cerrar pestañas. "
+                    "Si el jefe te pide click/escribir/leer dentro de una "
+                    "página web, dile que active 🌐 Modo browser moderno "
+                    "en Ajustes."
+                )
+            )
             capabilities.append(f"🗣 Natural (modo voz): {'ACTIVADO — sin gestos, diálogo puro.' if self.voice_mode else 'DESACTIVADO — gestos entre *asteriscos* activos.'}")
             capabilities.append(f"🔊 TTS (voz): {'ACTIVADO' if self.tts_enabled else 'DESACTIVADO'}")
             capabilities.append("")
