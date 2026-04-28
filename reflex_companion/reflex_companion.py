@@ -1469,35 +1469,30 @@ class State(rx.State):
     # ─────────────────────────────────────────
 
     def _maybe_dispatch_speculative(self, accumulated_text: str):
-        """Speculative action dispatch durante el streaming.
+        """Speculative action dispatch durante el streaming. Ver doc abajo.
 
-        Mientras Grok aún streamea su respuesta, vamos parseando el texto
-        acumulado buscando tags `[action:...]` ya CERRADOS. Cuando vemos
-        uno nuevo, lanzamos su `execute_action` en un thread daemon — la
-        acción IO-bound (open_app, play_music, close_tab, browser CDP)
-        empieza a ejecutarse YA, en paralelo con el resto del stream.
-
-        Cuando _finalize_response llega y procesa las acciones, las que ya
-        estaban dispatched simplemente esperan al thread (típicamente ya
-        completado) y reutilizan el resultado, sin re-ejecutar.
-
-        Net wall-clock: para flujos como "abre browser y pon X video",
-        las 2 acciones se solapan con el stream — pasamos de
-        stream(4s) + open_app(2s) + play_music(2s) = 8s a max(stream, IO).
-
-        Solo dispatchamos acciones que serían ejecutables en este turno
-        (auto_actions ON o acción SAFE). Si auto_actions OFF + non-safe,
-        _finalize_response se encarga de mostrar el "blocked" hint.
-
-        Thread snapshot: capturamos browser_opened, cdp_enabled, language
-        en variables locales — los threads NO deben tocar self.* porque
-        Reflex State no es thread-safe.
+        Defensa-en-profundidad: cualquier excepción en este método NO debe
+        bloquear el stream. Si el speculative falla, el flow normal de
+        _finalize_response sigue funcionando — solo perdemos el speedup.
         """
-        from .parsing import extract_all_actions as _extract_all
-        from .actions import execute_action as _exec_action
-        import threading
+        # Early-out: si no hay tag de acción en el texto aún, no parseamos
+        # nada. Evita el regex completo en cada chunk del comienzo del
+        # stream cuando aún no llegó la primera acción.
+        if "[action:" not in accumulated_text:
+            return
 
-        _, actions_so_far = _extract_all(accumulated_text)
+        try:
+            from .parsing import extract_all_actions as _extract_all
+            from .actions import execute_action as _exec_action
+            import threading
+        except Exception:
+            # Imports fallaron — no podemos hacer speculative. Stream sigue.
+            return
+
+        try:
+            _, actions_so_far = _extract_all(accumulated_text)
+        except Exception:
+            return
         if not actions_so_far:
             return
 
@@ -1546,10 +1541,15 @@ class State(rx.State):
                         "browser_opened": _bo,
                     }
 
-            t = threading.Thread(target=_worker, daemon=True,
-                                 name=f"speculative-{a['type']}")
-            t.start()
-            self._speculative_dispatched[key] = (t, result_holder)
+            try:
+                t = threading.Thread(target=_worker, daemon=True,
+                                     name=f"speculative-{a['type']}")
+                t.start()
+                self._speculative_dispatched[key] = (t, result_holder)
+            except Exception:
+                # Si threading falla por algún motivo raro, removemos el
+                # slot para que finalize ejecute la acción normalmente.
+                self._speculative_dispatched.pop(key, None)
 
     def _execute_and_record_action(self, action_dict, lang=None):
         """Execute an action, update state, append a system_result message
@@ -1642,6 +1642,14 @@ class State(rx.State):
         # Map: (action_type, tuple(params)) -> (thread, result_holder dict)
         self._speculative_dispatched = {}
 
+        # Timing diagnóstico — útil para diagnosticar lags reportados por
+        # el user. Logs van a ashley.timing logger (visible en stderr/log).
+        import time as _t
+        import logging as _logging
+        _timing_log = _logging.getLogger("ashley.timing")
+        _t_stream_start = _t.monotonic()
+        _t_first_chunk: float | None = None
+
         for text in generator:
             if not text:
                 empty_count += 1
@@ -1651,6 +1659,14 @@ class State(rx.State):
 
             if self.is_thinking:
                 self.is_thinking = False
+
+            if _t_first_chunk is None:
+                _t_first_chunk = _t.monotonic()
+                _ttft = _t_first_chunk - _t_stream_start
+                _timing_log.warning(
+                    "stream TTFT=%.2fs (provider=%s, model=%s)",
+                    _ttft, self.llm_provider, self.llm_model or "default",
+                )
 
             accumulated += text
             chunk_count += 1
@@ -1665,6 +1681,17 @@ class State(rx.State):
         self._last_response = accumulated
         # Última oportunidad para acciones que aparecieron justo al final
         self._maybe_dispatch_speculative(accumulated)
+
+        _t_total = _t.monotonic() - _t_stream_start
+        _ttft_str = (
+            f"{_t_first_chunk - _t_stream_start:.2f}s"
+            if _t_first_chunk is not None else "never"
+        )
+        _timing_log.warning(
+            "stream done: total=%.2fs, TTFT=%s, chars=%d, speculative=%d",
+            _t_total, _ttft_str, len(accumulated),
+            len(self._speculative_dispatched),
+        )
         yield
 
     def _build_prompt_context(self, user_message: str = "") -> dict:
@@ -2347,10 +2374,13 @@ class State(rx.State):
                 key = (current_action["type"], tuple(current_action.get("params") or []))
                 spec = specs.get(key)
                 if spec is not None:
-                    # Pre-dispatched durante stream — esperar al thread
+                    # Pre-dispatched durante stream — esperar brevemente.
+                    # 1s es suficiente: si el thread llevaba 2-3s
+                    # ejecutándose en paralelo al stream y aún no terminó,
+                    # algo va mal y mejor caemos al fallback.
                     thread, holder = spec
                     if thread is not None:
-                        thread.join(timeout=3.0)
+                        thread.join(timeout=1.0)
                     pre_result = holder.get("result")
                     if pre_result is not None:
                         # Reusar el resultado del thread + replicar el

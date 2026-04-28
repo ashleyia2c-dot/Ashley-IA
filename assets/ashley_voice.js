@@ -44,7 +44,7 @@
     _vadHasSpeech: false,   // true tras detectar habla por primera vez
     _vadSilentFrames: 0,    // frames consecutivos bajo el threshold
     _VAD_THRESHOLD: 10,     // volumen mínimo para considerar "habla" (0-255)
-    _VAD_SILENCE_SECS: 4,   // segundos de silencio para auto-stop
+    _VAD_SILENCE_SECS: 3,   // segundos de silencio (sin voz) para auto-stop
 
     currentAudio: null,
     lastSpokenMsgId: null,
@@ -183,7 +183,7 @@
         // ignora silently si el detector no estaba corriendo (idempotente).
         this._wakeWordPause();
 
-        // ── VAD: auto-stop tras 4s de silencio después de hablar ──
+        // ── VAD: auto-stop tras 3s de silencio después de hablar ──
         this._startVAD();
       } catch (e) {
         err('MediaRecorder.start() failed:', e);
