@@ -283,11 +283,39 @@ def _generate_validation_features_from_librispeech():
     print(f"Encontrados {len(flac_files)} .flac. "
           f"Procesando hasta {MAX_SECONDS//60} min en chunks de 2s...")
 
-    # Paso 1: cargar audio y trocear en chunks uniformes
+    # Cargar SAMPLES de ESC-50 para mezclar como background. El validation
+    # set adversarial = speech limpio + speech con TV/música/conversación
+    # de fondo. Eso da FPH medido cercano al real-world (vs LibriSpeech
+    # solo, que es speech limpio = "fácil").
+    bg_paths = list(BG_DIR.glob("*.wav"))
+    bg_audios = []
+    if bg_paths:
+        print(f"Cargando {min(200, len(bg_paths))} backgrounds para mix adversarial...")
+        import random
+        random.seed(42)
+        for bg_path in random.sample(bg_paths, min(200, len(bg_paths))):
+            try:
+                bg, bg_sr = sf.read(str(bg_path))
+                if bg.ndim > 1:
+                    bg = bg.mean(axis=1)
+                if bg_sr != 16000:
+                    from librosa import resample
+                    bg = resample(bg, orig_sr=bg_sr, target_sr=16000)
+                if len(bg) >= CHUNK_SAMPLES:
+                    bg_audios.append(bg[:CHUNK_SAMPLES * 3])  # max 6s por bg
+            except Exception:
+                continue
+        print(f"OK {len(bg_audios)} backgrounds en RAM")
+
+    # Paso 1: cargar audio y trocear en chunks uniformes — con mix opcional
     chunks = []
     total_seconds = 0.0
+    n_clean = 0
+    n_mixed = 0
 
     from tqdm import tqdm
+    import random
+    rng = random.Random(42)
     for flac_path in tqdm(flac_files, desc="Loading FLACs"):
         if total_seconds >= MAX_SECONDS:
             break
@@ -298,12 +326,32 @@ def _generate_validation_features_from_librispeech():
             if sr != 16000:
                 from librosa import resample
                 audio = resample(audio, orig_sr=sr, target_sr=16000)
-            audio_int16 = (audio * 32767).astype(np.int16)
-            duration = len(audio_int16) / 16000
+            duration = len(audio) / 16000
 
-            # Trocear en chunks de 2s, descartar el último si es < 1s
-            for start in range(0, len(audio_int16) - CHUNK_SAMPLES + 1, CHUNK_SAMPLES):
-                chunks.append(audio_int16[start:start + CHUNK_SAMPLES])
+            for start in range(0, len(audio) - CHUNK_SAMPLES + 1, CHUNK_SAMPLES):
+                speech_chunk = audio[start:start + CHUNK_SAMPLES].astype(np.float32)
+
+                # Con 50% probabilidad, mezclar con background a SNR ~10dB
+                # (background audible pero speech sigue dominando)
+                if bg_audios and rng.random() < 0.5:
+                    bg = rng.choice(bg_audios)
+                    bg_start = rng.randint(0, max(0, len(bg) - CHUNK_SAMPLES))
+                    bg_chunk = bg[bg_start:bg_start + CHUNK_SAMPLES].astype(np.float32)
+                    if len(bg_chunk) < CHUNK_SAMPLES:
+                        bg_chunk = np.pad(bg_chunk, (0, CHUNK_SAMPLES - len(bg_chunk)))
+                    # SNR ~10dB: scale bg para que su RMS sea ~1/3 del speech RMS
+                    speech_rms = np.sqrt(np.mean(speech_chunk ** 2)) + 1e-8
+                    bg_rms = np.sqrt(np.mean(bg_chunk ** 2)) + 1e-8
+                    bg_chunk = bg_chunk * (speech_rms / bg_rms) * 0.32
+                    mixed = speech_chunk + bg_chunk
+                    # Clip para evitar overflow
+                    mixed = np.clip(mixed, -1.0, 1.0)
+                    chunks.append((mixed * 32767).astype(np.int16))
+                    n_mixed += 1
+                else:
+                    chunks.append((speech_chunk * 32767).astype(np.int16))
+                    n_clean += 1
+
             total_seconds += duration
         except Exception as e:
             tqdm.write(f"  warn: {flac_path.name}: {e}")
@@ -313,7 +361,8 @@ def _generate_validation_features_from_librispeech():
         print("ERROR: no se pudo trocear ningún .flac en chunks de 2s.")
         sys.exit(1)
 
-    print(f"Total chunks: {len(chunks)} ({len(chunks)*2/60:.1f} min de audio en 2s slices)")
+    print(f"Total chunks: {len(chunks)} "
+          f"(speech limpio: {n_clean}, mezclado adversarial: {n_mixed})")
 
     # Paso 2: embeddings en batch. verify_environment ya descargó los
     # feature models (melspectrogram + embedding) al inicio, así que
@@ -376,11 +425,24 @@ def ensure_rir_and_background():
                 rir_zip = None
 
         if rir_zip and rir_zip.exists():
-            print("Extrayendo RIRs...")
+            print("Extrayendo RIRs (flatten subdirs to top level)...")
             import zipfile
+            # sim_rir_16k.zip tiene estructura subdirs (largeroom/Room001/*.wav).
+            # openwakeword usa os.scandir(top_dir) que da subdirs como "files"
+            # y luego soundfile crashea al intentar abrir un dir como audio.
+            # Solución: extraer directo al top con nombres únicos derivados
+            # del path.
             with zipfile.ZipFile(rir_zip) as z:
-                z.extractall(RIR_DIR)
-            rir_count = len(list(RIR_DIR.rglob("*.wav")))
+                for member in z.namelist():
+                    if not member.endswith(".wav"):
+                        continue
+                    # Generar nombre único uniendo segmentos del path
+                    flat_name = "_".join(Path(member).parts).replace(" ", "_")
+                    target = RIR_DIR / flat_name
+                    if not target.exists():
+                        with z.open(member) as src, open(target, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+            rir_count = len(list(RIR_DIR.glob("*.wav")))
             print(f"OK extraídos {rir_count} RIR a {RIR_DIR}")
 
     # ── Background: ESC-50 ──────────────────────────────────────────────
@@ -422,8 +484,8 @@ def ensure_rir_and_background():
 
 def write_config():
     """Escribe ashley.yaml con la config para openwakeword.train."""
-    n_samples = 8000  # 2x del run inicial — más voces sintéticas = mejor recall
-    n_samples_val = 1000
+    n_samples = 16000  # 4x del run inicial — más voces sintéticas, mejor recall
+    n_samples_val = 2000
     steps = 50000  # auto_train hace seq 1 (steps) + seq 2 (steps/10) + seq 3 (steps/100)
 
     config = f"""# OpenWakeWord training config para "Ashley"
@@ -432,21 +494,43 @@ def write_config():
 # === Target ===
 target_phrase: ["ashley"]
 custom_negative_phrases:
+  # English variants/homophones
   - "actually"
   - "ashes"
   - "ashen"
   - "ashling"
   - "asher"
-  - "asia"
   - "ashtray"
   - "ash tree"
   - "ashlee"
   - "ashleigh"
+  - "ash"
+  - "ashed"
+  - "ashy"
+  - "absolutely"
+  - "actually then"
+  - "actuary"
+  - "ashtin"
+  - "ash three"
+  # Other languages with Ashley-like sounds
+  - "asia"           # /eɪʒə/ similar to "ashley" /æʃli/ end
+  - "ascia"          # italian "axe" /ˈaʃʃa/
+  - "achille"        # french /aʃil/
+  - "ashanti"
+  - "ashfield"
+  - "ashgabat"
+  # Common confusables in conversational speech
+  - "actually I"
+  - "ash and"
+  - "nashville"
+  - "trash"
+  - "smashed"
+  - "lash"
 
 # === Output ===
 model_name: "{WAKE_WORD}"
 model_type: "dnn"
-layer_size: 32
+layer_size: 64  # 2x — más capacidad para discriminar phonemes parecidos
 output_dir: "{OUTPUT_DIR.as_posix()}"
 
 # === Sample generation (Piper TTS) ===
@@ -476,7 +560,10 @@ steps: {steps}
 batch_n_per_class:
   positive: 128
   adversarial_negative: 128
-max_negative_weight: 1500
+# Penalización para falsos positivos durante backprop. 5000 (vs default 1000)
+# fuerza al modelo a optimizar fuertemente para low FP, a costo potencial de
+# 2-3% de recall. Trade-off worth it para wake words consumer.
+max_negative_weight: 5000
 target_false_positives_per_hour: 0.5
 
 # Background features (precomputadas, sirven como validation false-positive set)
