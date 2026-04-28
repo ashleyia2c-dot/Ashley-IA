@@ -74,3 +74,11 @@ wake_word_training/models/
 wake_word_training/piper-sample-generator/
 wake_word_training/ashley.yaml
 wake_word_training/logs/
+
+# Modelo wake word entrenado: vive en reflex_companion/wake_word/ para
+# que el detector lo encuentre en runtime. NO commiteamos los .onnx/
+# .onnx.data porque son binarios que se regeneran con cada training
+# (ver wake_word_training/). El installer (electron-builder) sí los
+# bundlea si están presentes en el momento del build.
+reflex_companion/wake_word/*.onnx
+reflex_companion/wake_word/*.onnx.data

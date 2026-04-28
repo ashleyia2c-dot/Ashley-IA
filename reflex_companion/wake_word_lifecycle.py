@@ -83,6 +83,16 @@ def start_detector(
         # Reset bridge para no consumir signals stale del detector anterior
         wake_word_bridge.reset()
 
+        # Asegurar feature extraction models (melspectrogram, embedding,
+        # silero_vad). openwakeword no los incluye en el pip package — los
+        # descarga on-demand desde GitHub releases (~5 MB total, una sola
+        # vez por venv). Sin esto, AudioFeatures crashea con NO_SUCHFILE.
+        try:
+            from openwakeword.utils import download_models
+            download_models([])  # solo features, no wake words pre-trained
+        except Exception as e:
+            log.warning("download_models failed: %s — detector puede crashear", e)
+
         det = wake_word.WakeWordDetector(
             model_path=model_path,
             threshold=threshold,

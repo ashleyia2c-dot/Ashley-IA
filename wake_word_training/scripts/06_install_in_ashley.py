@@ -18,6 +18,14 @@ import shutil
 import sys
 import subprocess
 
+# Forzar UTF-8 en stdout para evitar UnicodeEncodeError con emojis ⚙️ 🎙
+# cuando el script se redirige a un archivo en Windows (cp1252 default).
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = ROOT.parent
 
@@ -33,7 +41,8 @@ ASHLEY_VENV_PYTHON = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
 
 def ensure_ashley_deps():
     """Verifica que openwakeword + sounddevice están en el venv de Ashley.
-    Si faltan, los instala (con confirm en TTY, automático en non-TTY).
+    Si faltan, los instala. También descarga los feature extraction
+    models (melspec + embedding + silero_vad) en el venv si no están.
     """
     if not ASHLEY_VENV_PYTHON.exists():
         print(f"WARNING: no se encontró el venv de Ashley en {ASHLEY_VENV_PYTHON}")
@@ -48,19 +57,32 @@ def ensure_ashley_deps():
     result = subprocess.run(check_cmd, capture_output=True, text=True)
     if result.returncode == 0 and "OK" in result.stdout:
         print(f"OK Deps de wake word presentes en venv de Ashley")
-        return
+    else:
+        print(f"Faltan deps en venv de Ashley:")
+        print(f"  {result.stderr.strip()}")
+        print(f"Instalando openwakeword + sounddevice en venv de Ashley...")
+        install_cmd = [
+            str(ASHLEY_VENV_PYTHON), "-m", "pip", "install",
+            "openwakeword", "sounddevice",
+        ]
+        subprocess.run(install_cmd, check=True)
+        print(f"OK Deps instaladas")
 
-    print(f"Faltan deps en venv de Ashley:")
-    print(f"  {result.stderr.strip()}")
-
-    # Auto-install — son ~7 MB total
-    print(f"Instalando openwakeword + sounddevice en venv de Ashley...")
-    install_cmd = [
-        str(ASHLEY_VENV_PYTHON), "-m", "pip", "install",
-        "openwakeword", "sounddevice",
+    # Pre-descargar feature extraction models (melspectrogram + embedding
+    # + silero_vad) en el venv de Ashley — son ~5 MB y openwakeword los
+    # necesita para AudioFeatures. Si no se descargan ahora, se
+    # descargan al primer toggle ON, lo cual añade ~10s de delay.
+    print(f"Descargando feature models (melspec + embedding + VAD ~5 MB)...")
+    download_cmd = [
+        str(ASHLEY_VENV_PYTHON), "-c",
+        "from openwakeword.utils import download_models; download_models([])",
     ]
-    subprocess.run(install_cmd, check=True)
-    print(f"OK Deps instaladas")
+    result = subprocess.run(download_cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"OK Feature models presentes en venv de Ashley")
+    else:
+        print(f"WARNING: download_models falló: {result.stderr.strip()[:200]}")
+        print(f"Se descargarán al primer toggle ON del wake word.")
 
 
 def main():

@@ -662,8 +662,8 @@ class State(rx.State):
                 # Happy path: arranca el detector real
                 ok, reason = _lifecycle.start_detector(
                     model_path=str(model_path),
-                    threshold=0.65,  # más estricto que default 0.5 — preferimos
-                                     # que pidas repetir antes que activarse solo
+                    threshold=0.5,   # el modelo ya está calibrado conservador
+                                     # por max_negative_weight=5000 en training
                     cooldown_seconds=1.5,
                     use_vad=True,
                 )
@@ -706,7 +706,8 @@ class State(rx.State):
 
         ok, reason = _lifecycle.start_detector(
             model_path=str(model_path),
-            threshold=0.65,
+            threshold=0.5,   # el modelo está calibrado conservador por
+                             # max_negative_weight=5000 en training
             cooldown_seconds=1.5,
             use_vad=True,
         )
