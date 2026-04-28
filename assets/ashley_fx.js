@@ -226,12 +226,44 @@
     var box = document.getElementById('chat_messages');
     if (!box) { setTimeout(initObservers, 300); return; }
 
-    // Auto-scroll
+    // Auto-scroll inteligente — solo pega al fondo si el user YA estaba
+    // cerca del fondo. Si el user scrolleó arriba (para releer algo),
+    // respetamos su posición y NO le pegamos abajo cuando Ashley actualiza
+    // su mensaje en stream. Cuando el user vuelve cerca del fondo
+    // (scroll manual o navegando), volvemos al modo "stick".
+    //
+    // Bug original: el MutationObserver siempre pegaba abajo en cada
+    // mutation, incluyendo updates del current_response durante stream.
+    // Un user que scrolleaba arriba mientras Ashley escribía era
+    // inmediatamente devuelto al fondo.
+    var stickToBottom = true;
+    var STICK_MARGIN_PX = 80;  // dentro de 80px del fondo = "stuck"
+
+    function recomputeStick() {
+      var distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+      stickToBottom = distanceFromBottom < STICK_MARGIN_PX;
+    }
+
+    // Listener: cada vez que el user (no las mutations programáticas)
+    // mueva el scroll, recalculamos si seguimos "stuck" abajo.
+    box.addEventListener('scroll', recomputeStick, { passive: true });
+    // También con la rueda del mouse y touch — algunos browsers no
+    // disparan scroll para movimientos muy pequeños.
+    box.addEventListener('wheel', function () {
+      // Pequeño delay para que el scroll position se actualice antes de medir
+      setTimeout(recomputeStick, 0);
+    }, { passive: true });
+
     var scrollObs = new MutationObserver(function () {
-      box.scrollTop = box.scrollHeight;
+      if (stickToBottom) {
+        box.scrollTop = box.scrollHeight;
+      }
     });
-    scrollObs.observe(box, { childList: true, subtree: true });
+    scrollObs.observe(box, { childList: true, subtree: true, characterData: true });
+
+    // Initial: arrancamos al fondo
     box.scrollTop = box.scrollHeight;
+    stickToBottom = true;
 
     // ── Sound observer ──────────────────────────────
     // Wait 600 ms for React to finish rendering existing messages,

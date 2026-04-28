@@ -67,9 +67,23 @@ async def _transcribe_endpoint(request):
         return _with_cors(_StarletteJSON({"error": "empty body"}, status_code=400))
     lang = request.query_params.get("lang", None)
     try:
-        from .whisper_stt import transcribe_bytes, is_loaded, is_loading, warmup
-        # Si el modelo no está listo, informar al frontend y seguir descargando
+        from .whisper_stt import (
+            transcribe_bytes, is_loaded, is_loading, warmup, load_error,
+        )
+        # Si el modelo no está listo, informar al frontend y seguir descargando.
+        # PERO: si una carga previa falló (load_error está set), reportamos el
+        # error en vez de re-disparar warmup en loop. Sin esto, cada call al
+        # endpoint reintenta la carga, vuelve a fallar y muestra el banner
+        # "downloading" eternamente al user.
         if not is_loaded():
+            err = load_error()
+            if err:
+                return _with_cors(_StarletteJSON({
+                    "status": "error",
+                    "error": err,
+                    "message": f"Whisper failed to load: {err}",
+                    "message_es": f"Whisper no pudo cargarse: {err}",
+                }, status_code=503))
             if not is_loading():
                 warmup()  # iniciar descarga en background
             return _with_cors(_StarletteJSON({

@@ -662,12 +662,13 @@ class State(rx.State):
                 # Happy path: arranca el detector real
                 ok, reason = _lifecycle.start_detector(
                     model_path=str(model_path),
-                    threshold=0.4,   # bajado de 0.5 — el modelo está
-                                     # calibrado conservador por
-                                     # max_negative_weight=5000, así que
-                                     # un threshold permisivo NO sube FP
-                                     # significativamente pero sí ayuda
-                                     # al recall en mics flojos
+                    threshold=0.55,  # subido de 0.4 — user reportaba que
+                                     # Ashley detectaba "de la nada".
+                                     # 0.55 es estricto pero el modelo
+                                     # entrenado con max_negative_weight
+                                     # =5000 mantiene buen recall en speech
+                                     # claro. Si pierde detecciones reales,
+                                     # bajar a 0.5.
                     cooldown_seconds=1.5,
                     use_vad=True,
                 )
@@ -710,7 +711,7 @@ class State(rx.State):
 
         ok, reason = _lifecycle.start_detector(
             model_path=str(model_path),
-            threshold=0.4,   # mismo razonamiento que toggle_wake_word_enabled
+            threshold=0.55,  # mismo razonamiento que toggle_wake_word_enabled
             cooldown_seconds=1.5,
             use_vad=True,
         )

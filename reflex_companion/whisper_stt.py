@@ -197,6 +197,24 @@ def _normalize_audio_gain(audio_path: str) -> str:
         return audio_path
 
 
+# Umbrales de confianza para descartar transcripciones probablemente
+# espurias (audio de fondo cuando el wake word disparó al detectar un
+# video reproduciendo, ruido del mic, etc).
+#
+# Whisper devuelve en cada segment:
+#   no_speech_prob: probabilidad de que el segment sea silencio/ruido
+#                   (no voz humana). 0=segura voz, 1=segura no-voz.
+#   avg_logprob: logprob promedio de los tokens. Más cerca de 0 = más
+#                seguro de la transcripción. Bajo (e.g. -1.5) = el
+#                modelo no "creía" lo que estaba diciendo.
+#
+# Si TODOS los segments fallan ambos thresholds, asumimos ruido y
+# devolvemos vacío. Ningún listado de palabras concretas — la propia
+# señal de Whisper decide.
+_NO_SPEECH_THRESHOLD = 0.6
+_LOGPROB_THRESHOLD = -1.0
+
+
 def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
     """
     Transcribe audio (webm / wav / mp3 / ogg) a texto.
@@ -242,10 +260,23 @@ def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
             initial_prompt="Ashley, jefe, boss.",  # ayuda a reconocer palabras clave
         )
         parts = []
+        any_confident = False  # ¿algún segment cumplió ambos thresholds?
         for s in segments:
             t = (s.text or "").strip()
-            if t:
-                parts.append(t)
+            if not t:
+                continue
+            parts.append(t)
+            # ¿Este segment es confiable? Si al menos uno lo es, la
+            # transcripción tiene contenido real — la devolvemos entera.
+            no_speech = getattr(s, "no_speech_prob", 0.0)
+            logp = getattr(s, "avg_logprob", 0.0)
+            if no_speech < _NO_SPEECH_THRESHOLD and logp > _LOGPROB_THRESHOLD:
+                any_confident = True
+        if not any_confident:
+            # Todos los segments tenían baja confianza — probable ruido
+            # (video de fondo, mic con TV, etc). Mejor devolver vacío
+            # que meter contenido fantasma al chat.
+            return ""
         return " ".join(parts).strip()
     finally:
         for p in {temp_path, normalized_path}:
