@@ -1694,6 +1694,41 @@ class State(rx.State):
         )
         yield
 
+    def _message_needs_system_state(self, user_message: str) -> bool:
+        """Decide si vale la pena inyectar la lista de ventanas/pestañas
+        abiertas en el system prompt para este turno.
+
+        Sí: el user pidió hacer algo del PC ("abre/cierra/pon/silencia/...")
+            o pidió ver lo que tiene ("qué tengo abierto", "qué hay").
+        No: pregunta general, charla, opinión, dudas. Sin lista de
+            ventanas, Ashley no puede mencionar contenido que no le
+            preguntaron — elimina el filler tipo "veo que tienes X y Y
+            abiertos".
+
+        Vacío o None → no inyectamos (turn de arranque, follow-up
+        proactivo, etc.). Esos casos generan el contexto sin user_message.
+        """
+        if not user_message:
+            return False
+        text = user_message.lower().strip()
+        # Action verbs ya definidos en parsing.py — la fuente de verdad
+        from .parsing import _USER_ACTION_VERBS
+        if any(v in text for v in _USER_ACTION_VERBS):
+            return True
+        # "qué tengo abierto", "qué hay en mi pc", "qué ventanas...",
+        # "muéstrame", etc. — preguntas explícitas del estado del PC
+        state_questions = (
+            "qué tengo abierto", "que tengo abierto",
+            "qué hay abierto", "que hay abierto",
+            "qué ventanas", "que ventanas",
+            "qué pestañas", "que pestañas",
+            "qué apps", "que apps",
+            "muéstrame qué", "muestrame que",
+            "what's open", "what is open",
+            "what windows", "what tabs", "show me what",
+        )
+        return any(q in text for q in state_questions)
+
     def _build_prompt_context(self, user_message: str = "") -> dict:
         """Build the keyword-argument dict expected by ``build_system_prompt``.
 
@@ -1772,30 +1807,49 @@ class State(rx.State):
             capabilities.append("NO interpretes notificaciones, popups ni texto pequeño del screenshot — si no puedes leerlo con 100% de certeza, NO lo menciones. No inventes nombres, tiempos ni mensajes que 'crees ver'.")
 
         system_state: str | None = None
+        # v0.14.2 — Anti-hallucination: solo inyectamos la lista de ventanas
+        # / pestañas si el user de verdad necesita ese contexto. Sin esto,
+        # Ashley recibe "ventanas abiertas: X, Y, Z" en CADA mensaje y los
+        # menciona como filler aunque el user pregunte por algo no
+        # relacionado. Heurística: si el mensaje contiene un verbo de
+        # acción (abrir/cerrar/pon/etc.) o el user pidió "qué tengo
+        # abierto", entonces sí. Si no, solo le decimos sus capabilities
+        # (qué puede/no puede hacer) sin enumerar nada concreto.
         if self.auto_actions:
-            try:
-                from .actions import get_system_state
-                system_state = "\n".join(capabilities) + "\n\n" + get_system_state()
-            except Exception as _e:
-                import logging
-                logging.getLogger("ashley").warning("getting system state: %s", _e)
+            needs_state = self._message_needs_system_state(user_message)
+            if needs_state:
+                try:
+                    from .actions import get_system_state
+                    system_state = "\n".join(capabilities) + "\n\n" + get_system_state()
+                except Exception as _e:
+                    import logging
+                    logging.getLogger("ashley").warning("getting system state: %s", _e)
+                    system_state = "\n".join(capabilities)
+            else:
                 system_state = "\n".join(capabilities)
         else:
             system_state = "\n".join(capabilities)
 
         reminders: str | None = None
         important: str | None = None
+        stale_important: str | None = None
         try:
             from .reminders import (
                 load_reminders, load_important,
                 format_reminders_for_prompt, format_important_for_prompt,
+                get_stale_important_items, format_stale_for_prompt,
             )
             r = format_reminders_for_prompt(load_reminders())
-            i = format_important_for_prompt(load_important())
+            imp_items = load_important()
+            i = format_important_for_prompt(imp_items)
+            stale = get_stale_important_items(imp_items)
+            stale_block = format_stale_for_prompt(stale)
             if r:
                 reminders = r
             if i:
                 important = i
+            if stale_block:
+                stale_important = stale_block
         except Exception as _e:
             import logging
             logging.getLogger("ashley").warning("loading reminders: %s", _e)
@@ -1840,6 +1894,10 @@ class State(rx.State):
             # al system prompt explicando las nuevas acciones (click,
             # type_browser, read_page, scroll_page).
             "cdp_enabled": self.cdp_enabled,
+            # v0.14.2: items importantes con due_date vencida hace >2 días.
+            # Si hay alguno, prompts.py añade un bloque pidiendo a Ashley
+            # que considere (no fuerce) preguntar al user si los limpia.
+            "stale_important": stale_important,
         }
 
     def _detect_recap_warning(self) -> str | None:

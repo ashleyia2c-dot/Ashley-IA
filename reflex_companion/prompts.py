@@ -34,6 +34,7 @@ def build_system_prompt(
     mental_state_block: str | None = None,
     topic_directive: str | None = None,
     cdp_enabled: bool = False,
+    stale_important: str | None = None,
 ) -> str:
     base = _impl(lang).build_system_prompt(
         facts=facts,
@@ -56,7 +57,56 @@ def build_system_prompt(
     # prompts_xx.py — central y consistente.
     if cdp_enabled:
         base = base + "\n\n" + _cdp_capabilities_block(lang)
+    if stale_important:
+        base = base + "\n\n" + _stale_important_block(stale_important, lang)
     return base
+
+
+def _stale_important_block(stale_listing: str, lang: str) -> str:
+    """Bloque que se inyecta cuando hay items importantes con due_date
+    vencida hace >2 días. Approach observacional: le decimos a Ashley
+    qué items son candidatos a limpiar y dejamos que SU criterio decida
+    cuándo preguntarle al user (en mitad de la conversación natural,
+    no como interrupción).
+
+    Sin few-shot examples (per memory feedback) — solo contexto + qué
+    tag emitir cuando el user confirme.
+    """
+    l = (lang or "en").strip().lower()[:2]
+    if l == "es":
+        return (
+            "[ITEMS POSIBLEMENTE PASADOS]\n"
+            "Estos items de la lista de importantes tienen fecha que ya pasó "
+            "hace varios días — quizá el evento ya ocurrió:\n"
+            f"{stale_listing}\n"
+            "Si encaja en la conversación natural (no fuerces el tema), "
+            "considera preguntar al jefe si quiere limpiarlos. Cuando él "
+            "confirme con un sí, emite [action:done_important:ID_o_texto] "
+            "para sacarlo de la lista. Si dice que no, déjalo y no insistas "
+            "el resto del día."
+        )
+    if l == "fr":
+        return (
+            "[ÉLÉMENTS POSSIBLEMENT PASSÉS]\n"
+            "Ces éléments de la liste d'importants ont une date passée "
+            "depuis plusieurs jours — l'événement a peut-être eu lieu :\n"
+            f"{stale_listing}\n"
+            "Si la conversation s'y prête (sans forcer), envisage de "
+            "demander au patron s'il veut les nettoyer. Quand il confirme, "
+            "émets [action:done_important:ID_ou_texte] pour le retirer. "
+            "S'il dit non, laisse tomber et n'insiste pas le reste de la "
+            "journée."
+        )
+    return (
+        "[POSSIBLY PAST ITEMS]\n"
+        "These items in the important list have a due date that passed "
+        "several days ago — the event may already be over:\n"
+        f"{stale_listing}\n"
+        "If it fits the natural conversation (don't force it), consider "
+        "asking the boss whether to clean them up. When he confirms with "
+        "a yes, emit [action:done_important:ID_or_text] to remove it. If "
+        "he says no, leave it alone and don't bring it up again today."
+    )
 
 
 def _cdp_capabilities_block(lang: str) -> str:

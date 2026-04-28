@@ -1753,8 +1753,18 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
 
         elif action_type == "add_important":
             from .reminders import add_important
+            # Soporta dos formatos:
+            #   [action:add_important:texto]                       (legacy)
+            #   [action:add_important:YYYY-MM-DDTHH:MM:texto]       (con fecha)
+            # parsing.py separa por ":" antes del texto; si el primer
+            # param parece ISO datetime, lo tratamos como due_date.
+            import re as _re
             text = params[0] if params else ""
-            return {"success": True, "result": add_important(text),
+            due_date = None
+            if len(params) > 1 and _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", params[0]):
+                due_date = params[0]
+                text = params[1]
+            return {"success": True, "result": add_important(text, due_date=due_date),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "done_important":

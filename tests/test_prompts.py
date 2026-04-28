@@ -188,3 +188,47 @@ def test_reminders_absent_when_none():
     """When reminders is None, no PENDING REMINDERS section appears."""
     result = build_system_prompt([], [], reminders=None, lang="en")
     assert "=== PENDING REMINDERS ===" not in result
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  stale_important block (v0.14.2)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_stale_important_block_appears_es():
+    """Con stale_important set, el prompt ES incluye el bloque + action."""
+    listing = "  - [abc] Reunion (vencio 10/04/2026 a las 15:00)"
+    out = build_system_prompt([], [], lang="es", stale_important=listing)
+    assert "ITEMS POSIBLEMENTE PASADOS" in out
+    assert "abc" in out
+    assert "done_important" in out
+
+
+def test_stale_important_block_appears_en():
+    listing = "  - [abc] Past meeting (due 04/10/2026)"
+    out = build_system_prompt([], [], lang="en", stale_important=listing)
+    assert "POSSIBLY PAST ITEMS" in out
+    assert "done_important" in out
+
+
+def test_stale_important_absent_when_none():
+    """Sin stale items, no se inyecta el bloque."""
+    out = build_system_prompt([], [], lang="es", stale_important=None)
+    assert "ITEMS POSIBLEMENTE PASADOS" not in out
+
+
+def test_stale_important_block_is_observational():
+    """El bloque _stale_important_block usa lenguaje observacional, no
+    imperativo negativo. Es importante para que el LLM no haga lo
+    opuesto a lo pedido (memoria del proyecto: "feedback_no_few_shot
+    _ashley" + el user dice que reglas tipo 'no hagas X' la inducen
+    a hacer X)."""
+    from reflex_companion.prompts import _stale_important_block
+    listing = "  - [x] item"
+    out_es = _stale_important_block(listing, "es")
+    # Bloque NO usa "no inventes" / "nunca" como mecanismo principal
+    assert "no inventes" not in out_es.lower()
+    assert "nunca menciones" not in out_es.lower()
+    # Sí menciona la action positiva a emitir cuando confirme el user
+    assert "done_important" in out_es
+    # Y hace explícito el "no fuerces" — observacional, no rule-based
+    assert "no fuerces" in out_es.lower()

@@ -224,7 +224,17 @@ def extract_action(text: str) -> tuple[str, dict | None]:
     elif a_type == "remind":
         # remind:YYYY-MM-DDTHH:MM:SS:texto — datetime tiene ":" propios
         params = parse_remind_params(rest)
-    elif a_type in ("add_important", "done_important"):
+    elif a_type == "add_important":
+        # Soporta dos formatos:
+        #   [action:add_important:texto]                          (legacy)
+        #   [action:add_important:YYYY-MM-DDTHH:MM:texto]          (con fecha)
+        # Si el inicio parsea como ISO datetime, split en (fecha, texto).
+        # Si no, todo es texto sin fecha — comportamiento original.
+        params = parse_remind_params(rest) if rest else []
+        # parse_remind_params devuelve [date, text] si match, o [rest] si no.
+        # Para legacy "Llamar al médico antes del viernes" sin fecha, devolverá
+        # [rest] que es exactamente lo que add_important espera como texto.
+    elif a_type == "done_important":
         params = [rest] if rest else []
     elif a_type == "save_taste":
         inner = rest.find(":")

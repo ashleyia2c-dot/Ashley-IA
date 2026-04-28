@@ -211,3 +211,117 @@ def test_format_important_for_prompt_excludes_done():
     assert "Done task" not in result
     assert "Pending task" in result
     assert "x2" in result
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  add_important con fecha (v0.14.2)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_add_important_with_due_date():
+    """add_important guarda due_date cuando se le pasa."""
+    msg = reminders.add_important("Llamar al médico", due_date="2026-05-10T15:00:00")
+    item = reminders.load_important()[0]
+    assert item["text"] == "Llamar al médico"
+    assert item["due_date"] == "2026-05-10T15:00:00"
+    # El mensaje incluye la fecha formateada
+    assert "10/05/2026" in msg
+
+
+def test_add_important_without_due_date_legacy():
+    """Sin due_date sigue funcionando (backward compat)."""
+    msg = reminders.add_important("Tarea sin fecha")
+    item = reminders.load_important()[0]
+    assert item["text"] == "Tarea sin fecha"
+    assert "due_date" not in item
+
+
+def test_format_important_shows_date_when_present():
+    """Items con due_date muestran la fecha formateada al inyectar al prompt."""
+    items = [
+        {"id": "a", "text": "Reunión", "done": False,
+         "due_date": "2026-05-10T15:00:00"},
+        {"id": "b", "text": "Sin fecha", "done": False},
+    ]
+    out = reminders.format_important_for_prompt(items)
+    assert "Reunión" in out and "10/05/2026" in out
+    assert "Sin fecha" in out
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Stale important items
+# ══════════════════════════════════════════════════════════════════════
+
+def test_stale_items_detected_after_due_date():
+    """Item con due_date hace 5 días aparece en stale."""
+    five_days_ago = (datetime.now() - timedelta(days=5)).isoformat()
+    items = [{"id": "x", "text": "Evento pasado", "done": False,
+              "due_date": five_days_ago}]
+    stale = reminders.get_stale_important_items(items, days=2)
+    assert len(stale) == 1
+    assert stale[0]["id"] == "x"
+
+
+def test_stale_items_excludes_recent():
+    """Items con due_date hoy NO son stale."""
+    today = datetime.now().isoformat()
+    items = [{"id": "x", "text": "Hoy", "done": False, "due_date": today}]
+    assert reminders.get_stale_important_items(items, days=2) == []
+
+
+def test_stale_items_excludes_done():
+    """Items ya marcados done NO aparecen en stale aunque su fecha haya pasado."""
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    items = [{"id": "x", "text": "Done", "done": True, "due_date": week_ago}]
+    assert reminders.get_stale_important_items(items, days=2) == []
+
+
+def test_stale_items_excludes_no_due_date():
+    """Items sin due_date NUNCA son stale (no podemos inferir vencimiento)."""
+    items = [{"id": "x", "text": "Sin fecha", "done": False}]
+    assert reminders.get_stale_important_items(items, days=2) == []
+
+
+def test_format_stale_for_prompt():
+    """format_stale_for_prompt produce un listing legible."""
+    week_ago = (datetime.now() - timedelta(days=5)).isoformat()
+    stale = [{"id": "abc123", "text": "Evento ya pasó",
+              "due_date": week_ago, "done": False}]
+    out = reminders.format_stale_for_prompt(stale)
+    assert "abc123" in out
+    assert "Evento ya pasó" in out
+    assert "venció" in out.lower()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Reminder GC (housekeeping)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_reminder_gc_keeps_pending():
+    """Reminders no-fired NO se borran (GC solo afecta a fired)."""
+    reminders.add_reminder("Future event", "2030-01-01T00:00:00")
+    items = reminders.load_reminders()
+    assert len(items) == 1
+
+
+def test_reminder_gc_keeps_recently_fired():
+    """Reminder fired hace 1 día NO se purga (cutoff es 7 días)."""
+    reminders.add_reminder("Recent", "2026-04-26T10:00:00")
+    rid = reminders.load_reminders()[0]["id"]
+    reminders.mark_reminder_fired(rid)  # fired_at = now
+    items = reminders.load_reminders()
+    assert len(items) == 1
+    assert items[0]["fired"] is True
+
+
+def test_reminder_gc_purges_old_fired(tmp_path, monkeypatch):
+    """Reminder fired hace >7 días se elimina al hacer load."""
+    # Inyectamos manualmente un fired reminder con fired_at viejo
+    from reflex_companion.memory import save_json
+    old_fired_at = (datetime.now() - timedelta(days=10)).isoformat()
+    save_json(reminders.REMINDERS_FILE, [{
+        "id": "old", "text": "Viejo", "datetime": "2025-01-01T00:00:00",
+        "created_at": "2025-01-01T00:00:00", "fired": True,
+        "fired_at": old_fired_at,
+    }])
+    items = reminders.load_reminders()
+    assert items == []  # GC borró el viejo
