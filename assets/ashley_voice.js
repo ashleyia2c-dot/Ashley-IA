@@ -332,11 +332,18 @@
             const data = await resp.json();
             if (data && data.error) errMsg = data.error;
           } catch {}
+          // 503 = error de carga conocido (load_error cacheado).
+          // 500 = exception genérico, posiblemente primera carga aún en marcha.
+          // Otros = transient.
+          const helpHint = resp.status === 500
+            ? '\n\nFirst use loads the speech model. Try again in 30 seconds.'
+            : '';
+          const helpHintEs = resp.status === 500
+            ? '\n\nEl primer uso carga el modelo de voz. Prueba en 30 segundos.'
+            : '';
           this._alert(this._i18n(
-            'Transcription error: ' + errMsg +
-            (resp.status === 500 ? '\n\nFirst use downloads a 75 MB Whisper model. Try again in 1-2 minutes.' : ''),
-            'Error de transcripción: ' + errMsg +
-            (resp.status === 500 ? '\n\nEl primer uso descarga un modelo Whisper de 75 MB. Prueba de nuevo en 1-2 minutos.' : '')
+            'Transcription error: ' + errMsg + helpHint,
+            'Error de transcripción: ' + errMsg + helpHintEs,
           ));
           return;
         }

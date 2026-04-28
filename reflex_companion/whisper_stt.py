@@ -242,23 +242,41 @@ def transcribe_bytes(audio_bytes: bytes, language: Optional[str] = None) -> str:
     normalized_path = _normalize_audio_gain(temp_path)
 
     try:
-        segments, info = model.transcribe(
-            normalized_path,
-            language=language if language in ("en", "es") else None,
-            beam_size=5,              # 5 = precisión alta (1 era rápido pero impreciso)
-            vad_filter=True,          # salta silencios
-            vad_parameters={
-                # Threshold bajo (0.3) para no cortar susurros — el VAD
-                # default de Silero es 0.5 y a esa exigencia los
-                # susurros normalizados pueden seguir siendo "silencio".
-                "threshold": 0.3,
-                "min_silence_duration_ms": 500,   # antes 300 — cortaba palabras
-                "speech_pad_ms": 300,             # +100ms pad antes/después
-                                                  # — protege bordes en
-                                                  # frases cortas tipo "sí"
-            },
-            initial_prompt="Ashley, jefe, boss.",  # ayuda a reconocer palabras clave
-        )
+        try:
+            segments, info = model.transcribe(
+                normalized_path,
+                language=language if language in ("en", "es") else None,
+                beam_size=5,              # 5 = precisión alta (1 era rápido pero impreciso)
+                vad_filter=True,          # salta silencios
+                vad_parameters={
+                    # Threshold bajo (0.3) para no cortar susurros — el VAD
+                    # default de Silero es 0.5 y a esa exigencia los
+                    # susurros normalizados pueden seguir siendo "silencio".
+                    "threshold": 0.3,
+                    "min_silence_duration_ms": 500,   # antes 300 — cortaba palabras
+                    "speech_pad_ms": 300,             # +100ms pad antes/después
+                                                      # — protege bordes en
+                                                      # frases cortas tipo "sí"
+                },
+                initial_prompt="Ashley, jefe, boss.",  # ayuda a reconocer palabras clave
+            )
+        except Exception as decode_err:
+            # Errores típicos:
+            #   - AVERROR_INVALIDDATA (errno 1094995529): el webm/opus
+            #     que mandó MediaRecorder está corrupto o truncado —
+            #     suele pasar con grabaciones MUY cortas (<200ms) o
+            #     cuando el wake word disparó pero el user no llegó
+            #     a hablar.
+            #   - OSError de I/O temporal.
+            # En cualquier caso, mejor devolver "" (frontend skipea texts
+            # vacíos en silencio) que dejar burbujear una alert al user
+            # con un errno hexadecimal sin contexto.
+            import logging
+            logging.getLogger("ashley.whisper").warning(
+                "transcribe failed on %s: %s — returning empty",
+                normalized_path, decode_err,
+            )
+            return ""
         parts = []
         any_confident = False  # ¿algún segment cumplió ambos thresholds?
         for s in segments:
