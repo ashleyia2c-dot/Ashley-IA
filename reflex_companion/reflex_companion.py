@@ -2744,7 +2744,7 @@ class State(rx.State):
         should_continue = (
             executed_count == 1
             and not any_failed  # failures ya disparan apology (también itera)
-            and self._auto_iter_count < 2
+            and self._auto_iter_count < 1  # cap 1 follow-up = 2 turns max
         )
         if should_continue:
             self._auto_iter_count += 1
@@ -2758,8 +2758,13 @@ class State(rx.State):
 
         Si emite una acción nueva, la ejecutamos. Si esa también lleva a
         un plan incompleto, el siguiente turn lo dispara la recursión
-        natural del counter (max 2 iteraciones).
+        natural del counter (max 1 follow-up por mensaje del user).
         """
+        import time as _t
+        import logging as _logging
+        _t_start = _t.monotonic()
+        _timing_log = _logging.getLogger("ashley.timing")
+
         self.is_thinking = True
         self.current_response = ""
         yield
@@ -2807,7 +2812,12 @@ class State(rx.State):
             )
 
         try:
-            yield from self._stream_with_trigger(trigger)
+            # fast_mode → xAI usa non-reasoning (ahorra ~3s).
+            # concise_context → cualquier provider envía menos history
+            # (ahorra tokens + TTFT en OR/Ollama también).
+            yield from self._stream_with_trigger(
+                trigger, fast_mode=True, concise_context=True,
+            )
             cont_text = self._last_response
             ct_clean, ct_mood = self._extract_mood(cont_text)
             ct_clean, ct_aff = self._extract_affection(ct_clean)
@@ -2841,6 +2851,11 @@ class State(rx.State):
                         )
         except Exception as e:
             self._handle_grok_error(e, "action_continuation")
+
+        _timing_log.warning(
+            "continuation done: total=%.2fs, iter=%d/1",
+            _t.monotonic() - _t_start, self._auto_iter_count,
+        )
         yield
 
     # ─────────────────────────────────────────
@@ -4123,15 +4138,39 @@ class State(rx.State):
     #  Acciones del sistema
     # ─────────────────────────────────────────
 
-    def _stream_with_trigger(self, trigger: str):
-        """Streaming usando un trigger invisible (no aparece en el chat)."""
+    def _stream_with_trigger(self, trigger: str, fast_mode: bool = False,
+                              concise_context: bool = False):
+        """Streaming usando un trigger invisible (no aparece en el chat).
+
+        fast_mode=True fuerza modelo non-reasoning para este turn —
+        solo aplica al path xAI directo (en OR/Ollama el user eligió su
+        modelo y no asumimos cuál es el "fast" equivalente). Ahorra
+        ~3s de TTFT.
+
+        concise_context=True recorta el historial pasado al modelo a
+        los últimos N mensajes — funciona en TODOS los providers,
+        ahorra tokens de input y TTFT. Útil en follow-ups internos
+        (continuation, apology) donde Ashley solo necesita ver los
+        eventos recientes para decidir el siguiente paso, no toda la
+        conversación. Diferencia típica: full history puede ser >5KB,
+        últimos 6 messages típicamente <1KB.
+        """
         from .grok_client import stream_response
 
         ctx = self._build_prompt_context()
         system_prompt = build_system_prompt(self.facts, self.diary, **ctx)
 
+        if concise_context:
+            # Últimos 6 messages — suficiente para ver: user_msg original,
+            # respuesta de Ashley, system_result(s) de las acciones, y
+            # context para decidir el siguiente paso.
+            messages_to_send = self.messages[-6:]
+        else:
+            messages_to_send = self.messages
+
         yield from self._streaming_loop(
-            stream_response(self.messages, system_prompt, trigger=trigger)
+            stream_response(messages_to_send, system_prompt,
+                            trigger=trigger, fast_mode=fast_mode)
         )
 
     def _stream_action_failure_apology(self, action: dict, error_msg: str):
@@ -4191,7 +4230,13 @@ class State(rx.State):
             )
 
         try:
-            yield from self._stream_with_trigger(trigger)
+            # fast_mode (xAI) + concise_context (cualquier provider) —
+            # apology no necesita el TTFT del reasoning ni todo el chat
+            # history. Ashley solo reacciona al fail con su voz +
+            # opcional siguiente acción.
+            yield from self._stream_with_trigger(
+                trigger, fast_mode=True, concise_context=True,
+            )
             apology_text = self._last_response
             ap_clean, ap_mood = self._extract_mood(apology_text)
             ap_clean, ap_aff = self._extract_affection(ap_clean)
@@ -4220,7 +4265,7 @@ class State(rx.State):
             # ejecutamos esa action y, si falla también, recursivamente
             # disparamos otra apology que puede emitir el siguiente paso.
             # Si tiene success → el loop termina ahí.
-            if follow_action is not None and self._auto_iter_count < 2:
+            if follow_action is not None and self._auto_iter_count < 1:
                 self._auto_iter_count += 1
                 _is_safe = follow_action["type"] in _SAFE_ACTIONS
                 if self.auto_actions or _is_safe:

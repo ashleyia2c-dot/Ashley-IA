@@ -322,6 +322,7 @@ def stream_response(
     system_prompt: str,
     use_web_search: bool = False,
     trigger: str | None = None,
+    fast_mode: bool = False,
 ) -> Iterator[str]:
     """
     Genera chunks de texto de la respuesta de Grok.
@@ -330,6 +331,11 @@ def stream_response(
     - messages:       historial (ya incluye el último mensaje del usuario)
     - use_web_search: activa la búsqueda web via Agent Tools API
     - trigger:        mensaje de usuario artificial (útil en initiative)
+    - fast_mode:      si True, fuerza el modelo non-reasoning incluso si el
+                      user tiene reasoning configurado. Para follow-ups
+                      automáticos (continuation, apology) donde Ashley ya
+                      tiene plan claro y reasoning añade ~3s de TTFT
+                      innecesario. Solo aplica al path xAI directo.
 
     Retries: si la conexión inicial falla (antes del primer chunk), hasta
     3 intentos con 1s/2s/4s. Si falla mid-stream (ya emitimos tokens),
@@ -344,6 +350,14 @@ def stream_response(
 
     # Si el user usa OpenRouter/Ollama → path OpenAI-compatible. Sin
     # web_search (no soportado en ese path) y sin el formato xai_sdk.
+    # Nota sobre fast_mode: solo aplica al path xAI (donde sabemos que
+    # existe grok-4-1-fast-non-reasoning como alternativa rápida). En
+    # OR/Ollama mantenemos el modelo que el user eligió — no podemos
+    # asumir cuál sería el equivalente "fast" del modelo configurado
+    # (Claude Sonnet/Haiku, Gemini Flash/Pro, Llama X/Y, etc.). El cap
+    # de 1 follow-up sigue ayudando ahí. Si el provider soporta prompt
+    # caching automático (xAI/OpenRouter sí), el system prompt repetido
+    # en el follow-up se sirve cacheado y baja el TTFT también.
     if is_openai_compat():
         # Retry de apertura manejado implícitamente por openai_compat_stream
         # (aunque si falla mid-stream también propaga, igual que xAI).
@@ -359,13 +373,22 @@ def stream_response(
     from xai_sdk.chat import system, user as xai_user, assistant, image as xai_image
     from xai_sdk.tools import web_search
 
+    # fast_mode: para follow-ups internos (continuation, apology) usamos
+    # non-reasoning. Benchmark live (2026-04): TTFT reasoning ~3.4s vs
+    # non-reasoning ~0.6s = ahorro de ~2.8s por follow-up. El user ve
+    # el chat principal con su modelo elegido (fast_mode=False); solo
+    # los turns automáticos invisibles usan el modelo rápido.
+    _model_to_use = (
+        "grok-4-1-fast-non-reasoning" if fast_mode else GROK_MODEL
+    )
+
     def _open_stream():
         """Prepara el chat y devuelve el iterador de chunks de Grok."""
         tools = [web_search()] if use_web_search else []
         client = Client(api_key=XAI_API_KEY)
         chat = _chat_create(
             client,
-            model=GROK_MODEL,
+            model=_model_to_use,
             tools=tools if tools else None,
         )
         chat.append(system(system_prompt))
