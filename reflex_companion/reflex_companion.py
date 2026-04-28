@@ -2560,6 +2560,12 @@ class State(rx.State):
         # paramos el loop y mostramos el toggle hint UNA VEZ (en lugar de
         # spamear N bubbles de "actívame el toggle").
         blocked_action = None
+        # v0.14.4 — agentic continuation: acumulamos resultados del primer
+        # turn para evaluar al final si vale la pena dispararle a Ashley
+        # un follow-up automático cuando el plan multi-step parece
+        # incompleto (ej: user pidió "abre yt, pon video, dale like" y
+        # Ashley solo emitió 1 acción de search/setup).
+        executed_results: list[dict] = []
         # v0.14.1: speculative dispatch — _streaming_loop pudo haber
         # disparado threads daemon para algunas acciones IO-bound mientras
         # Grok aún streameaba. Si lo hizo, el thread ya terminó (o casi)
@@ -2607,6 +2613,10 @@ class State(rx.State):
                 else:
                     result = self._execute_and_record_action(current_action)
                 result_text = result["result"]
+                executed_results.append({
+                    "action": current_action,
+                    "result": result,
+                })
                 yield
 
                 # v0.13.20: si la acción falló, Ashley reacciona en
@@ -2715,6 +2725,139 @@ class State(rx.State):
             except Exception as e:
                 self._handle_grok_error(e, "action_blocked_followup")
             yield
+            return  # plan abortado por toggle OFF; nada que continuar
+
+        # ── Agentic continuation (v0.14.4) ──────────────────────────
+        # Si el user pidió multi-step (varios verbos de acción en su
+        # mensaje) y Ashley solo ejecutó 1 acción exitosa, probablemente
+        # el plan no terminó. Le damos un follow-up automático para que
+        # vea el [system_result] y emita el siguiente paso.
+        # Cap: 2 iteraciones extras (3 turns total) por mensaje del user.
+        last_user = self._last_user_message or ""
+        any_failed = any(not r["result"].get("success", True) for r in executed_results)
+        executed_count = len(executed_results)
+        should_continue = (
+            executed_count >= 1
+            and not any_failed  # failures ya disparan apology que también itera
+            and self._auto_iter_count < 2
+            and self._user_message_implies_multi_step(last_user)
+        )
+        if should_continue:
+            self._auto_iter_count += 1
+            yield from self._stream_action_continuation(executed_results)
+
+    def _user_message_implies_multi_step(self, user_msg: str) -> bool:
+        """Heurística: ¿el mensaje del user sugiere más de una acción?
+
+        Cuenta verbos de acción del set existente _USER_ACTION_VERBS. Si
+        hay 2 o más matches, asumimos plan multi-step. Heurística genérica
+        — no listas de phrases concretas, solo el conteo del vocabulario
+        que ya tenemos centralizado en parsing.py.
+        """
+        if not user_msg:
+            return False
+        text = user_msg.lower()
+        from .parsing import _USER_ACTION_VERBS
+        matches = 0
+        for v in _USER_ACTION_VERBS:
+            if v in text:
+                matches += 1
+                if matches >= 2:
+                    return True
+        return False
+
+    def _stream_action_continuation(self, executed_results: list[dict]):
+        """Dispara un turn automático de Grok cuando el plan multi-step
+        del user parece incompleto. Ashley ve los [system_result]s en su
+        historial y, con un trigger observacional (sin ejemplos), decide
+        si emite el siguiente paso o cierra el plan.
+
+        Si emite una acción nueva, la ejecutamos. Si esa también lleva a
+        un plan incompleto, el siguiente turn lo dispara la recursión
+        natural del counter (max 2 iteraciones).
+        """
+        self.is_thinking = True
+        self.current_response = ""
+        yield
+
+        n_done = len(executed_results)
+        if (self.language or "en").startswith("es"):
+            trigger = (
+                f"[CONTINUACIÓN AUTOMÁTICA DEL PLAN] El jefe te pidió "
+                f"varios pasos en su mensaje original. Has ejecutado "
+                f"{n_done} acción(es) hasta ahora. Mira el último "
+                f"[system_result] del historial: ¿el plan está completo "
+                f"o falta un paso?\n\n"
+                f"Si falta — emite la siguiente acción en tu voz "
+                f"natural (1-2 frases breves + el tag). Si el resultado "
+                f"intermedio cambió la situación (algo no salió como "
+                f"esperabas), ajusta el plan en lugar de continuar a "
+                f"ciegas. Si crees que está completo o necesitas "
+                f"información del jefe, dilo y NO emitas tag."
+            )
+        elif (self.language or "en").startswith("fr"):
+            trigger = (
+                f"[CONTINUATION AUTOMATIQUE DU PLAN] Le patron t'a "
+                f"demandé plusieurs étapes. Tu en as exécuté {n_done}. "
+                f"Regarde le dernier [system_result] : le plan est-il "
+                f"complet ou manque-t-il une étape ?\n\n"
+                f"S'il manque, émets la suivante dans ta voix (1-2 "
+                f"phrases + le tag). Si un résultat intermédiaire change "
+                f"la donne, ajuste au lieu de continuer aveuglément. Si "
+                f"tu juges que c'est terminé ou tu as besoin d'aide du "
+                f"patron, dis-le SANS émettre de tag."
+            )
+        else:
+            trigger = (
+                f"[AUTOMATIC PLAN CONTINUATION] The boss asked for "
+                f"several steps in his original message. You've executed "
+                f"{n_done} action(s) so far. Check the last "
+                f"[system_result] in history: is the plan complete or is "
+                f"a step missing?\n\n"
+                f"If missing — emit the next action in your natural "
+                f"voice (1-2 short sentences + the tag). If an "
+                f"intermediate result changed the situation (something "
+                f"didn't go as you expected), adjust the plan instead of "
+                f"blindly continuing. If you think it's done or need "
+                f"information from the boss, say so and do NOT emit a tag."
+            )
+
+        try:
+            yield from self._stream_with_trigger(trigger)
+            cont_text = self._last_response
+            ct_clean, ct_mood = self._extract_mood(cont_text)
+            ct_clean, ct_aff = self._extract_affection(ct_clean)
+            ct_clean, follow_action = self._extract_action(ct_clean)
+            self._apply_affection_delta(ct_aff)
+            self.mood = ct_mood
+            self.current_response = ""
+            ts = now_iso()
+            self.messages.append({
+                "role": "assistant",
+                "content": _clean_display_fn(ct_clean),
+                "timestamp": ts,
+                "id": f"a-{ts}",
+                "image": "",
+            })
+            self.save_history()
+
+            # Si Ashley emitió siguiente paso, ejecutarlo. Si tiene
+            # success y el plan sigue sin parecer cerrado, el counter
+            # cap controla cuántas más iteraciones permitimos.
+            if follow_action is not None:
+                _is_safe = follow_action["type"] in _SAFE_ACTIONS
+                if self.auto_actions or _is_safe:
+                    fr = self._execute_and_record_action(follow_action)
+                    yield
+                    if not fr.get("success", True):
+                        # Si falla → entramos al path de apology, que
+                        # también puede iterar respetando el counter.
+                        yield from self._stream_action_failure_apology(
+                            follow_action, fr["result"],
+                        )
+        except Exception as e:
+            self._handle_grok_error(e, "action_continuation")
+        yield
 
     # ─────────────────────────────────────────
     #  Envío de mensajes
