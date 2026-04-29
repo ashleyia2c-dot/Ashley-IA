@@ -55,6 +55,46 @@ _SPECULATIVE_BY_STATE: dict[int, dict] = {}
 
 
 # ─────────────────────────────────────────────
+#  Per-turn caches para llamadas costosas duplicadas
+# ─────────────────────────────────────────────
+#
+# Por turn (un mensaje del user) las siguientes operaciones se llamaban
+# múltiples veces aunque devuelvan lo mismo:
+#   • get_state_snapshot() — pycaw + GetForegroundWindow. 80-150ms en cold,
+#     ~25-50ms en warm. Llamada en _build_prompt_context, _stream_grok,
+#     y _execute_and_record_action.state_before.
+#   • get_system_state() — EnumWindows + UI Automation tabs. 50-1000ms.
+#     Llamada en _build_prompt_context (gate) y _stream_grok (verified
+#     windows) — exactamente la misma data.
+#
+# Cache lifecycle: misma estrategia que _SPECULATIVE_BY_STATE — module-level
+# dict keyed por id(state). Se reinicia al inicio de cada flow que
+# arranca un nuevo turn (_stream_grok, _stream_with_trigger, etc.) y al
+# ejecutar una acción (state cambia → invalidar). Memoria acotada al
+# tamaño de un dict pequeño por turno.
+_TURN_CACHE_BY_STATE: dict[int, dict] = {}
+
+
+def _get_turn_cache(state_id: int) -> dict:
+    """Devuelve el slot de caché del turno actual; lo crea si no existe."""
+    return _TURN_CACHE_BY_STATE.setdefault(state_id, {})
+
+
+def _reset_turn_cache(state_id: int) -> None:
+    """Llamar al inicio de cada handler que arranca un turn nuevo. Garantiza
+    que get_state_snapshot/get_system_state se relean desde 0."""
+    _TURN_CACHE_BY_STATE[state_id] = {}
+
+
+def _invalidate_turn_state_snapshot(state_id: int) -> None:
+    """Llamar tras ejecutar una acción que cambia volumen/ventana activa
+    para que el próximo state snapshot se relea fresh (state_after)."""
+    cache = _TURN_CACHE_BY_STATE.get(state_id)
+    if cache is not None:
+        cache.pop("state_snapshot", None)
+
+
+# ─────────────────────────────────────────────
 #  Helpers pre-state
 # ─────────────────────────────────────────────
 
@@ -185,6 +225,12 @@ class State(rx.State):
     # todas las features de Ashley, privacidad, tokens, y cómo
     # activar/desactivar cada cosa. Estado per-session (no persiste).
     manual_open: bool = False
+
+    # ── Vista 2D/3D del panel derecho (v0.15.4) ────
+    # Toggle entre la imagen 2D mood-image (cuadrada) y el placeholder
+    # del modelo 3D (vertical). Default 2D porque el 3D aún no llegó.
+    # No persiste — al reabrir vuelve a 2D que es lo que sí funciona.
+    view_3d_mode: bool = False
 
     # ── Agentic loop counter (v0.14.3) ────────
     # Cuántos turnos auto-continue lleva el plan actual. Cuando una
@@ -332,14 +378,32 @@ class State(rx.State):
 
     @rx.var
     def mood_overlay_color(self) -> str:
-        """Color de overlay del fondo según el humor de Ashley."""
+        """Color de overlay del fondo según el humor de Ashley.
+
+        v0.16.10 — alphas subidos (0.04 → 0.10-0.18) porque el
+        overlay ahora vive encima de los paneles con
+        mix-blend-mode: screen. Antes era casi invisible (tapado
+        por el chat panel opaco). En screen mode los píxeles
+        oscuros del overlay no afectan, los claros iluminan, así
+        que un alpha más alto solo aporta tinte de mood sin
+        emborronar nada.
+
+        Tonos elegidos para que cada mood se sienta distinto pero
+        coherente con la paleta boutique:
+          excited     → ámbar dorado (cálido, alegre)
+          embarrassed → rosa coral (mejillas)
+          tsundere    → azul violeta (frío defensivo)
+          soft        → rosa empolvado (íntimo, vulnerable)
+          surprised   → menta dorado (sorpresa positiva)
+          proud       → ámbar profundo (ego cálido)
+        """
         colors = {
-            "excited":     "rgba(255,210,60,0.045)",
-            "embarrassed": "rgba(255,80,130,0.045)",
-            "tsundere":    "rgba(80,110,255,0.04)",
-            "soft":        "rgba(255,154,238,0.06)",
-            "surprised":   "rgba(80,255,190,0.04)",
-            "proud":       "rgba(255,185,60,0.045)",
+            "excited":     "rgba(255,210,80,0.16)",
+            "embarrassed": "rgba(255,120,140,0.14)",
+            "tsundere":    "rgba(120,140,255,0.12)",
+            "soft":        "rgba(255,180,210,0.16)",
+            "surprised":   "rgba(140,255,200,0.12)",
+            "proud":       "rgba(255,180,80,0.18)",
         }
         return colors.get(self.mood, "rgba(0,0,0,0)")
 
@@ -1634,9 +1698,10 @@ class State(rx.State):
 
         _lang = lang or self.language
 
-        # Snapshot del estado ANTES de ejecutar (captura no-bloqueante,
-        # cualquier fallo en pycaw devuelve dict con None values).
-        state_before = get_state_snapshot()
+        # Snapshot del estado ANTES — reutilizamos el cacheado del turn
+        # (lo pidió _stream_grok hace un instante para el system prompt
+        # injection). Ahorra una llamada a pycaw + GetForegroundWindow.
+        state_before = self._cached_state_snapshot()
 
         result = execute_action(
             action_dict["type"], action_dict["params"],
@@ -1646,9 +1711,15 @@ class State(rx.State):
         )
         self.browser_opened = result.get("browser_opened", self.browser_opened)
 
-        # Snapshot DESPUÉS — capturado AHORA, sin esperar (la mayoría de
-        # acciones aplican inmediatamente; las que no, el log lo nota).
+        # Snapshot DESPUÉS — la acción acaba de ejecutar. El state pudo
+        # cambiar (ej: volumen), así que invalidamos el caché y leemos
+        # fresh. action_log lo compara contra state_before para detectar
+        # mismatches (ej: emitió set:100 pero el sistema reporta 0).
+        _invalidate_turn_state_snapshot(id(self))
         state_after = get_state_snapshot()
+        # Re-poblar el caché con el valor post-acción para que llamadas
+        # posteriores en el mismo turn vean el state actualizado.
+        _get_turn_cache(id(self))["state_snapshot"] = state_after
 
         if action_dict["type"] == "save_taste":
             from .tastes import load_tastes
@@ -1760,6 +1831,52 @@ class State(rx.State):
             len(_SPECULATIVE_BY_STATE.get(id(self), {})),
         )
         yield
+
+    # ─────────────────────────────────────────
+    #  Per-turn cache helpers (state snapshot + system state)
+    # ─────────────────────────────────────────
+
+    def _cached_state_snapshot(self) -> dict:
+        """Devuelve get_state_snapshot() con caché por turno. Llamado por
+        _build_prompt_context, _stream_grok y _execute_and_record_action.
+        En un turn típico ahorra 1-3 llamadas duplicadas a pycaw + Win API.
+        """
+        cache = _get_turn_cache(id(self))
+        if "state_snapshot" not in cache:
+            try:
+                from .system_state import get_state_snapshot
+                cache["state_snapshot"] = get_state_snapshot()
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning(
+                    "get_state_snapshot failed: %s", _e,
+                )
+                # Fallback: dict con valores None — los callers ya manejan eso
+                cache["state_snapshot"] = {
+                    "volume_pct": None,
+                    "volume_muted": None,
+                    "active_window": "",
+                }
+        return cache["state_snapshot"]
+
+    def _cached_system_state(self) -> str:
+        """Devuelve get_system_state() con caché por turno. EnumWindows +
+        UI Automation enumera todas las pestañas — la operación más cara
+        en un turn (50-1000ms). Antes se llamaba 2 veces por turn cuando
+        auto_actions=ON; ahora solo una.
+        """
+        cache = _get_turn_cache(id(self))
+        if "system_state_text" not in cache:
+            try:
+                from .actions import get_system_state
+                cache["system_state_text"] = get_system_state()
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning(
+                    "get_system_state failed: %s", _e,
+                )
+                cache["system_state_text"] = ""
+        return cache["system_state_text"]
 
     def _message_needs_system_state(self, user_message: str) -> bool:
         """Decide si vale la pena inyectar la lista de ventanas/pestañas
@@ -1958,12 +2075,13 @@ class State(rx.State):
         if self.auto_actions:
             needs_state = self._message_needs_system_state(user_message)
             if needs_state:
-                try:
-                    from .actions import get_system_state
-                    system_state = "\n".join(capabilities) + "\n\n" + get_system_state()
-                except Exception as _e:
-                    import logging
-                    logging.getLogger("ashley").warning("getting system state: %s", _e)
+                # _cached_system_state ya maneja la excepción internamente
+                # y devuelve "" si falla — system_state queda solo con
+                # capabilities, igual que el path original.
+                _sys_text = self._cached_system_state()
+                if _sys_text:
+                    system_state = "\n".join(capabilities) + "\n\n" + _sys_text
+                else:
                     system_state = "\n".join(capabilities)
             else:
                 system_state = "\n".join(capabilities)
@@ -2123,14 +2241,22 @@ class State(rx.State):
                 events = _ms.classify_user_event(user_message, minutes_since)
                 _ms.apply_events_to_mood(state, events)
 
-                # Regenerar preoccupation si está vieja o hay gap
+                # Regenerar preoccupation si está vieja o hay gap.
+                # v0.14.5: si el bg pre-warm ya está regenerando, NO
+                # disparamos un segundo LLM call — usamos lo que esté
+                # en disco (puede ser stale por unos segundos hasta que
+                # bg termine y guarde). El siguiente turn ya verá el
+                # valor fresco. Sin esta gate, el user ultra-rápido
+                # paga ~3.5s de wait extra mientras dos llamadas LLM
+                # corren en paralelo redundantemente.
                 if _ms.should_regenerate_preoccupation(state) or (
                     minutes_since is not None and minutes_since >= _ms.LONG_GAP_MINUTES
                 ):
-                    gap_ctx = _ms.compute_gap_context(minutes_since, self.language)
-                    _ms.regenerate_preoccupation(
-                        state, self.messages, self.facts, self.language, gap_ctx
-                    )
+                    if not _ms.is_preoccupation_regen_in_progress():
+                        gap_ctx = _ms.compute_gap_context(minutes_since, self.language)
+                        _ms.regenerate_preoccupation(
+                            state, self.messages, self.facts, self.language, gap_ctx
+                        )
 
                 # Contador de iniciativa
                 initiative_due = _ms.tick_initiative_counter(state)
@@ -2138,9 +2264,10 @@ class State(rx.State):
                 # Read-only path: solo asegurar que la preoccupation no esté
                 # ancestral. No tocar mood ni counter.
                 if _ms.should_regenerate_preoccupation(state):
-                    _ms.regenerate_preoccupation(
-                        state, self.messages, self.facts, self.language, None
-                    )
+                    if not _ms.is_preoccupation_regen_in_progress():
+                        _ms.regenerate_preoccupation(
+                            state, self.messages, self.facts, self.language, None
+                        )
 
             state["last_update"] = datetime.now().isoformat()
             _ms.save_state(state)
@@ -2301,8 +2428,27 @@ class State(rx.State):
     def _stream_grok(self, user_message: str):
         from .grok_client import stream_response
 
+        # Cache reset al inicio del turn — get_state_snapshot/get_system_state
+        # se cachean dentro del turn (mismas variables se piden 2-3 veces).
+        # Reset garantiza que el primer call popula el slot fresh.
+        _reset_turn_cache(id(self))
+
+        # Timing instrumentation — diagnóstico del lag pre-stream que el
+        # user reportó (10-20s antes del primer token). Cada fase pesada
+        # se timea contra ashley.timing logger. Filtrar con:
+        #   tail -f log | grep ashley.timing
+        import time as _t
+        import logging as _logging
+        _timing = _logging.getLogger("ashley.timing")
+        _t_turn_start = _t.monotonic()
+
+        _t0 = _t.monotonic()
         ctx = self._build_prompt_context(user_message)
+        _timing.warning("phase build_ctx=%.2fs", _t.monotonic() - _t0)
+
+        _t0 = _t.monotonic()
         system_prompt = build_system_prompt(self.facts, self.diary, **ctx)
+        _timing.warning("phase build_sys_prompt=%.2fs", _t.monotonic() - _t0)
 
         # ── Inyección de hora real como mensaje en el historial ──────────
         # El LLM a veces repite horas de mensajes anteriores en vez de leer
@@ -2330,12 +2476,14 @@ class State(rx.State):
         # un patrón que Grok copia (dice "SQL" porque se dijo "SQL"). Al
         # resumir lo antiguo en UN mensaje de sistema y mantener solo lo
         # reciente raw, cortamos la inercia. Cache interno en disco.
+        _t0 = _t.monotonic()
         try:
             from .context_compression import compress_history
             messages_for_llm = compress_history(messages_for_llm, self.language)
         except Exception as _e:
             import logging
             logging.getLogger("ashley").warning("context compression failed: %s", _e)
+        _timing.warning("phase compress_history=%.2fs", _t.monotonic() - _t0)
 
         # Insertar ANTES del último mensaje (que es el del usuario)
         messages_for_llm.insert(max(0, len(messages_for_llm) - 1), _time_inject_msg)
@@ -2431,8 +2579,8 @@ class State(rx.State):
         # Falla silencioso si pycaw no está disponible.
         if self.auto_actions and messages_for_llm:
             try:
-                from .system_state import get_state_snapshot, format_state_for_prompt
-                _sys_snap = get_state_snapshot()
+                from .system_state import format_state_for_prompt
+                _sys_snap = self._cached_state_snapshot()
                 _sys_line = format_state_for_prompt(_sys_snap, lang=self.language)
                 if _sys_line:
                     messages_for_llm.insert(max(0, len(messages_for_llm) - 1), {
@@ -2453,14 +2601,17 @@ class State(rx.State):
         # Con Actions OFF, Ashley es totalmente ciega al contenido del PC —
         # garantía de privacidad para cuando el user hace algo privado y no
         # quiere que Ashley vea nada.
+        _t0 = _t.monotonic()
         if self.auto_actions and messages_for_llm:
             last_msg = messages_for_llm[-1]
             if last_msg.get("role") == "user" and not last_msg.get("image"):
                 try:
-                    from .actions import take_screenshot_low_res, get_system_state
+                    from .actions import take_screenshot_low_res
                     ctx_img = take_screenshot_low_res()
-                    # Lista verificada de ventanas (la misma que usa el modo Acciones)
-                    verified_windows = get_system_state()
+                    # Lista verificada de ventanas (la misma que usa el modo
+                    # Acciones). _cached_system_state — si _build_prompt_context
+                    # ya la pidió, esta llamada sale instantánea (mismo turno).
+                    verified_windows = self._cached_system_state()
                     # Inyectar la lista como mensaje del sistema ANTES del screenshot
                     if self.language == "en":
                         _vision_ctx = (
@@ -2486,6 +2637,8 @@ class State(rx.State):
                 except Exception as _e:
                     import logging
                     logging.getLogger("ashley").warning("vision screenshot failed: %s", _e)
+        _timing.warning("phase screenshot+windows=%.2fs", _t.monotonic() - _t0)
+        _timing.warning("phase TOTAL pre-stream=%.2fs", _t.monotonic() - _t_turn_start)
 
         yield from self._streaming_loop(
             stream_response(messages_for_llm, system_prompt, use_web_search=True)
@@ -3150,6 +3303,21 @@ class State(rx.State):
     def toggle_focus_mode(self):
         self.focus_mode = not self.focus_mode
 
+    def toggle_view_3d_mode(self):
+        """Switch entre vista 2D (mood-image cuadrada) y 3D (placeholder
+        vertical futuro modelo). v0.15.4 — no persiste, default 2D."""
+        self.view_3d_mode = not self.view_3d_mode
+
+    def set_view_3d_mode_true(self):
+        """Setter explícito a 3D — usado por el segmento '3D' del toggle.
+        Reflex deprecó los auto-setters en 0.8.9; necesitamos explícitos
+        para llamar desde on_click sin lambda (no aceptado en eventos)."""
+        self.view_3d_mode = True
+
+    def set_view_3d_mode_false(self):
+        """Setter explícito a 2D — usado por el segmento '2D' del toggle."""
+        self.view_3d_mode = False
+
     def toggle_memories(self):
         self.show_memories = not self.show_memories
 
@@ -3638,6 +3806,149 @@ class State(rx.State):
     # El mensaje llega a la UI completo (sin efecto typewriter) pero eso es
     # aceptable — el arranque se siente 2-3s más rápido.
 
+    async def _prewarm_session_state(self):
+        """Pre-calienta los cómputos lentos que normalmente bloquean el
+        primer mensaje del user (v0.14.5).
+
+        Dos cómputos pesados:
+          • regenerate_preoccupation (3-4s) — TTL 60 min.
+          • compress_history regen (3-4s) — caché stale tras +8 mensajes.
+
+        Ambos hacen una llamada LLM síncrona a grok-3-fast (o equivalente
+        del provider activo). Antes corrían dentro de _stream_grok →
+        bloqueaban el path crítico del user.
+
+        Esta función arranca AL MOMENTO de abrir la app, mientras el user
+        está leyendo la UI / decidiendo qué escribir (~5-30s). Para
+        cuando el user pulsa enter, los valores frescos ya están en
+        disco y el _stream_grok los lee sin regen.
+
+        Defensa-en-profundidad: si pre-warm no termina antes del primer
+        mensaje, _compute_mental_state_block / compress_history detectan
+        que el caché sigue stale y caen al path síncrono. Ningún caso
+        rompe la feature — solo cambia el "cuándo".
+
+        Run con run_in_executor — las llamadas LLM bloquean el event
+        loop si las hacemos directas. El executor las pone en thread
+        pool y dejan al loop responder a otros eventos (UI, websocket).
+        """
+        import asyncio
+
+        # Snapshot atómico de los datos que las funciones de regen
+        # necesitan. Sin esto, el bg thread accedería a self.messages
+        # mientras el user puede estar enviando uno nuevo → race.
+        async with self:
+            _msgs = list(self.messages)
+            _facts = list(self.facts)
+            _lang = self.language
+
+        # Si no hay conversación previa, no tiene sentido pre-warm —
+        # tampoco habría regen en el primer mensaje (el path síncrono
+        # también respeta esa condición vía mental_state internals).
+        if not _msgs:
+            return
+
+        loop = asyncio.get_running_loop()
+
+        # ── 1. Pre-warm preoccupation ─────────────────────────────────
+        def _do_preoccupation_regen():
+            from . import mental_state as _ms
+            _ms.set_preoccupation_regen_in_progress(True)
+            try:
+                # Snapshot del state — solo para verificar staleness y para
+                # pasarle a regenerate_preoccupation como contenedor mutable.
+                # Importante: NO guardamos este state directamente al final;
+                # haremos un re-load fresh antes de save para no clobberar
+                # mutaciones del user thread (mood deltas, classify events).
+                state = _ms.load_state()
+                if not _ms.should_regenerate_preoccupation(state):
+                    return  # ya está fresca, nada que hacer
+                # Calcular gap context si hay datos del lado del thread.
+                minutes_since = None
+                try:
+                    from datetime import datetime, timezone
+                    user_msgs = [
+                        m for m in _msgs
+                        if m.get("role") == "user" and m.get("timestamp")
+                    ]
+                    if user_msgs:
+                        last = datetime.fromisoformat(
+                            user_msgs[-1]["timestamp"].replace("Z", "+00:00")
+                        )
+                        if last.tzinfo is None:
+                            last = last.replace(tzinfo=timezone.utc)
+                        now = datetime.now(timezone.utc)
+                        minutes_since = max(
+                            0.0, (now - last).total_seconds() / 60.0,
+                        )
+                except Exception:
+                    pass
+                gap_ctx = _ms.compute_gap_context(minutes_since, _lang)
+                # NO hacemos drift_mood_on_gap aquí — eso es el path del
+                # USER (en _compute_mental_state_block). Si lo dupliquramos
+                # aquí, el mood se driftearía dos veces. Solo regen.
+                ok = _ms.regenerate_preoccupation(
+                    state, _msgs, _facts, _lang, gap_ctx,
+                )
+                if not ok:
+                    return
+                # Patch save: re-lee state fresh y copia SOLO los campos de
+                # preoccupation. Si el user thread escribió mood deltas
+                # mientras corríamos el LLM, los preservamos.
+                fresh = _ms.load_state()
+                fresh["preoccupation"] = state["preoccupation"]
+                fresh["preoccupation_generated_at"] = state["preoccupation_generated_at"]
+                # last_update se actualiza implícitamente con el regen
+                fresh["last_update"] = __import__("datetime").datetime.now().isoformat()
+                _ms.save_state(fresh)
+            except Exception as e:
+                import logging
+                logging.getLogger("ashley").warning(
+                    "prewarm preoccupation failed: %s", e,
+                )
+            finally:
+                # CRÍTICO: limpiar siempre, aunque el regen falle. Si lo
+                # dejamos True por una excepción, _compute_mental_state_block
+                # seguiría usando el valor stale para siempre.
+                _ms.set_preoccupation_regen_in_progress(False)
+
+        # ── 2. Pre-warm compress_history ──────────────────────────────
+        def _do_compress_warmup():
+            from . import context_compression as _cc
+            _cc.set_compress_regen_in_progress(True)
+            try:
+                # compress_history hace su propio cache check + LLM call
+                # internamente. Si el caché está fresco no toca nada.
+                # Si está stale, regenera y escribe a disco. La única
+                # diferencia vs el path principal es que NO retornamos
+                # el resultado — el siguiente _stream_grok leerá el
+                # caché actualizado de disco al llamar compress_history
+                # de nuevo (ese hit del caché es <1ms).
+                #
+                # Importante: durante la regen, otras llamadas a
+                # compress_history (del user) ven el flag y devuelven el
+                # caché stale en vez de disparar otro LLM call.
+                _cc.compress_history(_msgs, _lang)
+            except Exception as e:
+                import logging
+                logging.getLogger("ashley").warning(
+                    "prewarm compress_history failed: %s", e,
+                )
+            finally:
+                _cc.set_compress_regen_in_progress(False)
+
+        # Las dos llamadas LLM en paralelo — independientes entre sí, y
+        # ya que cada una tarda ~3-4s, paralelizar las pone a ~3-4s
+        # total en lugar de ~7s en serie.
+        try:
+            await asyncio.gather(
+                loop.run_in_executor(None, _do_preoccupation_regen),
+                loop.run_in_executor(None, _do_compress_warmup),
+            )
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("prewarm gather failed: %s", _e)
+
     async def _run_startup_engagement(self):
         """Ejecuta el engagement de arranque si el flag está activo.
 
@@ -3849,6 +4160,30 @@ class State(rx.State):
 
         async with self:
             self._bg_discovery_running = True
+
+        # ── Pre-warm de mental_state + context_compression (v0.14.5) ──────
+        # Estas dos operaciones eran síncronas dentro de _stream_grok y
+        # bloqueaban el primer mensaje del user con 2 llamadas LLM:
+        #   • regenerate_preoccupation (~3.5s) si TTL >60min — siempre
+        #     vencido al reabrir la app después del trabajo/comida
+        #   • compress_history (~3.9s) si caché stale (>8 mensajes nuevos)
+        # Combinado = ~7s de wait pre-stream antes de que el LLM principal
+        # empezara a responder.
+        #
+        # Solución: arrancar el regen de ambos en background AL MOMENTO de
+        # abrir la app. Mientras el user lee la UI y decide qué escribir
+        # (~5-30s), el regen termina y escribe a disco. Cuando el user
+        # mande su primer mensaje, _compute_mental_state_block leerá la
+        # preoccupation FRESCA (timestamp nuevo → no regen sync).
+        #
+        # Si el user es ultra-rápido (<3s) y se adelanta al pre-warm,
+        # caemos al path síncrono de antes — fallback transparente, sin
+        # perder la feature.
+        try:
+            await self._prewarm_session_state()
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("prewarm session state: %s", _e)
 
         # ── Fase inicial: startup engagement (v0.13.1) ────────────────────
         # El on_load puso el flag _pending_startup_engagement si corresponde.
@@ -4342,6 +4677,11 @@ from .components import (  # noqa: E402
     _news_panel, _news_pill_with_badge,
     license_gate,
     manual_button, manual_dialog,
+    # v0.15 — layout 3-columnas (deprecado, retenido para retrocompat)
+    left_sidebar, right_panel,
+    # v0.16 — layout 2-cols boutique noir
+    _ambient_lights, left_portrait_panel, _chat_header_bar,
+    _light_rays_svg,
 )
 
 # ── Estilos globales (extraídos a styles.py) ──
@@ -4349,164 +4689,100 @@ from .styles import global_styles  # noqa: E402
 
 
 def index():
-    # ── Input area ───────────────────────────────────────────
+    # ── Input area v0.16 ──────────────────────────────────────
+    # En el rediseño boutique noir, los botones de acción
+    # (mic/sparkles/focus/upload) viven debajo del portrait izquierdo
+    # — no en el input. El input solo contiene el textarea pill warm
+    # + el botón send circular ámbar grande. Más limpio, más elegante.
+    _input_disabled = State.is_thinking | (State.current_response != "")
+
     input_area = rx.vstack(
+        # ── Preview de imagen adjunta (si la hay) ─────────────────
         rx.cond(
             State.pending_image != "",
             rx.box(
                 rx.hstack(
                     rx.image(src=State.pending_image, height="36px", width="36px",
-                             object_fit="cover", border_radius="6px"),
+                             object_fit="cover", border_radius="8px"),
                     rx.text(State.pending_image_name, color=COLOR_TEXT_MUTED,
                             font_size="11px", flex="1", no_of_lines=1),
                     rx.button(
                         "✕", on_click=State.clear_image,
-                        size="1", bg="transparent", color="#888888",
-                        _hover={"color": "#ff6b6b", "bg": "transparent"},
+                        size="1", bg="transparent", color="#9c8b7e",
+                        _hover={"color": "#e66b6b", "bg": "transparent"},
                         cursor="pointer",
                     ),
                     spacing="2", align="center",
                 ),
-                bg="rgba(255,154,238,0.06)", padding="5px 10px",
-                border_radius="10px", border=f"1px solid rgba(255,154,238,0.3)",
+                bg="rgba(212,163,115,0.08)", padding="6px 12px",
+                border_radius="14px", border="1px solid rgba(212,163,115,0.30)",
                 width="100%",
             ),
             rx.box(),
         ),
-        rx.hstack(
-            rx.upload(
-                rx.button(
-                    "📎",
-                    bg="rgba(255,255,255,0.04)", color=COLOR_TEXT_MUTED,
-                    border="1px solid rgba(255,255,255,0.08)", height="52px",
-                    border_radius="10px",
-                    _hover={"color": COLOR_PRIMARY, "border": f"1px solid rgba(255,154,238,0.4)",
-                            "bg": "rgba(255,154,238,0.08)"},
-                    transition="all 0.2s ease",
-                    disabled=State.is_thinking | (State.current_response != ""),
-                    type="button",
-                ),
-                id="img_upload",
-                on_drop=State.handle_upload(rx.upload_files(upload_id="img_upload")),
-                accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"],
-                        "image/webp": [".webp"], "image/gif": [".gif"]},
-                multiple=False, no_drag=True,
-            ),
-            # ── Botón de iniciativa de Ashley (✨) ─────────────────────
-            # Antes vivía en el dropdown de ajustes pero es una acción
-            # del flujo del chat ("haz que Ashley hable"), no una
-            # configuración. Mejor accesible junto al input.
-            rx.button(
-                "✨",
-                on_click=State.send_initiative,
-                type="button",
-                bg="rgba(255,255,255,0.04)",
-                color=COLOR_TEXT_MUTED,
-                border="1px solid rgba(255,255,255,0.08)",
-                height="52px",
-                border_radius="10px",
-                _hover={
-                    "color": COLOR_PRIMARY,
-                    "border": f"1px solid rgba(255,154,238,0.4)",
-                    "bg": "rgba(255,154,238,0.08)",
-                },
-                transition="all 0.2s ease",
-                title=State.t["menu_initiative"],
-                disabled=State.is_thinking | (State.current_response != ""),
-            ),
-            # ── Botón de micrófono (dictar por voz) ────────────────────
-            rx.button(
-                "🎤",
-                id="ashley-mic-btn",
-                type="button",
-                bg="rgba(255,255,255,0.04)",
-                color=COLOR_TEXT_MUTED,
-                border="1px solid rgba(255,255,255,0.08)",
-                height="52px",
-                border_radius="10px",
-                _hover={
-                    "color": COLOR_PRIMARY,
-                    "border": f"1px solid rgba(255,154,238,0.4)",
-                    "bg": "rgba(255,154,238,0.08)",
-                },
-                transition="all 0.2s ease",
-                title=State.t["mic_tooltip"],
-                class_name="ashley-mic-btn",
-                disabled=State.is_thinking | (State.current_response != ""),
-            ),
-            rx.form(
-                rx.hstack(
-                    rx.text_area(
-                        placeholder=State.t["input_placeholder"],
-                        id="message", width="100%",
-                        min_height="52px", max_height="180px",
-                        resize="none", overflow_y="auto",
-                        bg="rgba(255,255,255,0.04)", color="white",
-                        border="1px solid rgba(255,255,255,0.09)",
-                        border_radius="12px",
-                        padding="14px 16px", font_size="14px", line_height="1.5",
-                        _focus={"border": f"1px solid rgba(255,154,238,0.5)",
-                                "box_shadow": "0 0 12px rgba(255,154,238,0.2)",
-                                "outline": "none"},
-                        _placeholder={"color": "#444455"},
-                        class_name="ashley-textarea",
-                    ),
+
+        # ── Fila principal ─────────────────────────────────────────
+        # v0.16.1: paperclip de vuelta al input (al lado del textarea).
+        # El user dijo "el botón de imagen no está donde debe estar,
+        # debería estar al lado de donde el user escribe no tan lejos".
+        rx.form(
+            rx.hstack(
+                # 📎 paperclip — abrir selector de imagen (rx.upload)
+                rx.upload(
                     rx.button(
-                        State.t["btn_send"], type="submit",
-                        bg=COLOR_PRIMARY, color="black", font_weight="bold",
-                        height="52px", align_self="flex-end",
-                        border_radius="12px",
-                        _hover={"bg": COLOR_PRIMARY_HOVER,
-                                "box_shadow": "0 0 18px rgba(255,154,238,0.5)"},
-                        transition="all 0.2s ease",
-                        disabled=State.is_thinking | (State.current_response != ""),
+                        rx.icon("paperclip", size=18, stroke_width=1.7),
+                        type="button",
+                        class_name="ashley-action-btn",
+                        title=State.t["pill_memories"],  # i18n placeholder
+                        disabled=_input_disabled,
                     ),
-                    spacing="3", align="end",
+                    id="img_upload",
+                    on_drop=State.handle_upload(rx.upload_files(upload_id="img_upload")),
+                    accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"],
+                            "image/webp": [".webp"], "image/gif": [".gif"]},
+                    multiple=False, no_drag=True,
+                    border="none", padding="0", margin="0",
+                    width="auto", class_name="ashley-upload-clean",
                 ),
-                on_submit=State.send_message,
-                reset_on_submit=True,
-                flex="1",
+
+                # Textarea pill warm — domina el ancho.
+                # v0.16.7: min-height subido a 60px porque font-size
+                # subió a 17px + padding 16px*2 → contenido ~57px.
+                # 52px de antes cortaba el descender de la 'g'/'p'.
+                rx.text_area(
+                    placeholder=State.t["input_placeholder"],
+                    id="message", width="100%",
+                    min_height="60px", max_height="200px",
+                    resize="none", overflow_y="auto",
+                    class_name="ashley-input-pill ashley-textarea",
+                    flex="1",
+                ),
+
+                # Send — círculo ámbar warm con icono Lucide
+                rx.button(
+                    rx.icon("arrow-right", size=22, stroke_width=2),
+                    type="submit",
+                    class_name="ashley-send-btn",
+                    title=State.t["btn_send"],
+                    disabled=_input_disabled,
+                ),
+
+                spacing="3",
+                align="end",
+                width="100%",
             ),
-            spacing="3", align="end", width="100%",
+            on_submit=State.send_message,
+            reset_on_submit=True,
+            width="100%",
         ),
-        spacing="2", align="center", width=CHAT_WIDTH,
+        spacing="2", align="stretch", width="100%",
     )
 
-    # ── Header bar ───────────────────────────────────────────
-    header = rx.hstack(
-        # Branding (top-left) + botón ❓ del manual de usuario
-        rx.hstack(
-            manual_button(),  # ❓ — abre el dialog del manual
-            rx.text("◈", font_size="20px", color=COLOR_PRIMARY,
-                    style={"textShadow": "0 0 12px rgba(255,154,238,0.6)"}),
-            rx.text("Ashley", font_size="17px", font_weight="800",
-                    color=COLOR_PRIMARY, letter_spacing="0.05em",
-                    style={"textShadow": "0 0 14px rgba(255,154,238,0.35)"}),
-            spacing="2", align="center",
-        ),
-        rx.spacer(),
-        # Pills visibles: Memorias, Noticias (con badge), Actions, Menu
-        rx.hstack(
-            _pill_btn("🧠", State.t["pill_memories"], State.toggle_memories, State.show_memories),
-            _news_pill_with_badge(),
-            _pill_btn_orange("⚡", State.t["pill_actions"], State.toggle_auto_actions, State.auto_actions),
-            _header_quick_menu(),
-            spacing="1",
-            overflow_x="auto",
-            flex_wrap="nowrap",
-            flex_shrink="1",
-            min_width="0",
-            class_name="pills-row",
-        ),
-        padding_x="20px",
-        padding_y="10px",
-        align="center",
-        width="100%",
-        class_name="glass-header",
-        position="sticky",
-        top="0",
-        z_index="100",
-    )
+    # ── Layout 2-cols v0.16 ──────────────────────────────────
+    # Sin header global. La nav vive como barra horizontal sobre el
+    # panel izquierdo (ver _top_nav_bar() en components.py).
+    # El branding "Ashley" aparece en serif grande dentro del panel
+    # derecho (chat_header_bar) y como overlay sobre el portrait.
 
     page = rx.box(
         global_styles(),
@@ -4531,15 +4807,12 @@ def index():
             },
         ),
 
-        # ── Mood overlay (fixed, full screen) ─────────────
-        rx.box(
-            position="fixed",
-            top="0", left="0", right="0", bottom="0",
-            bg=State.mood_overlay_color,
-            style={"transition": "background 1.8s ease"},
-            z_index="0",
-            pointer_events="none",
-        ),
+        # ── Mood overlay v0.16.11 ──────
+        # Movido al chat panel (ver _ambient_lights → chat-mood-tint
+        # más abajo). Antes era fixed full-screen → tintaba TAMBIÉN
+        # el portrait con la cara de Ashley. El user lo rechazó:
+        # "tiene que ir por detras del chat, en el fondo negro
+        # solamente no en toda la maldita pantalla".
 
         # ── Achievement toast notification ────────────────
         rx.cond(
@@ -4566,74 +4839,102 @@ def index():
             rx.fragment(),
         ),
 
-        rx.vstack(
-            header,
+        # ── Ambient lights animados (siempre detrás del layout) ───
+        _ambient_lights(),
 
-            # ── Contenido principal ───────────────────────
-            rx.center(
-                rx.hstack(
-                    # Chat + input — O el panel de noticias, según show_news
-                    # v0.13.7: ambos paneles SIEMPRE en el DOM, alternamos
-                    # con display:none/flex en lugar de rx.cond. Antes el
-                    # chat se desmontaba al ver noticias y al volver el
-                    # scroll se reseteaba arriba — ahora se conserva.
-                    rx.vstack(
-                        # Panel de chat (se oculta cuando show_news=True)
-                        rx.box(
-                            rx.vstack(
-                                rx.foreach(State.messages, message_item),
-                                streaming_bubble(),
-                                thinking_indicator(),
-                                id="chat_messages",
-                                height=CHAT_HEIGHT,
-                                overflow_y="auto",
-                                padding="20px 24px",
-                                border_radius="20px",
-                                width=CHAT_WIDTH,
-                                spacing="1",
-                                class_name="ashley-chat glass-chat",
-                            ),
-                            display=rx.cond(State.show_news, "none", "block"),
-                        ),
-                        # Panel de noticias (se oculta cuando show_news=False)
-                        rx.box(
-                            _news_panel(),
-                            height=CHAT_HEIGHT,
-                            width=CHAT_WIDTH,
-                            border_radius="20px",
-                            overflow="hidden",
-                            display=rx.cond(State.show_news, "block", "none"),
-                        ),
-                        # Input solo cuando estamos en chat
-                        rx.box(
-                            input_area,
-                            display=rx.cond(State.show_news, "none", "block"),
-                            width="100%",
-                        ),
-                        spacing="4", align="center",
-                    ),
-
-                    # Panel retrato (oculto en focus mode)
-                    rx.cond(
-                        State.focus_mode,
-                        rx.box(),
-                        _ashley_portrait_panel(),
-                    ),
-
-                    spacing="8",
-                    align="start",
+        rx.hstack(
+            # ── Layout 2-cols v0.16 — boutique noir ──────────────────
+            # Izquierda: portrait gigante con nav arriba, nombre + status
+            #            + actions abajo, vignette + spotlight cálido.
+            # Derecha: chat header (Ashley serif + heart counter), chat
+            #          messages flex 1, input pill warm.
+            # Ambient lights animados detrás de todo (capas 1/2/3).
+            rx.cond(
+                State.focus_mode,
+                rx.box(),  # focus mode oculta el portrait left
+                left_portrait_panel(),
+            ),
+            # Right chat panel (siempre visible)
+            rx.vstack(
+                # ── Mood tint v0.16.11 ──────────────────────
+                # Capa de color que cambia con el mood de Ashley,
+                # SOLO dentro del chat panel (no afecta al portrait).
+                # mix-blend-mode: screen suma luz, nunca oscurece.
+                # Cobertura: full chat panel (inset 0).
+                rx.box(
+                    position="absolute",
+                    top="0", left="0", right="0", bottom="0",
+                    bg=State.mood_overlay_color,
+                    style={
+                        "transition": "background 1.8s ease",
+                        "mixBlendMode": "screen",
+                        "WebkitMixBlendMode": "screen",
+                    },
+                    pointer_events="none",
+                    class_name="chat-mood-tint",
                 ),
-                padding="28px 48px",
-                position="relative",
-                z_index="1",
+
+                # Light rays cenital
+                _light_rays_svg(),
+
+                _chat_header_bar(),
+
+                # Chat messages area (flex 1)
+                rx.box(
+                    rx.box(
+                        rx.vstack(
+                            rx.foreach(State.messages, message_item),
+                            streaming_bubble(),
+                            thinking_indicator(),
+                            id="chat_messages",
+                            width="100%",
+                            spacing="1",
+                        ),
+                        max_width="900px",
+                        width="100%",
+                        margin_x="auto",
+                    ),
+                    display=rx.cond(State.show_news, "none", "block"),
+                    class_name="ashley-chat-scroll",
+                    width="100%",
+                ),
+                # News panel (alterna con chat)
+                rx.box(
+                    rx.box(
+                        _news_panel(),
+                        max_width="900px",
+                        width="100%",
+                        margin_x="auto",
+                        height="100%",
+                    ),
+                    display=rx.cond(State.show_news, "block", "none"),
+                    class_name="ashley-chat-scroll",
+                    width="100%",
+                ),
+
+                # Input row
+                rx.box(
+                    rx.box(
+                        input_area,
+                        max_width="900px",
+                        width="100%",
+                        margin_x="auto",
+                    ),
+                    display=rx.cond(State.show_news, "none", "block"),
+                    class_name="ashley-chat-input-row",
+                    width="100%",
+                ),
+
+                spacing="0",
+                class_name="ashley-chat-panel",
                 width="100%",
-                align_items="flex-start",
-                justify_content="center",
+                height="100vh",
             ),
 
             spacing="0",
             width="100%",
             align="stretch",
+            class_name="ashley-layout-2col",
         ),
 
         min_height="100vh",

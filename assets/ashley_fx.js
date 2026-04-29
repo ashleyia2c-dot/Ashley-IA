@@ -6,15 +6,43 @@
   /* ══════════════════════════════════════════
      STARFIELD
   ══════════════════════════════════════════ */
-  function initStarfield() {
-    if (document.getElementById('ashley-starfield')) return;
+  function createStarfieldCanvas() {
+    var c = document.createElement('canvas');
+    c.id = 'ashley-starfield';
+    // v0.15.5 — z-index alto + mix-blend-mode:screen es la combinación
+    // a prueba de balas:
+    //   • z-index: 9000 → siempre encima de cualquier glass panel,
+    //     sidebar, chat, lo que sea. No depende de stacking contexts.
+    //   • pointer-events: none → no interfiere con clicks/scroll.
+    //   • mix-blend-mode: screen → los píxeles negros del canvas son
+    //     "transparentes" en blend (negro+X = X), los blancos iluminan
+    //     (255+X = saturado a 255). Resultado: estrellas blancas
+    //     visibles sobre cualquier bg, sin oscurecer NADA del UI.
+    c.style.cssText =
+      'position:fixed;top:0;left:0;width:100vw;height:100vh;' +
+      'z-index:9000;pointer-events:none;display:block;' +
+      'mix-blend-mode:screen;-webkit-mix-blend-mode:screen;';
+    // Lo metemos al final del body para que esté en el último layer.
+    document.body.appendChild(c);
+    return c;
+  }
 
-    var canvas = document.createElement('canvas');
-    canvas.id = 'ashley-starfield';
-    canvas.style.cssText =
-      'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'z-index:0;pointer-events:none;';
-    document.body.insertBefore(canvas, document.body.firstChild);
+  function initStarfield() {
+    // v0.15.5 — vuelta al método JS-only con guardián MutationObserver.
+    //
+    // Historia: probamos a renderizar el canvas via Reflex (rx.el.canvas)
+    // pero o no rendered o desaparecía igual. El método original (JS
+    // crea + body.insertBefore) funcionaba antes del rediseño, así que
+    // volvemos. ÚNICA novedad: un MutationObserver que vigila si React
+    // remueve el canvas durante una re-hidratación, y lo recrea +
+    // re-arranca el loop de dibujo. Garantiza que las estrellas
+    // siempre estén ahí, suceda lo que suceda con la hidratación.
+    var canvas = document.getElementById('ashley-starfield');
+    if (canvas && canvas._starfieldInitialized) return;
+    if (!canvas) {
+      canvas = createStarfieldCanvas();
+    }
+    canvas._starfieldInitialized = true;
 
     var ctx = canvas.getContext('2d');
     var W = canvas.width  = window.innerWidth;
@@ -42,7 +70,12 @@
     });
 
     function draw() {
-      ctx.fillStyle = '#0a0a0a';
+      // v0.15.5 — vuelvo a fillRect opaco con #080810 (mismo color que
+      // el body bg). Funciona porque al ser opaco GARANTIZA que el
+      // canvas se vea aunque algo lo cubra parcialmente o haya
+      // problemas con clearRect+layers. Las estrellas se dibujan
+      // sobre este fondo controlado.
+      ctx.fillStyle = '#080810';
       ctx.fillRect(0, 0, W, H);
       for (var i = 0; i < stars.length; i++) {
         var s = stars[i];
@@ -58,6 +91,33 @@
       requestAnimationFrame(draw);
     }
     draw();
+
+    // ── Guardián anti-React: si React/Next.js remueve el canvas
+    // durante una re-hidratación, lo recreamos. Sin este observer
+    // las estrellas a veces desaparecían tras un rato sin avisar.
+    try {
+      var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var m = mutations[i];
+          for (var j = 0; j < m.removedNodes.length; j++) {
+            if (m.removedNodes[j].id === 'ashley-starfield') {
+              // Reset y recrear
+              canvas._starfieldInitialized = false;
+              window._ashleyFxLoaded = false;
+              setTimeout(function () {
+                window._ashleyFxLoaded = true;
+                initStarfield();
+              }, 50);
+              return;
+            }
+          }
+        }
+      });
+      observer.observe(document.body, { childList: true });
+    } catch (e) {
+      // MutationObserver puede fallar en entornos exóticos —
+      // no bloqueamos el resto.
+    }
 
     window.addEventListener('resize', function () {
       var prevW = W, prevH = H;
@@ -104,7 +164,19 @@
   document.addEventListener('keydown',   unlockAudio, { passive: true });
   document.addEventListener('touchstart', unlockAudio, { passive: true });
 
+  // v0.16.3 — sonidos rediseñados para encajar con el tema visual
+  // wine boutique noir. Antes: tones brillantes 800-1300Hz tipo synth
+  // bell discoteca. Ahora: tones warm 200-650Hz con lowpass filter +
+  // harmonic overtones + decay exponencial → "soft chime" tipo pequeña
+  // campana de boutique, gentle bell de hotel, no notification stridente.
+  //
+  // Helper warmTone() añade:
+  //   • Lowpass filter (suaviza los harmónicos altos)
+  //   • Overtone a 2×freq con vol=15% del principal (rico, no plano)
+  //   • Attack 25ms (suave) + decay exponencial (natural fade)
+
   function tone(freq, dur, vol, type, freqEnd) {
+    // Mantengo el original tone() por compat con código legacy
     if (!_audioReady) return;
     try {
       var actx = getActx();
@@ -126,53 +198,123 @@
     } catch (e) {}
   }
 
+  function warmTone(freq, dur, vol, opts) {
+    // opts = { wave: 'sine'|'triangle', overtone: bool, filterFreq: Hz }
+    if (!_audioReady) return;
+    try {
+      var actx = getActx();
+      if (!actx) return;
+      opts = opts || {};
+      var t = actx.currentTime;
+
+      // Cadena: osc → lowpass → gain → destination
+      var osc = actx.createOscillator();
+      var gain = actx.createGain();
+      var filter = actx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(opts.filterFreq || (freq * 3.5), t);
+      filter.Q.setValueAtTime(1.0, t);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(actx.destination);
+      osc.type = opts.wave || 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+
+      // Attack suave 25ms + decay exponencial natural
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(vol, t + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+
+      // Overtone harmónico — añade riqueza sin estridencia
+      if (opts.overtone !== false) {
+        var harm = actx.createOscillator();
+        var hg = actx.createGain();
+        harm.connect(hg);
+        hg.connect(actx.destination);
+        harm.type = 'sine';
+        harm.frequency.setValueAtTime(freq * 2, t);
+        hg.gain.setValueAtTime(0, t);
+        hg.gain.linearRampToValueAtTime(vol * 0.15, t + 0.030);
+        hg.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.7);
+        harm.start(t);
+        harm.stop(t + dur * 0.7 + 0.05);
+      }
+    } catch (e) {}
+  }
+
+  // v0.16.5: volúmenes subidos (~2x) — el user reportó que no oía
+  // los sonidos. Antes 0.06-0.10 era casi inaudible sobre música/
+  // ruido ambiente. Ahora 0.16-0.22 — perceptible pero todavía no
+  // estridente.
+
   function playSend() {
-    tone(520, 0.12, 0.10, 'sine', 320);
-    setTimeout(function () { tone(300, 0.09, 0.06, 'sine'); }, 90);
+    // User envió mensaje — soft tap warm. Frecuencia baja (G3) tipo
+    // golpe de wood puro, decay rápido.
+    warmTone(196, 0.20, 0.18, { wave: 'sine' });
   }
   function playThinking() {
-    tone(260, 0.35, 0.07, 'sine');
-    setTimeout(function () { tone(220, 0.35, 0.05, 'sine'); }, 180);
+    // Ashley está pensando. Tono medio-bajo, dur larga.
+    warmTone(220, 0.50, 0.12, { wave: 'sine' });
   }
   function playWriting() {
-    tone(494, 0.10, 0.09, 'sine');
-    setTimeout(function () { tone(587, 0.12, 0.08, 'sine'); }, 95);
-    setTimeout(function () { tone(659, 0.16, 0.07, 'sine'); }, 200);
+    // Ashley empezó a escribir — mini chord ascendente warm (G3→C4).
+    warmTone(196, 0.18, 0.14, { wave: 'sine' });
+    setTimeout(function () { warmTone(262, 0.22, 0.12, { wave: 'sine' }); }, 80);
   }
   function playResponse() {
-    tone(784,  0.10, 0.10, 'sine');
-    setTimeout(function () { tone(988,  0.12, 0.09, 'sine'); }, 100);
-    setTimeout(function () { tone(1175, 0.18, 0.07, 'sine'); }, 210);
+    // Ashley terminó — triada major C4-E4-G4 ascendente warm.
+    warmTone(262, 0.32, 0.18, { wave: 'sine' });
+    setTimeout(function () { warmTone(330, 0.32, 0.16, { wave: 'sine' }); }, 90);
+    setTimeout(function () { warmTone(392, 0.44, 0.15, { wave: 'sine' }); }, 200);
   }
 
   function playAffectionUp() {
-    // Gentle ascending sparkle — 3 notes going up
-    tone(660, 0.12, 0.07, 'sine');
-    setTimeout(function() { tone(880, 0.12, 0.06, 'sine'); }, 100);
-    setTimeout(function() { tone(1100, 0.15, 0.05, 'sine'); }, 200);
+    // Afecto sube — E4 → G4 → B4.
+    warmTone(330, 0.38, 0.18, { wave: 'sine' });
+    setTimeout(function () { warmTone(392, 0.38, 0.16, { wave: 'sine' }); }, 110);
+    setTimeout(function () { warmTone(494, 0.55, 0.15, { wave: 'sine' }); }, 230);
   }
-
   function playAffectionDown() {
-    // Soft descending sad tone — 2 notes going down
-    tone(440, 0.15, 0.05, 'sine');
-    setTimeout(function() { tone(330, 0.20, 0.04, 'sine', 280); }, 130);
+    // Afecto baja — E4 → C4 minor 3rd descendente.
+    warmTone(330, 0.45, 0.14, { wave: 'sine' });
+    setTimeout(function () { warmTone(262, 0.60, 0.12, { wave: 'sine' }); }, 150);
   }
 
   function playHeartbeat() {
-    // Two beats like a heart: tum-TUM... tum-TUM
-    tone(80, 0.15, 0.12, 'sine');
-    setTimeout(function() { tone(60, 0.12, 0.10, 'sine'); }, 150);
-    setTimeout(function() { tone(80, 0.15, 0.12, 'sine'); }, 800);
-    setTimeout(function() { tone(60, 0.12, 0.10, 'sine'); }, 950);
+    // Latido suave, mantiene el original — bass tones funcionan bien.
+    warmTone(110, 0.20, 0.10, { wave: 'sine', overtone: false });
+    setTimeout(function () { warmTone(82, 0.16, 0.08, { wave: 'sine', overtone: false }); }, 150);
+    setTimeout(function () { warmTone(110, 0.20, 0.10, { wave: 'sine', overtone: false }); }, 800);
+    setTimeout(function () { warmTone(82, 0.16, 0.08, { wave: 'sine', overtone: false }); }, 950);
   }
 
   function playAchievement() {
-    // Magical ascending arpeggio — more special than affection sounds
-    tone(523, 0.12, 0.08, 'sine');   // C5
-    setTimeout(function() { tone(659, 0.12, 0.07, 'sine'); }, 100);   // E5
-    setTimeout(function() { tone(784, 0.12, 0.07, 'sine'); }, 200);   // G5
-    setTimeout(function() { tone(1047, 0.20, 0.09, 'sine'); }, 300);  // C6
-    setTimeout(function() { tone(1319, 0.25, 0.06, 'sine'); }, 450);  // E6 (high sparkle)
+    // Logro desbloqueado — arpegio rico mayor (C4 E4 G4 C5 E5) +
+    // ligero shimmer al final. Es el sonido más prominente porque
+    // pasa raramente y debe sentirse SPECIAL.
+    warmTone(262, 0.25, 0.09, { wave: 'sine' });
+    setTimeout(function () { warmTone(330, 0.25, 0.08, { wave: 'sine' }); }, 100);
+    setTimeout(function () { warmTone(392, 0.30, 0.08, { wave: 'sine' }); }, 200);
+    setTimeout(function () { warmTone(523, 0.45, 0.10, { wave: 'sine' }); }, 320);
+    setTimeout(function () { warmTone(659, 0.55, 0.07, { wave: 'sine' }); }, 480);
+  }
+
+  // v0.16.3 — nuevos sonidos para más eventos del chat
+  function playHeartHover() {
+    // Hover sobre el corazón — tap suave warm, muy bajo vol.
+    warmTone(440, 0.15, 0.04, { wave: 'sine' });
+  }
+  function playToggleOn() {
+    // Activar un toggle (Acciones, etc.) — soft click ascendente.
+    warmTone(330, 0.10, 0.06, { wave: 'sine' });
+    setTimeout(function () { warmTone(440, 0.12, 0.05, { wave: 'sine' }); }, 60);
+  }
+  function playToggleOff() {
+    // Desactivar — descendente.
+    warmTone(440, 0.10, 0.05, { wave: 'sine' });
+    setTimeout(function () { warmTone(330, 0.12, 0.04, { wave: 'sine' }); }, 60);
   }
 
 
@@ -223,19 +365,26 @@
      AUTO-SCROLL + SOUND TRIGGERS
   ══════════════════════════════════════════ */
   function initObservers() {
-    var box = document.getElementById('chat_messages');
-    if (!box) { setTimeout(initObservers, 300); return; }
+    var msgsBox = document.getElementById('chat_messages');
+    if (!msgsBox) { setTimeout(initObservers, 300); return; }
+
+    // v0.16.5 fix scroll: en el layout nuevo el id `chat_messages` vive
+    // en el vstack INTERNO (sin overflow). El scroll real ocurre en el
+    // ancestro con clase `.ashley-chat-scroll` (overflow-y:auto). Antes
+    // hacíamos `chat_messages.scrollTop = scrollHeight` lo que era
+    // un no-op porque ese elemento no scrollea — por eso el chat al
+    // abrir aparecía arriba del todo.
+    //
+    // closest() camina hacia arriba y encuentra el primer ancestor con
+    // la clase. Si por alguna razón no existe (layout futuro), caemos
+    // al box original como fallback.
+    var box = msgsBox.closest('.ashley-chat-scroll') || msgsBox;
 
     // Auto-scroll inteligente — solo pega al fondo si el user YA estaba
     // cerca del fondo. Si el user scrolleó arriba (para releer algo),
     // respetamos su posición y NO le pegamos abajo cuando Ashley actualiza
     // su mensaje en stream. Cuando el user vuelve cerca del fondo
     // (scroll manual o navegando), volvemos al modo "stick".
-    //
-    // Bug original: el MutationObserver siempre pegaba abajo en cada
-    // mutation, incluyendo updates del current_response durante stream.
-    // Un user que scrolleaba arriba mientras Ashley escribía era
-    // inmediatamente devuelto al fondo.
     var stickToBottom = true;
     var STICK_MARGIN_PX = 80;  // dentro de 80px del fondo = "stuck"
 
@@ -244,26 +393,45 @@
       stickToBottom = distanceFromBottom < STICK_MARGIN_PX;
     }
 
-    // Listener: cada vez que el user (no las mutations programáticas)
-    // mueva el scroll, recalculamos si seguimos "stuck" abajo.
+    // Scroll listeners en el container scrollable (no en chat_messages).
     box.addEventListener('scroll', recomputeStick, { passive: true });
-    // También con la rueda del mouse y touch — algunos browsers no
-    // disparan scroll para movimientos muy pequeños.
     box.addEventListener('wheel', function () {
-      // Pequeño delay para que el scroll position se actualice antes de medir
       setTimeout(recomputeStick, 0);
     }, { passive: true });
 
+    // El observer mira mutations sobre msgsBox (donde se añaden los
+    // .msg-enter) pero la acción de scroll se aplica al container.
     var scrollObs = new MutationObserver(function () {
       if (stickToBottom) {
         box.scrollTop = box.scrollHeight;
       }
     });
-    scrollObs.observe(box, { childList: true, subtree: true, characterData: true });
+    scrollObs.observe(msgsBox, { childList: true, subtree: true, characterData: true });
 
-    // Initial: arrancamos al fondo
-    box.scrollTop = box.scrollHeight;
+    // v0.16.5 — Initial scroll polling más agresivo (40 intentos × 75ms
+    // = 3s) y aplicado al container correcto. React puede seguir
+    // renderizando mensajes durante el primer segundo, y los assets
+    // de imagen (avatar, mood-image) cambian el scrollHeight cuando
+    // cargan — necesitamos seguir empujando al fondo durante un rato.
+    var _initialScrollAttempts = 0;
+    function _initialScroll() {
+      box.scrollTop = box.scrollHeight;
+      _initialScrollAttempts++;
+      if (_initialScrollAttempts < 40) {
+        setTimeout(_initialScroll, 75);
+      }
+    }
+    _initialScroll();
     stickToBottom = true;
+
+    // Re-trigger initial scroll cuando la fuente principal (Cormorant
+    // Garamond) termina de cargar — eso re-mide los altos de las
+    // burbujas y puede haber cambiado el scrollHeight.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        box.scrollTop = box.scrollHeight;
+      }).catch(function () {});
+    }
 
     // ── Sound observer ──────────────────────────────
     // Wait 600 ms for React to finish rendering existing messages,
@@ -289,11 +457,17 @@
         }
         prevMsgCount = all.length;
       });
-      msgObs.observe(box, { childList: true, subtree: false });
+      // v0.16.5: subtree=true — Reflex puede meter wrappers entre
+      // chat_messages y los .msg-enter; con subtree=false el observer
+      // perdía los mensajes y los sonidos no disparaban.
+      msgObs.observe(box, { childList: true, subtree: true });
 
-      // Thinking / streaming → lightweight 100 ms poll
+      // Thinking / streaming → lightweight 100 ms poll.
+      // v0.16.5 fix: el selector era `.avatar-thinking` que no existe
+      // en la UI nueva (la clase real es `.portrait-thinking` en el
+      // avatar de Ashley). Por eso playThinking() jamás disparaba.
       setInterval(function () {
-        var isThink  = !!document.querySelector('.avatar-thinking');
+        var isThink  = !!document.querySelector('.portrait-thinking');
         var isStream = !!document.querySelector('.cursor-blink');
         if (isThink  && !prevThink)  playThinking();
         if (isStream && !prevStream) playWriting();
@@ -302,6 +476,65 @@
       }, 100);
 
     }, 600);
+  }
+
+
+  /* ══════════════════════════════════════════
+     INTERACTIVE SOUNDS — hover + click (v0.16.5)
+  ══════════════════════════════════════════
+     User reportó "no hay sonido cuando paso el ratón por los botones
+     ni cuando clickeo". Tenía las funciones playToggleOn/playHeartHover
+     definidas pero nunca las wireé a eventos reales.
+
+     Approach: event delegation en document. Mouseover/click bubbles a
+     document, así que un solo listener captura TODOS los botones,
+     incluso los que React añade después. */
+
+  function initInteractiveSounds() {
+    // Selectores de elementos "interactivos" que merecen sonido:
+    var SEL = '.ashley-nav-link, .ashley-action-btn, .heart-frame, ' +
+              '.ashley-toggle-seg, .ashley-send-btn, ' +
+              '.ashley-mic-btn, button[type="submit"]';
+
+    // ── Hover: track el último botón hovered. Solo dispara sonido
+    // cuando entras a uno NUEVO. Mouseover bubbles, mouseenter no —
+    // así que usamos mouseover + tracking de "elemento actual".
+    var lastHovered = null;
+    document.addEventListener('mouseover', function (e) {
+      if (!_audioReady) return;
+      var btn = e.target.closest(SEL);
+      if (btn === lastHovered) return;
+      if (btn) {
+        lastHovered = btn;
+        // Tap muy suave warm — el "sonidito" boutique al hover
+        warmTone(740, 0.08, 0.06, { wave: 'sine', overtone: false });
+      } else {
+        lastHovered = null;
+      }
+    }, { passive: true });
+
+    // ── Click: sound on press. Skip send button (la animación del
+    // mensaje + playSend del observer ya dan feedback). Heart tiene
+    // su propio tono más rico. Resto: playToggleOn genérico.
+    document.addEventListener('click', function (e) {
+      if (!_audioReady) return;
+      var btn = e.target.closest(SEL);
+      if (!btn) return;
+      // Send button: deja que el msg observer reproduzca playSend
+      if (btn.classList.contains('ashley-send-btn') ||
+          btn.getAttribute('type') === 'submit') {
+        return;
+      }
+      // Heart: sound más rico (es el único elemento "afectivo")
+      if (btn.classList.contains('heart-frame')) {
+        warmTone(523, 0.20, 0.14, { wave: 'sine' });
+        setTimeout(function () { warmTone(659, 0.22, 0.10, { wave: 'sine' }); }, 70);
+        return;
+      }
+      // Resto de botones: click warm corto
+      warmTone(440, 0.10, 0.10, { wave: 'sine' });
+      setTimeout(function () { warmTone(587, 0.12, 0.08, { wave: 'sine' }); }, 55);
+    }, { passive: true });
   }
 
 
@@ -765,9 +998,11 @@
      BOOT
   ══════════════════════════════════════════ */
   function boot() {
-    initStarfield();
+    // v0.16 — starfield desactivado en el rediseño boutique noir.
+    // initStarfield();
     initTextarea();
     initObservers();
+    initInteractiveSounds();  // v0.16.5 — hover/click sounds
     initNotificationObserver();
     initPinOnTopObserver();
     initVisibilityReload();
@@ -777,10 +1012,33 @@
     initUpdateNotifier();
   }
 
+  // v0.15.4 — el canvas de starfield ahora lo renderiza Reflex
+  // (rx.el.canvas en index()). Pero el script defer puede correr
+  // antes de que React monte el árbol → no encuentra el canvas →
+  // las estrellas no arrancan.
+  // Solución: si al hacer boot el canvas no existe todavía,
+  // reintentamos cada 100ms hasta máximo 2s. Una vez detectado,
+  // boot() arranca el loop de estrellas y el resto de inits.
+  function bootWhenReady() {
+    var canvas = document.getElementById('ashley-starfield');
+    if (canvas) {
+      boot();
+      return;
+    }
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      if (document.getElementById('ashley-starfield') || tries > 20) {
+        clearInterval(iv);
+        boot();
+      }
+    }, 100);
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
+    document.addEventListener('DOMContentLoaded', bootWhenReady);
   } else {
-    boot();
+    bootWhenReady();
   }
 
 })();

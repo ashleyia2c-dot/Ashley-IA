@@ -79,30 +79,37 @@ STREAM_CHUNK_SIZE = 5
 #  Colores
 # ─────────────────────────────────────────────
 
-COLOR_PRIMARY = "#ff9aee"
-COLOR_PRIMARY_HOVER = "#ffb8f5"
-COLOR_BG_APP = "#0a0a0a"
-COLOR_BG_CHAT = "#0f0f0f"
-COLOR_BG_MSG_ASHLEY = "#3a1f4d"
-COLOR_BG_MSG_USER = "#1f2a44"
-COLOR_BG_INPUT = "#1a1a1a"
-COLOR_BG_FACT_BADGE = "#2a0f3d"
-COLOR_TEXT_MUTED = "#bbbbbb"
-COLOR_TEXT_DIM = "#cccccc"
-COLOR_TEXT_FACT = "#dddddd"
-COLOR_STATUS_ONLINE = "#88ff99"
-COLOR_STATUS_WRITING = "#ffcc88"
-COLOR_BUTTON_OFF = "#333333"
-COLOR_BUTTON_OFF_TEXT = "#aaaaaa"
+# v0.16 — paleta wine/sepia cálida (rediseño tipo "cinema noir boutique")
+# Antes: rosa neón #ff9aee + negro azulado.
+# Ahora: ámbar/dorado cálido + vino burgundy + crema. Aesthetic más
+# elegante, mature, "candle-lit room" en lugar de "discoteca cyberpunk".
+# La transición la dispara el cambio del valor de COLOR_PRIMARY que
+# se propaga vía rx.var → CSS, junto con override de body/glass en
+# styles.py.
+COLOR_PRIMARY = "#d4a373"          # ámbar dorado (acento principal)
+COLOR_PRIMARY_HOVER = "#e6b887"    # ámbar más claro
+COLOR_BG_APP = "#1a0a10"           # vino profundo (fondo base)
+COLOR_BG_CHAT = "#231119"          # vino chat panel
+COLOR_BG_MSG_ASHLEY = "#2d1822"    # ashley bubble vino
+COLOR_BG_MSG_USER = "#3a2330"      # user bubble (vino más claro/marrón)
+COLOR_BG_INPUT = "#1f0e15"         # input bg
+COLOR_BG_FACT_BADGE = "#2a1419"    # fact badges
+COLOR_TEXT_MUTED = "#9c8b7e"       # crema apagado
+COLOR_TEXT_DIM = "#c4b3a4"         # crema medio
+COLOR_TEXT_FACT = "#e8dcc4"        # crema texto principal
+COLOR_STATUS_ONLINE = "#c8a47d"    # online ámbar suave
+COLOR_STATUS_WRITING = "#e6b887"   # escribiendo ámbar más vivo
+COLOR_BUTTON_OFF = "#3a2630"       # botón apagado
+COLOR_BUTTON_OFF_TEXT = "#9c8b7e"
 
 # ─────────────────────────────────────────────
-#  Sombras
+#  Sombras (todas en tonos cálidos)
 # ─────────────────────────────────────────────
 
-SHADOW_ASHLEY = "0 4px 15px rgba(255,154,238,0.15)"
-SHADOW_USER = "0 4px 15px rgba(100,150,255,0.15)"
-SHADOW_BUTTON = "0 4px 15px rgba(255,154,238,0.35)"
-SHADOW_AVATAR = "0 0 25px rgba(255,154,238,0.4)"
+SHADOW_ASHLEY = "0 4px 18px rgba(212,163,115,0.14)"
+SHADOW_USER = "0 4px 18px rgba(196,127,90,0.10)"
+SHADOW_BUTTON = "0 4px 18px rgba(212,163,115,0.35)"
+SHADOW_AVATAR = "0 0 35px rgba(212,163,115,0.40)"
 
 # ─────────────────────────────────────────────
 #  Dimensiones UI
@@ -113,3 +120,20 @@ CHAT_WIDTH = "880px"
 DIALOG_WIDTH = "900px"
 CHAT_HEIGHT = "58vh"
 MEMORY_HEIGHT = "60vh"
+
+# v0.15 — layout 3-columnas estilo c.ai
+# Sidebar izquierdo: navegación principal (memorias, noticias, acciones,
+#   toggles secundarios, idioma, ajustes, manual). Reemplaza los pills
+#   horizontales del header. Ancho fijo — colapsable a iconos en
+#   pantallas <1280px vía CSS @media (no implementado aún).
+# Panel derecho: tarjeta de Ashley arriba (avatar + nombre + status +
+#   afecto) y un área grande reservada para el modelo 3D que llegará
+#   en una versión posterior. Por ahora el área 3D contiene un
+#   placeholder con label.
+SIDEBAR_LEFT_WIDTH = "240px"
+# v0.15.2 — panel derecho ensanchado para que el área de Ashley 2D
+# (mood-image que cambia con el chat) sea protagonista. Antes 360px
+# era cómodo solo para el placeholder 3D; con el 2D real necesita
+# más presencia visual.
+PANEL_RIGHT_WIDTH = "460px"
+MODEL_3D_HEIGHT = "560px"

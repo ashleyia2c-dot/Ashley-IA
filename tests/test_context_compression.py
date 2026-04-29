@@ -193,3 +193,86 @@ def test_format_dialogue_truncates_long_messages():
     # Truncado + ellipsis
     assert "..." in text
     assert len(text) < 500
+
+
+# ──────────────────────────────────────────────────
+#  Pre-warm coordination flag (v0.14.5)
+# ──────────────────────────────────────────────────
+
+def test_compress_flag_default_is_false():
+    from reflex_companion import context_compression as cc
+    cc.set_compress_regen_in_progress(False)
+    assert cc.is_compress_regen_in_progress() is False
+
+
+def test_compress_flag_same_thread_sees_false():
+    """El thread del bg pre-warm setea el flag pero al ejecutar
+    compress_history para SU PROPIO regen debe ver False (sino se
+    auto-bloquearía y nunca regeneraría nada)."""
+    from reflex_companion import context_compression as cc
+    try:
+        cc.set_compress_regen_in_progress(True)
+        assert cc.is_compress_regen_in_progress() is False
+    finally:
+        cc.set_compress_regen_in_progress(False)
+
+
+def test_compress_flag_other_thread_sees_true():
+    import threading
+    from reflex_companion import context_compression as cc
+    seen = []
+    try:
+        cc.set_compress_regen_in_progress(True)
+        t = threading.Thread(target=lambda: seen.append(
+            cc.is_compress_regen_in_progress()
+        ))
+        t.start()
+        t.join(timeout=2)
+        assert seen == [True]
+    finally:
+        cc.set_compress_regen_in_progress(False)
+
+
+def test_compress_history_uses_stale_cache_when_other_thread_regenerating(monkeypatch):
+    """Si otro thread está mid-regen, compress_history del user devuelve
+    el caché stale en lugar de hacer una segunda llamada LLM."""
+    import threading
+    from reflex_companion import context_compression as cc
+
+    # Setup: caché stale en disco (covers viejo)
+    msgs = _mk_msgs(40)
+    cc._save_cache({
+        "text": "Stale summary from before",
+        "covers_up_to_count": 5,  # mucho menor que older_end → needs_regen=True
+        "generated_at": "2026-01-01T00:00:00",
+    })
+
+    # Mock el summarizer para detectar si se llama (no debería)
+    summarizer_called = []
+    def _spy_summarizer(*args, **kwargs):
+        summarizer_called.append(args)
+        return "should not be called"
+    monkeypatch.setattr(cc, "_call_fast_summarizer", _spy_summarizer)
+
+    # Otro thread setea el flag
+    flag_setter = threading.Thread(
+        target=lambda: cc.set_compress_regen_in_progress(True)
+    )
+    flag_setter.start()
+    flag_setter.join()
+    # Now from THIS thread (different from setter), compress should
+    # detect the in-progress flag and skip regen.
+    try:
+        result = cc.compress_history(msgs, "es")
+        # Debe usar el caché stale (no llamar al summarizer)
+        assert summarizer_called == [], (
+            f"summarizer was called {len(summarizer_called)} times despite "
+            f"in-progress flag — should have used stale cache"
+        )
+        # Y devolver una lista que contenga el resumen stale
+        assert any(
+            "Stale summary from before" in (m.get("content") or "")
+            for m in result
+        )
+    finally:
+        cc.set_compress_regen_in_progress(False)

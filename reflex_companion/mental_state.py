@@ -53,6 +53,42 @@ PREOCCUPATION_TTL_MINUTES = 60
 # Cada cuántos turnos se fuerza iniciativa conversacional
 INITIATIVE_EVERY_N_TURNS = 3
 
+
+# ─────────────────────────────────────────────
+#  Flag de coordinación pre-warm (v0.14.5)
+# ─────────────────────────────────────────────
+#
+# discovery_bg_task arranca un regen de preoccupation en background al
+# abrir la app. Si el user es ultra-rápido y manda su primer mensaje
+# mientras el bg está mid-regen, _compute_mental_state_block del lado
+# del user vería que la preoccupation sigue stale en disco y dispararía
+# un SEGUNDO regen (LLM call duplicado, ~3.5s wait).
+#
+# Guardamos el thread_id del bg que está regenerando. is_*_in_progress()
+# devuelve True solo si OTRO thread está mid-regen — así el thread que
+# setea el flag sigue ejecutando su propio regen (que es lo que queremos),
+# pero el thread del user ve que hay regen en curso y skip el suyo.
+import threading as _threading
+_PREOCCUPATION_REGEN_THREAD_ID: int | None = None
+
+
+def is_preoccupation_regen_in_progress() -> bool:
+    """True si OTRO thread está regenerando. El thread que setó el flag
+    ve False (puede hacer su trabajo)."""
+    tid = _PREOCCUPATION_REGEN_THREAD_ID
+    if tid is None:
+        return False
+    return tid != _threading.get_ident()
+
+
+def set_preoccupation_regen_in_progress(value: bool) -> None:
+    """Solo llamado desde el bg pre-warm en reflex_companion.py.
+    Marca el inicio (True) y fin (False, dentro de un finally)."""
+    global _PREOCCUPATION_REGEN_THREAD_ID
+    _PREOCCUPATION_REGEN_THREAD_ID = (
+        _threading.get_ident() if value else None
+    )
+
 # Umbral para considerar "gap largo" y meter contexto temporal al regenerar
 LONG_GAP_MINUTES = 90
 

@@ -250,3 +250,56 @@ def test_format_block_does_not_include_preoccupation_when_empty():
     block = ms.format_mental_state_block(s, "es", False)
     # Should not include a "rumiando" section if nothing there
     assert "rumiando" not in block.lower()
+
+
+# ──────────────────────────────────────────────────
+#  Pre-warm coordination flag (v0.14.5)
+# ──────────────────────────────────────────────────
+
+def test_preoccupation_flag_default_is_false():
+    # Estado inicial: ningún regen en curso.
+    ms.set_preoccupation_regen_in_progress(False)
+    assert ms.is_preoccupation_regen_in_progress() is False
+
+
+def test_preoccupation_flag_same_thread_sees_false():
+    """El thread que SETÓ el flag a True debe ver False — necesario para
+    que el bg pre-warm pueda ejecutar SU PROPIO regen sin auto-bloquearse.
+    Solo OTROS threads ven el flag como True para skip su regen."""
+    try:
+        ms.set_preoccupation_regen_in_progress(True)
+        # Mismo thread que setó → ve False
+        assert ms.is_preoccupation_regen_in_progress() is False
+    finally:
+        ms.set_preoccupation_regen_in_progress(False)
+
+
+def test_preoccupation_flag_other_thread_sees_true():
+    """Cuando el bg pre-warm está mid-regen, un segundo thread (el del user)
+    debe ver el flag True y saber que tiene que skip su propio regen."""
+    import threading
+    seen = []
+    try:
+        ms.set_preoccupation_regen_in_progress(True)
+        t = threading.Thread(target=lambda: seen.append(
+            ms.is_preoccupation_regen_in_progress()
+        ))
+        t.start()
+        t.join(timeout=2)
+        assert seen == [True]
+    finally:
+        ms.set_preoccupation_regen_in_progress(False)
+
+
+def test_preoccupation_flag_clear_returns_false_everywhere():
+    import threading
+    ms.set_preoccupation_regen_in_progress(True)
+    ms.set_preoccupation_regen_in_progress(False)
+    assert ms.is_preoccupation_regen_in_progress() is False
+    seen = []
+    t = threading.Thread(target=lambda: seen.append(
+        ms.is_preoccupation_regen_in_progress()
+    ))
+    t.start()
+    t.join(timeout=2)
+    assert seen == [False]

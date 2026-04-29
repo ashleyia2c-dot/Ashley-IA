@@ -516,10 +516,13 @@ function hardenWindow(win) {
 function createSplash() {
   const iconPath = path.join(__dirname, 'build-resources', 'icon.ico');
   splashWindow = new BrowserWindow({
-    width: 400, height: 280,
+    width: 420, height: 320,
     frame: false, transparent: false, alwaysOnTop: true,
     resizable: false, movable: true,
-    backgroundColor: '#0a0a0a',
+    // v0.16.2 — paleta wine/amber boutique noir (matching app colors).
+    // Antes: pink fluo + casi-negro #0a0a0a. Ahora: wine deep + ámbar
+    // dorado, tipografía serif Cormorant para el "Ashley" branding.
+    backgroundColor: '#1a0a10',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     center: true, skipTaskbar: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -528,19 +531,75 @@ function createSplash() {
   // el resto de la UI. Default EN (primera ejecucion o archivo inexistente).
   const lang = loadLanguageSync();
   const s = SPLASH_STRINGS[lang] || SPLASH_STRINGS[DEFAULT_LANG];
-  const splashHTML = `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8"><style>
-    body{margin:0;padding:0;background:#0a0a0a;color:#ff9aee;font-family:'Segoe UI',sans-serif;
-      display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;user-select:none}
-    h1{margin:0 0 12px;font-size:42px;font-weight:300;letter-spacing:4px}
-    .sub{color:#bbb;font-size:13px;margin-bottom:28px}
-    .spinner{width:32px;height:32px;border:3px solid #333;border-top-color:#ff9aee;
-      border-radius:50%;animation:spin 0.9s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .status{margin-top:20px;font-size:11px;color:#666}
-  </style></head><body>
-    <h1>Ashley</h1><div class="sub">${s.sub}</div>
-    <div class="spinner"></div><div class="status">${s.status}</div>
-  </body></html>`;
+  const splashHTML = `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      body {
+        margin: 0; padding: 0;
+        background:
+          radial-gradient(ellipse at top left,  rgba(212,163,115,0.16) 0%, transparent 55%),
+          radial-gradient(ellipse at bottom right, rgba(140,60,70,0.20) 0%, transparent 60%),
+          linear-gradient(135deg, #2a0f15 0%, #150810 70%, #0a0408 100%);
+        color: #e8dcc4;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; height: 100vh; user-select: none;
+        position: relative; overflow: hidden;
+      }
+      /* Glow pulsante warm detrás del título */
+      body::before {
+        content: ''; position: absolute; top: 30%; left: 50%;
+        width: 60%; height: 50%; transform: translate(-50%, -50%);
+        background: radial-gradient(ellipse,
+          rgba(212,163,115,0.30) 0%,
+          rgba(212,163,115,0.10) 35%,
+          transparent 65%);
+        filter: blur(30px);
+        animation: glowPulse 3s ease-in-out infinite;
+        pointer-events: none;
+      }
+      @keyframes glowPulse {
+        0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+        50%      { opacity: 1.0; transform: translate(-50%, -50%) scale(1.08); }
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-family: 'Cormorant Garamond', Georgia, serif;
+        font-size: 64px; font-weight: 600; letter-spacing: 0.02em;
+        color: #e8dcc4;
+        text-shadow:
+          0 2px 12px rgba(0,0,0,0.6),
+          0 0 30px rgba(212,163,115,0.40);
+        position: relative; z-index: 2;
+      }
+      .sub {
+        color: #c4b3a4; font-size: 13px; margin-bottom: 32px;
+        font-style: italic; letter-spacing: 0.06em;
+        position: relative; z-index: 2;
+      }
+      .spinner {
+        width: 36px; height: 36px;
+        border: 2px solid rgba(212,163,115,0.18);
+        border-top-color: #d4a373;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+        position: relative; z-index: 2;
+        box-shadow: 0 0 18px rgba(212,163,115,0.30);
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .status {
+        margin-top: 22px; font-size: 11px; color: #8b6e5c;
+        letter-spacing: 0.10em; text-transform: uppercase;
+        position: relative; z-index: 2;
+      }
+    </style></head><body>
+      <h1>Ashley</h1>
+      <div class="sub">${s.sub}</div>
+      <div class="spinner"></div>
+      <div class="status">${s.status}</div>
+    </body></html>`;
   splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHTML));
   splashWindow.on('closed', () => { splashWindow = null; });
   hardenWindow(splashWindow);

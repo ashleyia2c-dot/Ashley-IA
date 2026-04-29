@@ -56,6 +56,39 @@ SUMMARY_FILE = _data_path("context_summary_ashley.json")
 
 
 # ─────────────────────────────────────────────
+#  Flag de coordinación pre-warm (v0.14.5)
+# ─────────────────────────────────────────────
+#
+# Mismo patrón que mental_state. discovery_bg_task arranca un regen del
+# resumen en background al abrir la app. Si el user manda mensaje mientras
+# corre, compress_history detectaría caché stale y dispararía un SEGUNDO
+# LLM call (~3.9s extra de wait). Con el flag, devuelve el valor stale
+# (o el historial raw si no hay caché todavía) sin llamada extra.
+#
+# Guardamos thread_id — is_compress_regen_in_progress() devuelve True solo
+# si OTRO thread está regenerando. El thread que setea el flag puede
+# ejecutar su propio regen sin auto-bloquearse.
+import threading as _threading
+_COMPRESS_REGEN_THREAD_ID: int | None = None
+
+
+def is_compress_regen_in_progress() -> bool:
+    """True si OTRO thread está regenerando."""
+    tid = _COMPRESS_REGEN_THREAD_ID
+    if tid is None:
+        return False
+    return tid != _threading.get_ident()
+
+
+def set_compress_regen_in_progress(value: bool) -> None:
+    """Solo llamado desde el bg pre-warm en reflex_companion.py."""
+    global _COMPRESS_REGEN_THREAD_ID
+    _COMPRESS_REGEN_THREAD_ID = (
+        _threading.get_ident() if value else None
+    )
+
+
+# ─────────────────────────────────────────────
 #  Caché persistente
 # ─────────────────────────────────────────────
 
@@ -201,6 +234,17 @@ def compress_history(messages: list[dict], language: str) -> list[dict]:
         or covers_count < older_end - REGEN_AFTER_NEW_MSGS
         or covers_count > older_end  # historial se encogió (borrado) → invalidar
     )
+
+    # v0.14.5: si el bg pre-warm ya está regenerando este caché, NO
+    # disparamos un segundo LLM call. Usamos el caché actual aunque
+    # sea stale; el bg termina y escribe a disco, y el siguiente
+    # _stream_grok ya lee la versión fresca.
+    if needs_regen and is_compress_regen_in_progress():
+        if cached.get("text"):
+            needs_regen = False  # usar caché stale, no doble-LLM
+        # Si no hay caché en absoluto, dejamos que el path normal
+        # caiga al fallback "return messages" — más seguro que un
+        # resumen vacío.
 
     summary_text = cached.get("text", "")
     if needs_regen:

@@ -13,10 +13,132 @@ from .config import COLOR_PRIMARY
 
 def global_styles():
     return rx.html(f"""
+<!-- v0.16 — Google Fonts (serif elegante para "Ashley" branding) + sans
+     limpia para chat. Cormorant Garamond es el serif boutique perfecto:
+     letras finas, ascenders altos, looks expensive sin ser pretencioso. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- v0.16.4 — gradient compartido para los rayos de luz cenital.
+     Los polygons del SVG _light_rays_svg() rellenan con url(#ashley-ray-grad).
+     Definirlo una vez aquí evita duplicar el <defs> en cada panel. -->
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <defs>
+    <linearGradient id="ashley-ray-grad" x1="0" y1="0" x2="0" y2="1">
+      <!-- v0.16.5 fade más temprano: la luz angelical toca cabeza
+           y hombros (upper 0-50%) y se desvanece antes de tocar
+           el cuerpo (50%+). Antes el fade era a 70% — los rayos
+           llegaban casi al fondo del panel y se sentía "apuntando
+           al espacio vacío". -->
+      <stop offset="0%"  stop-color="#ffe0b3" stop-opacity="0.75"/>
+      <stop offset="20%" stop-color="#ffcc88" stop-opacity="0.45"/>
+      <stop offset="45%" stop-color="#ffb866" stop-opacity="0.10"/>
+      <stop offset="70%" stop-color="#ffb866" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+</svg>
 <style>
+  /* ── Body bg cálido con gradient diagonal de wine a casi-negro,
+        más capas de luz ambient suave que se mueven. El user pidió
+        "efectos de luz constantes y suaves para que el chat no se
+        sienta como algo solido que no se mueve". */
   html, body {{
-    background: #080810 !important;
+    background:
+      radial-gradient(ellipse at top left, rgba(212,163,115,0.10) 0%, transparent 55%),
+      radial-gradient(ellipse at bottom right, rgba(140,60,70,0.18) 0%, transparent 60%),
+      linear-gradient(135deg, #2a0f15 0%, #150810 70%, #0a0408 100%) !important;
+    background-attachment: fixed !important;
     margin: 0; padding: 0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: #e8dcc4;
+  }}
+
+  /* ── Capas de luz ambient — siempre en movimiento sutil ────────
+        Tres capas con frecuencias diferentes flotando lento. Crean
+        la sensación de que la habitación está iluminada por varias
+        velas que tiemblan suave. Pointer-events:none para que no
+        bloqueen clicks. */
+  .ambient-glow-1, .ambient-glow-2, .ambient-glow-3 {{
+    position: fixed;
+    pointer-events: none;
+    z-index: 0;
+    will-change: transform, opacity;
+    filter: blur(80px);
+  }}
+  .ambient-glow-1 {{
+    top: -15vh; left: -10vw;
+    width: 70vw; height: 70vh;
+    background: radial-gradient(ellipse,
+      rgba(212,163,115,0.20) 0%,
+      rgba(212,163,115,0.08) 40%,
+      transparent 65%);
+    animation: ambientFloat1 16s ease-in-out infinite;
+  }}
+  .ambient-glow-2 {{
+    bottom: -10vh; right: -10vw;
+    width: 60vw; height: 60vh;
+    background: radial-gradient(ellipse,
+      rgba(196,127,90,0.16) 0%,
+      rgba(140,60,70,0.10) 40%,
+      transparent 65%);
+    animation: ambientFloat2 22s ease-in-out infinite;
+  }}
+  .ambient-glow-3 {{
+    top: 30vh; left: 40vw;
+    width: 35vw; height: 35vh;
+    background: radial-gradient(circle,
+      rgba(232,202,158,0.10) 0%,
+      transparent 60%);
+    animation: ambientFloat3 28s ease-in-out infinite;
+  }}
+  @keyframes ambientFloat1 {{
+    0%, 100% {{ transform: translate(0, 0) scale(1); opacity: 0.65; }}
+    33%      {{ transform: translate(3vw, 2vh) scale(1.06); opacity: 0.85; }}
+    66%      {{ transform: translate(-2vw, 4vh) scale(0.95); opacity: 0.55; }}
+  }}
+  @keyframes ambientFloat2 {{
+    0%, 100% {{ transform: translate(0, 0) scale(1); opacity: 0.55; }}
+    50%      {{ transform: translate(-3vw, -2vh) scale(1.08); opacity: 0.85; }}
+  }}
+  @keyframes ambientFloat3 {{
+    0%, 100% {{ transform: translate(0, 0) scale(1); opacity: 0.40; }}
+    50%      {{ transform: translate(4vw, -3vh) scale(1.10); opacity: 0.65; }}
+  }}
+
+  /* Spotlight cálido sobre el área de la portrait — efecto vela
+     iluminando por arriba como en el mockup. */
+  .portrait-spotlight {{
+    position: absolute;
+    top: -10%; left: 50%;
+    transform: translateX(-50%);
+    width: 100%; height: 60%;
+    background: radial-gradient(ellipse at top,
+      rgba(232,202,158,0.30) 0%,
+      rgba(212,163,115,0.10) 30%,
+      transparent 55%);
+    pointer-events: none;
+    z-index: 2;
+    filter: blur(20px);
+    animation: spotlightFlicker 8s ease-in-out infinite;
+  }}
+  @keyframes spotlightFlicker {{
+    0%, 100% {{ opacity: 0.85; }}
+    25%      {{ opacity: 1.00; }}
+    50%      {{ opacity: 0.75; }}
+    75%      {{ opacity: 0.95; }}
+  }}
+
+  /* ── Tipografía elegante para "Ashley" branding ─────────── */
+  .ashley-serif {{
+    font-family: 'Cormorant Garamond', Georgia, serif !important;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-feature-settings: "liga" 1, "kern" 1;
+  }}
+  .ashley-serif-light {{
+    font-family: 'Cormorant Garamond', Georgia, serif !important;
+    font-weight: 400;
+    letter-spacing: 0.02em;
   }}
   .radix-themes,
   [data-is-root-theme],
@@ -183,42 +305,916 @@ def global_styles():
     animation: pillPulse 2.2s ease-in-out infinite, visionPulse 3s ease-in-out infinite;
   }}
 
-  /* ── Glassmorphism — burbujas ────────────────────────── */
-  .bubble-ashley {{
-    background: rgba(110, 40, 155, 0.28) !important;
-    backdrop-filter: blur(16px) saturate(160%) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
-    border: 1px solid rgba(255, 154, 238, 0.32) !important;
-    box-shadow: 0 4px 22px rgba(255,154,238,0.16),
-                inset 0 1px 0 rgba(255,255,255,0.07) !important;
-  }}
-  .bubble-user {{
-    background: rgba(25, 55, 120, 0.28) !important;
-    backdrop-filter: blur(16px) saturate(160%) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
-    border: 1px solid rgba(100, 150, 255, 0.28) !important;
-    box-shadow: 0 4px 22px rgba(100,150,255,0.12),
-                inset 0 1px 0 rgba(255,255,255,0.05) !important;
-  }}
+  /* ── Burbujas estilo wine boutique (v0.16.1) ─────────────────
+     Lora serif (más elegante para body de chat que Inter sans).
+     Ashley: vino oscuro con borde ámbar suave.
+     User: marrón cálido con borde más sutil.
 
-  /* ── Glassmorphism — panels ──────────────────────────── */
-  .glass-chat {{
-    background: rgba(8, 5, 18, 0.55) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255,154,238,0.08) !important;
+     v0.16.7 — tipografía cambiada de Lora serif (15px) a Inter sans
+     (17px) por feedback de legibilidad. El user reportó que le
+     costaba leer a distancia. Inter es el font de UI más probado
+     para legibilidad en pantalla — letterforms abiertos, x-height
+     alto. La elegancia boutique se mantiene en el branding (Ashley
+     header, name overlay) que sigue siendo Cormorant Garamond serif.
+
+     Italics seguimos respetando para *gestos* que Ashley usa. */
+  .bubble-ashley, .bubble-user {{
+    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif !important;
+    font-size: 17px !important;
+    line-height: 1.6 !important;
+    letter-spacing: 0.01em !important;
+    font-weight: 400 !important;
   }}
-  .glass-portrait {{
-    background: rgba(12, 7, 22, 0.28) !important;
+  .bubble-ashley em, .bubble-user em,
+  .bubble-ashley i, .bubble-user i {{
+    font-style: italic !important;
+    color: rgba(245,235,213,0.78) !important;
+    /* En italic mantenemos sans (Inter italic queda elegante) — si
+       prefieres serif italic para que los *gestos* destaquen como
+       prosa, cambiar a 'Lora' aquí. */
+  }}
+  /* v0.16.6 — diferenciación clara Ashley vs User.
+     User feedback: las dos burbujas se veían demasiado parecidas
+     (ambos wine apagado). Ahora:
+       Ashley → vino-púrpura oscuro con borde ámbar tenue
+                ("color casa", refleja el ámbar de su nombre/heart)
+       User   → tabac/cognac warm brown con borde crema más definido
+                ("leather" — distinto pero todavía warm boutique)
+     Ambos siguen siendo cálidos, pero el contraste de tono (púrpura
+     vs ocre) es claro de un vistazo. */
+  .bubble-ashley {{
+    position: relative;  /* para que ::before del tail se posicione */
+    background: linear-gradient(135deg,
+      rgba(50, 26, 38, 0.82) 0%,
+      rgba(40, 20, 32, 0.82) 100%) !important;
     backdrop-filter: blur(14px) saturate(140%) !important;
     -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
-    border: 1px solid rgba(255,154,238,0.14) !important;
+    border: 1px solid rgba(212,163,115, 0.22) !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.30),
+                inset 0 1px 0 rgba(232,220,196,0.06) !important;
+    /* v0.16.7 — texto más brillante para mejor contraste sobre fondo
+       chat negro. Antes #e8dcc4, ahora #f5ebd5 (más blanco-crema). */
+    color: #f5ebd5 !important;
+  }}
+  .bubble-user {{
+    position: relative;  /* para tail */
+    background: linear-gradient(135deg,
+      rgba(82, 55, 38, 0.78) 0%,
+      rgba(64, 42, 28, 0.78) 100%) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+    border: 1px solid rgba(232,202,158, 0.30) !important;
+    box-shadow: 0 4px 22px rgba(0,0,0,0.30),
+                inset 0 1px 0 rgba(255,235,200,0.10) !important;
+    color: #faf2dd !important;
+  }}
+
+  /* v0.16.9 — tails REMOVIDOS.
+     Probé añadir triangulitos ::before a las burbujas para feel
+     "chat-app" tipo iMessage, pero quedaron pochos: triángulos
+     sólidos vs burbuja con gradient + borde + glass = costura
+     visible. Modern apps de chat IA (Discord, ChatGPT, Claude
+     web) NO usan tails — el avatar a la izquierda + alineación
+     a derecha es suficiente para identificar al hablante.
+     Vuelvo al diseño minimal sin tails. Sigo dejando
+     position:relative en .bubble-* por si en el futuro se quiere
+     posicionar algo absoluto dentro (timestamp, reaction, etc.). */
+
+  /* ── Glass panels en tonos vino ─────────────────────────── */
+  .glass-chat {{
+    background: rgba(20, 8, 14, 0.30) !important;
+    backdrop-filter: blur(18px) !important;
+    -webkit-backdrop-filter: blur(18px) !important;
+    border: 1px solid rgba(212,163,115,0.10) !important;
+  }}
+  .glass-portrait {{
+    background: rgba(20, 8, 14, 0.20) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+    border: 1px solid rgba(212,163,115,0.16) !important;
   }}
   .glass-header {{
-    background: rgba(5, 3, 12, 0.78) !important;
-    backdrop-filter: blur(28px) !important;
-    -webkit-backdrop-filter: blur(28px) !important;
-    border-bottom: 1px solid rgba(255,154,238,0.07) !important;
+    background: rgba(15, 6, 10, 0.55) !important;
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+    border-bottom: 1px solid rgba(212,163,115,0.10) !important;
+  }}
+  .glass-sidebar {{
+    background: rgba(15, 6, 10, 0.45) !important;
+    backdrop-filter: blur(22px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(140%) !important;
+    border-right: 1px solid rgba(212,163,115,0.10) !important;
+  }}
+  .ashley-sidebar {{
+    position: sticky;
+    top: 50px;  /* alto del header minimal */
+    height: calc(100vh - 50px);
+    overflow-y: auto;
+    padding: 4px 0;
+  }}
+  /* Scroll bar más fino que el chat — el sidebar rara vez scrollea */
+  .ashley-sidebar::-webkit-scrollbar {{ width: 2px; }}
+  .ashley-sidebar::-webkit-scrollbar-thumb {{ background: rgba(255,154,238,0.12); }}
+  .ashley-sidebar {{ scrollbar-width: thin; scrollbar-color: rgba(255,154,238,0.12) transparent; }}
+
+  /* Panel derecho — sticky igual que el sidebar */
+  .ashley-right-panel {{
+    position: sticky;
+    top: 70px;
+    align-self: flex-start;
+    padding: 18px 18px 18px 0;
+  }}
+
+  /* Tarjeta del personaje (top del panel derecho) */
+  .ashley-character-card {{
+    background: rgba(12, 7, 22, 0.45) !important;
+    backdrop-filter: blur(16px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+    border: 1px solid rgba(255,154,238,0.18) !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4),
+                inset 0 1px 0 rgba(255,255,255,0.04) !important;
+  }}
+
+  /* Items del nav del sidebar (memorias / noticias / acciones / etc.) */
+  .ashley-nav-item {{
+    user-select: none;
+  }}
+
+  /* ══════════════════════════════════════════════════════════════
+     v0.16 — Layout 2-columnas estilo "boutique noir"
+     Portrait gigante a la izquierda + chat a la derecha
+     ══════════════════════════════════════════════════════════════ */
+
+  /* Wrapper raíz del layout 2-cols */
+  .ashley-layout-2col {{
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    position: relative;
+    z-index: 1;  /* sobre los ambient glows */
+  }}
+
+  /* ── Panel izquierdo: portrait + nav arriba + actions abajo ──── */
+  .ashley-portrait-panel {{
+    position: relative;
+    flex: 0 0 45%;
+    max-width: 720px;
+    height: 100vh;
+    overflow: hidden;
+    background: linear-gradient(180deg,
+      rgba(35,15,20,0.6) 0%,
+      rgba(20,8,12,0.85) 60%,
+      rgba(15,6,10,0.95) 100%);
+    border-right: 1px solid rgba(212,163,115,0.10);
+  }}
+
+  /* Imagen mood que llena el panel — con vignette y spotlight */
+  .ashley-mood-image {{
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center top;
+    background-repeat: no-repeat;
+    opacity: 0.95;
+    z-index: 1;
+  }}
+  /* Vignette que oscurece bordes para que el nombre se lea bien */
+  .ashley-mood-vignette {{
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg,
+        rgba(20,8,12,0.20) 0%,
+        transparent 25%,
+        transparent 50%,
+        rgba(15,6,10,0.85) 100%),
+      radial-gradient(ellipse at 50% 30%,
+        transparent 30%,
+        rgba(15,6,10,0.45) 90%);
+    pointer-events: none;
+    z-index: 3;
+  }}
+
+  /* Nav horizontal arriba del panel izquierdo (Ashley/Recuerdos/...) */
+  .ashley-top-nav {{
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-evenly;
+    padding: 18px 24px;
+    background: linear-gradient(180deg,
+      rgba(15,6,10,0.7) 0%,
+      transparent 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }}
+  .ashley-nav-link {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: #c4b3a4;
+    transition: all 0.25s ease;
+    user-select: none;
+  }}
+  .ashley-nav-link:hover {{
+    color: #e8dcc4;
+    background: rgba(212,163,115,0.08);
+    transform: translateY(-1px);
+  }}
+  .ashley-nav-link.active {{
+    color: {COLOR_PRIMARY};
+    text-shadow: 0 0 12px rgba(212,163,115,0.5);
+  }}
+  .ashley-nav-link svg {{
+    width: 18px; height: 18px;
+    stroke-width: 1.6;
+  }}
+  .ashley-nav-link span {{
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }}
+
+  /* Bloque inferior del panel izquierdo: nombre + status + actions */
+  .ashley-portrait-overlay {{
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 32px 32px 32px 32px;
+    z-index: 4;
+    text-align: center;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      rgba(15,6,10,0.85) 70%,
+      rgba(10,4,7,0.95) 100%);
+  }}
+  .ashley-name-large {{
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 600;
+    font-size: 56px;
+    line-height: 1;
+    color: #e8dcc4;
+    letter-spacing: 0.01em;
+    text-shadow:
+      0 2px 12px rgba(0,0,0,0.6),
+      0 0 30px rgba(212,163,115,0.20);
+    margin: 0;
+  }}
+  .ashley-status-line {{
+    margin-top: 6px;
+    color: {COLOR_PRIMARY};
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }}
+  .ashley-status-line .status-dot {{
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: {COLOR_PRIMARY};
+    margin-right: 6px;
+    box-shadow: 0 0 8px rgba(212,163,115,0.7);
+    animation: statusPulse 2.4s ease-in-out infinite;
+  }}
+  @keyframes statusPulse {{
+    0%, 100% {{ opacity: 0.6; transform: scale(1); }}
+    50%      {{ opacity: 1.0; transform: scale(1.15); }}
+  }}
+
+  /* Botones de acción circulares debajo del nombre (mic/✨/focus/📎) */
+  .ashley-action-row {{
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 18px;
+  }}
+  .ashley-action-btn {{
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: rgba(35,17,25,0.5);
+    border: 1px solid rgba(212,163,115,0.25);
+    color: #c4b3a4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    backdrop-filter: blur(10px);
+  }}
+  .ashley-action-btn:hover {{
+    background: rgba(212,163,115,0.15);
+    border: 1px solid rgba(212,163,115,0.6);
+    color: {COLOR_PRIMARY};
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(212,163,115,0.25);
+  }}
+  .ashley-action-btn.active {{
+    background: rgba(212,163,115,0.20);
+    border: 1px solid rgba(212,163,115,0.8);
+    color: {COLOR_PRIMARY};
+    box-shadow: 0 0 14px rgba(212,163,115,0.5);
+  }}
+  .ashley-action-btn svg {{
+    width: 18px; height: 18px;
+    stroke-width: 1.7;
+  }}
+
+  /* ── Light rays cenital v0.16.4 ───────────────────────────────
+     User feedback explícito (descripción detallada):
+       "rayos vienen desde arriba, cayendo verticalmente sobre el
+        personaje como foco o luz cenital. Abriéndose ligeramente
+        conforme bajan, creando un cono de luz invertido. Tono
+        cálido amarillento/dorado. Intensidad suave y difusa, no
+        rayos duros tipo láser — luz angelical, iluminación dramática
+        estilo escenario. Iluminan cabeza y hombros, el cuerpo se
+        desvanece hacia las sombras."
+
+     Implementación: SVG con 5 polígonos (trapezoides finos) que
+     parten de un punto cerca del top-left/top-center del panel y
+     se abren hacia abajo. Gradient vertical interior (gold→transparent
+     a 70% de altura) hace que la luz se desvanezca antes de llegar
+     al fondo → el cuerpo queda en sombras.
+
+     Cada rayo tiene su propio timing de pulse (independiente, fases
+     desencajadas) → intensidad cambia armónicamente sin sincronizarse,
+     lo que da sensación orgánica de luz natural. */
+
+  .ashley-light-rays {{
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    z-index: 2;
+  }}
+  .ashley-light-rays polygon {{
+    fill: url(#ashley-ray-grad);
+    filter: blur(3px);
+    transform-origin: 50% 0%;
+    transform-box: fill-box;
+  }}
+  .ashley-light-rays .ray-1 {{
+    animation: rayPulseA 7.5s ease-in-out infinite;
+  }}
+  .ashley-light-rays .ray-2 {{
+    animation: rayPulseB 9.5s ease-in-out infinite;
+    animation-delay: -2s;
+  }}
+  .ashley-light-rays .ray-3 {{
+    animation: rayPulseC 6.5s ease-in-out infinite;
+    animation-delay: -3.5s;
+  }}
+  .ashley-light-rays .ray-4 {{
+    animation: rayPulseD 8.5s ease-in-out infinite;
+    animation-delay: -1s;
+  }}
+  .ashley-light-rays .ray-5 {{
+    animation: rayPulseE 10.5s ease-in-out infinite;
+    animation-delay: -4s;
+  }}
+  @keyframes rayPulseA {{
+    0%, 100% {{ opacity: 0.35; }}
+    50%      {{ opacity: 0.80; }}
+  }}
+  @keyframes rayPulseB {{
+    0%, 100% {{ opacity: 0.55; }}
+    50%      {{ opacity: 0.20; }}
+  }}
+  @keyframes rayPulseC {{
+    0%, 100% {{ opacity: 0.40; }}
+    60%      {{ opacity: 0.90; }}
+  }}
+  @keyframes rayPulseD {{
+    0%, 100% {{ opacity: 0.45; }}
+    40%      {{ opacity: 0.15; }}
+  }}
+  @keyframes rayPulseE {{
+    0%, 100% {{ opacity: 0.30; }}
+    50%      {{ opacity: 0.70; }}
+  }}
+
+  /* Variante chat-panel: rayos más sutiles porque ahí no hay
+     personaje; la luz es ambiental, no spotlight. */
+  .ashley-chat-panel .ashley-light-rays {{
+    opacity: 0.55;
+  }}
+
+  /* v0.16.5 — fix CRÍTICO: alinear rayos con la imagen del personaje.
+     El user explicó: "la primera imagen el rayo TOCA al personaje, en
+     la segunda cae al lado del personaje". Antes los rayos abarcaban
+     todo el panel entero pero la imagen 2D es un cuadrado centrado
+     más pequeño → los rayos pasaban POR EL ESPACIO VACÍO al lado de
+     Ashley, no sobre ella. Ahora en mode-2d, el contenedor del SVG
+     se posiciona exactamente donde está la imagen → los rayos caen
+     sobre la cara/hombros de Ashley = chiaroscuro coherente. */
+  .ashley-portrait-panel.mode-2d .ashley-light-rays {{
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin-top: -40px;
+    width: 92%;
+    max-width: 680px;
+    height: auto;
+    aspect-ratio: 1 / 1;
+  }}
+  /* En 3D la imagen llena el panel entero → rayos full-panel funcionan,
+     no necesita override (uso default top:0,left:0,100% × 100%). */
+
+  /* ── 2D mode (square frame) vs 3D mode (full vertical) ─────────
+     v0.16.1: el user pidió que en 2D la imagen sea más cuadrada
+     (no toma toda la altura del panel) y en 3D quede full vertical.
+     Toggle en .ashley-portrait-panel.mode-2d / .mode-3d. */
+
+  /* Default (3D): la imagen llena el panel vertical entero */
+  .ashley-portrait-panel.mode-3d .ashley-mood-image {{
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center top;
+  }}
+
+  /* 2D v0.16.3 — imagen cuadrada CENTRADA verticalmente, MÁS grande.
+     User feedback: "Ashley sea más grande, aún hay espacio horizontal
+     que le sobra". Antes width=min(72%, 460px) dejaba mucho espacio
+     a los lados en panels anchos. Ahora 92%, sin cap restrictivo. */
+  .ashley-portrait-panel.mode-2d .ashley-mood-image {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin-top: -40px;
+    width: 92%;
+    max-width: 680px;  /* cap más alto — solo evita que en 4K llene
+                          un panel gigante hasta el infinito */
+    aspect-ratio: 1 / 1;
+    background-size: cover;
+    background-position: center top;
+    border-radius: 22px;
+    -webkit-mask-image: linear-gradient(180deg,
+      transparent 0%,
+      rgba(0,0,0,0.6) 6%,
+      black 14%,
+      black 86%,
+      rgba(0,0,0,0.6) 94%,
+      transparent 100%);
+    mask-image: linear-gradient(180deg,
+      transparent 0%,
+      rgba(0,0,0,0.6) 6%,
+      black 14%,
+      black 86%,
+      rgba(0,0,0,0.6) 94%,
+      transparent 100%);
+    box-shadow:
+      0 24px 60px rgba(0,0,0,0.55),
+      0 -8px 30px rgba(0,0,0,0.35);
+  }}
+  /* En 2D, la vignette es solo un gradient muy sutil abajo (para que
+     el overlay con el nombre se lea sobre cualquier color del asset). */
+  .ashley-portrait-panel.mode-2d .ashley-mood-vignette {{
+    background:
+      linear-gradient(180deg,
+        transparent 0%,
+        transparent 60%,
+        rgba(15,6,10,0.7) 100%);
+  }}
+  /* Halo ámbar suave detrás del cuadrado 2D — subtle warm light
+     coming from behind the portrait, refuerza el "spotlight" feel
+     sin ser un stripe. v0.16.3: scale up para acompañar la imagen
+     más grande. */
+  .ashley-portrait-panel.mode-2d::before {{
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin-top: -40px;
+    width: 105%;
+    max-width: 800px;
+    aspect-ratio: 1 / 1;
+    background: radial-gradient(circle,
+      rgba(212,163,115,0.20) 0%,
+      rgba(212,163,115,0.08) 35%,
+      transparent 65%);
+    pointer-events: none;
+    filter: blur(50px);
+    z-index: 1;
+    animation: portraitHaloPulse 6s ease-in-out infinite;
+  }}
+  @keyframes portraitHaloPulse {{
+    0%, 100% {{ opacity: 0.7; }}
+    50%      {{ opacity: 1.0; }}
+  }}
+
+  /* Toggle pill 2D | 3D — POR DEBAJO del nav, no junto al "Más
+     ajustes..." (v0.16.5 fix: estaban demasiado pegados → choque
+     visual). Ahora vive ~80px del top, fuera del row del nav. */
+  .portrait-view-toggle {{
+    position: absolute;
+    top: 80px;
+    right: 18px;
+    z-index: 6;
+    display: flex;
+    background: rgba(15,6,10,0.85);
+    border: 1px solid rgba(212,163,115,0.30);
+    border-radius: 99px;
+    overflow: hidden;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }}
+  .portrait-view-toggle .seg {{
+    padding: 5px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #9c8b7e;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }}
+  .portrait-view-toggle .seg.active {{
+    background: {COLOR_PRIMARY};
+    color: #1a0a10;
+  }}
+  .portrait-view-toggle .seg:not(.active):hover {{
+    color: {COLOR_PRIMARY};
+    background: rgba(212,163,115,0.10);
+  }}
+
+  /* ── Panel derecho: chat + input ─────────────────────────────── */
+  .ashley-chat-panel {{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    min-width: 0;
+    position: relative;
+    overflow: hidden;  /* contiene los .light-rays absolute internos */
+    /* v0.16.8 — black con HINT warm en lugar de negro puro. El
+       negro absoluto creaba un corte vertical brusco contra el
+       portrait wine warm. Ahora gradient muy oscuro pero con
+       trazos de wine — apenas perceptible como "color" pero
+       suficiente para que el ojo conecte ambos paneles como una
+       sola escena, no dos apps pegadas. */
+    background: linear-gradient(180deg,
+      #0d0610 0%,
+      #08040a 50%,
+      #050307 100%);
+  }}
+  /* Contenido del chat panel siempre por encima de los light rays
+     y del mood-tint. La regla excluye los layers absolute (rays +
+     tint) para que NO les pise su position:absolute → quedan a z=2
+     y el contenido scrollable a z=3 encima. */
+  .ashley-chat-panel > *:not(.light-rays):not(.ashley-light-rays):not(.chat-mood-tint) {{
+    position: relative;
+    z-index: 3;
+  }}
+  /* Mood tint: detrás de los light rays pero encima del bg negro
+     del chat panel. Así el orden de "capas" del chat es:
+        1. bg negro (panel)
+        2. mood-tint (warm/pink/blue según humor — z=1)
+        3. light rays (cono dorado — z=2)
+        4. content (header, mensajes, input — z=3) */
+  .chat-mood-tint {{
+    z-index: 1 !important;
+  }}
+
+  .ashley-chat-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 28px 48px 20px;
+    gap: 32px;
+    border-bottom: 1px solid rgba(212,163,115,0.08);
+    flex-shrink: 0;
+  }}
+
+  .ashley-chat-scroll {{
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 36px;
+    min-height: 0;
+  }}
+
+  .ashley-chat-input-row {{
+    padding: 18px 36px 28px;
+    flex-shrink: 0;
+  }}
+
+  /* Input pill warm con glow ámbar.
+     v0.16.8 — añadida idle breath: cuando NO está focuseado, el
+     glow ámbar pulsa suave (4s) avisando que es el spot activo
+     "esperándote". Al focusear, animación se detiene y se queda
+     en el estado focus glow estático más intenso. */
+  .ashley-input-pill {{
+    background: rgba(31,14,21,0.85) !important;
+    border: 1px solid rgba(212,163,115,0.25) !important;
+    color: #f5ebd5 !important;
+    border-radius: 28px !important;
+    padding: 16px 24px !important;
+    font-size: 17px !important;
+    line-height: 1.5 !important;
+    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif !important;
+    transition: border-color 0.25s ease;
+    box-shadow:
+      0 0 0 1px rgba(212,163,115,0.05),
+      0 4px 20px rgba(0,0,0,0.3);
+    animation: inputIdleBreath 4.5s ease-in-out infinite;
+  }}
+  .ashley-input-pill:focus,
+  .ashley-input-pill:focus-within {{
+    border: 1px solid rgba(212,163,115,0.55) !important;
+    box-shadow:
+      0 0 0 1px rgba(212,163,115,0.2),
+      0 0 30px rgba(212,163,115,0.18),
+      0 4px 24px rgba(0,0,0,0.4) !important;
+    outline: none !important;
+    /* Detenemos el breath al focusear — el focus glow es ya
+       prominente, el breath sería ruido visual encima. */
+    animation: none !important;
+  }}
+  @keyframes inputIdleBreath {{
+    0%, 100% {{
+      box-shadow:
+        0 0 0 1px rgba(212,163,115,0.05),
+        0 4px 20px rgba(0,0,0,0.3),
+        0 0 12px rgba(212,163,115,0.06);
+    }}
+    50% {{
+      box-shadow:
+        0 0 0 1px rgba(212,163,115,0.10),
+        0 4px 22px rgba(0,0,0,0.3),
+        0 0 26px rgba(212,163,115,0.20);
+    }}
+  }}
+  .ashley-input-pill::placeholder {{
+    color: #6e5a4a !important;
+  }}
+
+  /* Send button — círculo ámbar warm con glow */
+  .ashley-send-btn {{
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d4a373 0%, #b8825a 100%);
+    color: #1a0a10;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+    box-shadow:
+      0 4px 20px rgba(212,163,115,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.25);
+    flex-shrink: 0;
+  }}
+  .ashley-send-btn:hover {{
+    background: linear-gradient(135deg, #e6b887 0%, #c89968 100%);
+    transform: scale(1.06) translateY(-1px);
+    box-shadow:
+      0 6px 28px rgba(212,163,115,0.65),
+      inset 0 1px 0 rgba(255,255,255,0.3);
+  }}
+  .ashley-send-btn:disabled {{
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }}
+  .ashley-send-btn svg {{
+    width: 22px; height: 22px;
+    stroke-width: 2;
+  }}
+
+  /* v0.16.6 — Header action button (focus toggle + futuros).
+     Vive en el chat-header al lado del heart counter. Cuando el
+     focus mode está activo lleva clase .active (estilo destacado).
+     Mismo patrón visual que .ashley-action-btn pero más pequeño
+     (38px vs 42px) para no robarle protagonismo al título Ashley. */
+  .ashley-header-action {{
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(35,17,25,0.5);
+    border: 1px solid rgba(212,163,115,0.20);
+    color: #c4b3a4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.22s ease;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    user-select: none;
+  }}
+  .ashley-header-action:hover {{
+    background: rgba(212,163,115,0.12);
+    border: 1px solid rgba(212,163,115,0.55);
+    color: {COLOR_PRIMARY};
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(212,163,115,0.25);
+  }}
+  .ashley-header-action.active {{
+    background: rgba(212,163,115,0.20);
+    border: 1px solid rgba(212,163,115,0.70);
+    color: {COLOR_PRIMARY};
+    box-shadow: 0 0 14px rgba(212,163,115,0.45);
+  }}
+  .ashley-header-action.active:hover {{
+    background: rgba(212,163,115,0.28);
+  }}
+  .ashley-header-action svg {{
+    width: 18px; height: 18px;
+    stroke-width: 1.7;
+  }}
+
+  /* Heart counter del chat-header — outline elegante con número.
+     v0.16.1: número MÁS grande (32px) y más padding/gap, para que
+     el "100" se lea sin esforzar la vista. */
+  .ashley-affection-counter {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 22px 10px 16px;
+    border-radius: 99px;
+    background: rgba(35,17,25,0.5);
+    border: 1px solid rgba(212,163,115,0.20);
+    transition: all 0.3s ease;
+  }}
+  .ashley-affection-counter:hover {{
+    background: rgba(212,163,115,0.12);
+    border: 1px solid rgba(212,163,115,0.45);
+  }}
+  .ashley-affection-number {{
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 600;
+    font-size: 32px;
+    color: #e8dcc4;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-shadow: 0 1px 8px rgba(212,163,115,0.30);
+  }}
+
+  /* ── Adaptación a ventanas pequeñas (v0.15.3) ─────────────────
+     Como Ashley es Electron desktop el caso típico es 1920+, pero
+     el user puede redimensionar a tamaños raros. Reglas:
+       • <1280px: ocultar el panel derecho (avatar 2D + heart) — el
+         chat necesita el ancho. El user puede activar focus mode
+         igual a mano.
+       • <900px: reducir el sidebar izquierdo a 64px (solo iconos,
+         sin texto) para dejarle espacio al chat.
+       • <640px: colapsar sidebar a un bar superior con iconos
+         horizontales (poco probable en desktop pero por si acaso). */
+  @media (max-width: 1280px) {{
+    .ashley-right-panel {{ display: none !important; }}
+  }}
+  @media (max-width: 900px) {{
+    .ashley-sidebar {{
+      width: 64px !important;
+    }}
+    .ashley-sidebar .ashley-nav-item span:nth-child(2),
+    .ashley-sidebar .ashley-nav-item div:nth-child(2) {{
+      /* Ocultar el label de texto, dejar solo el icono.
+         El icono es el primer hijo del hstack interno del item. */
+      display: none !important;
+    }}
+    /* Sección "AJUSTES RAPIDOS" label también */
+    .ashley-sidebar p,
+    .ashley-sidebar h6 {{
+      display: none !important;
+    }}
+  }}
+
+  /* ── Affection heart (v0.15.1, sustituye la barra vertical) ──
+     Estructura DOM:
+       .heart-frame (positioning + outline SVG via ::after)
+         └─ .heart-clip (clip-path al SVG corazón, contiene bg + agua)
+              ├─ .heart-bg (fondo oscuro estático con highlight sutil)
+              └─ .heart-water (rellena bottom-up, height = afecto%)
+                   ├─ ::before (ola 1, animada)
+                   └─ ::after  (ola 2, animada con desfase)
+         └─ .heart-number (cifra de afecto debajo)
+
+     Por qué dos capas (frame + clip):
+       • clip-path corta lo que queda fuera del corazón → el outline
+         con stroke se perdería si lo pusiéramos dentro del clip.
+       • Por eso el outline va en el ::after del frame (capa NO
+         clipeada), dibujado con un SVG path como background-image
+         para que el filter:drop-shadow lo abrace correctamente. */
+
+  /* v0.16 — Corazón outline elegante con respiración constante.
+     Estilo mockup: outline simple (no fill solid), tono ámbar/dorado
+     cálido, animación de breath (escala sutil + glow pulsante).
+     Hover: scale más fuerte + glow intenso, y los rays del exterior
+     se intensifican.
+
+     Cuando afecto >70: animación más rápida + colores más cálidos
+     (rosa-coral) para indicar "estado enamorado". */
+
+  .heart-frame {{
+    position: relative;
+    width: 38px;
+    height: 36px;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: inline-block;
+  }}
+  .heart-frame:hover {{
+    transform: scale(1.20);
+  }}
+
+  .ashley-heart-svg {{
+    width: 100%;
+    height: 100%;
+    display: block;
+    animation: heartBreathe 3.2s ease-in-out infinite;
+  }}
+  @keyframes heartBreathe {{
+    0%, 100% {{
+      transform: scale(1);
+      filter: drop-shadow(0 0 4px rgba(212,163,115,0.45))
+              drop-shadow(0 0 12px rgba(212,163,115,0.20));
+    }}
+    50% {{
+      transform: scale(1.06);
+      filter: drop-shadow(0 0 8px rgba(232,202,158,0.75))
+              drop-shadow(0 0 18px rgba(212,163,115,0.40));
+    }}
+  }}
+  .heart-frame:hover .ashley-heart-svg {{
+    animation-duration: 1.5s;
+    filter: drop-shadow(0 0 12px rgba(255,180,140,0.95))
+            drop-shadow(0 0 24px rgba(232,202,158,0.6)) !important;
+  }}
+
+  /* Afecto >70 — respiración más viva con tinte coral */
+  .heart-glow .ashley-heart-svg {{
+    animation: heartBreatheGlow 2.0s ease-in-out infinite;
+  }}
+  @keyframes heartBreatheGlow {{
+    0%, 100% {{
+      transform: scale(1.02);
+      filter: drop-shadow(0 0 8px rgba(255,140,120,0.65))
+              drop-shadow(0 0 16px rgba(212,163,115,0.40));
+    }}
+    50% {{
+      transform: scale(1.10);
+      filter: drop-shadow(0 0 16px rgba(255,170,140,1.0))
+              drop-shadow(0 0 28px rgba(232,180,150,0.7))
+              drop-shadow(0 0 4px rgba(255,255,220,0.5));
+    }}
+  }}
+
+  /* Número de afecto debajo del corazón */
+  .heart-number {{
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-shadow: 0 0 10px rgba(255,102,170,0.5);
+    pointer-events: none;
+    user-select: none;
+  }}
+  .heart-label {{
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-weight: 700;
+    color: #888;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    pointer-events: none;
+    user-select: none;
+  }}
+
+  /* ── rx.upload sin dashed border (input redesign v0.15.1) ──
+     Por defecto rx.upload pinta un drop zone con borde dashed que
+     en nuestro nuevo input pill quedaba como un cuadrado feo
+     alrededor del icono 📎. Eliminamos todo ese marco para que
+     el botón circular interior sea lo único visible.
+     Targeting amplio porque Reflex puede generar varios divs
+     anidados — todos transparentes y sin padding/border. */
+  .ashley-upload-clean,
+  .ashley-upload-clean > div,
+  .ashley-upload-clean .rx-Upload {{
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+    margin: 0 !important;
+    min-width: auto !important;
+    width: auto !important;
+    min-height: auto !important;
+    height: auto !important;
+    display: inline-flex !important;
   }}
 
   /* ── Chat scroll ─────────────────────────────────────── */
@@ -347,13 +1343,13 @@ def global_styles():
   }}
   .affection-heart-float.positive {{
     animation: floatHeartUp 2s ease-out forwards;
-    color: #ff66aa;
-    text-shadow: 0 0 8px rgba(255,102,170,0.6);
+    color: #e6b887;  /* v0.16 ámbar warm */
+    text-shadow: 0 0 10px rgba(212,163,115,0.7);
   }}
   .affection-heart-float.negative {{
     animation: floatHeartDown 1.5s ease-in forwards;
-    color: #6688cc;
-    text-shadow: 0 0 6px rgba(100,136,204,0.4);
+    color: #8b6e5c;  /* v0.16 marrón muted */
+    text-shadow: 0 0 6px rgba(139,110,92,0.5);
   }}
   .affection-heart-float .delta {{
     font-size: 11px;
@@ -546,6 +1542,57 @@ def global_styles():
   }}
   .ashley-menu-toggle-item:hover {{
     transform: translateX(2px) !important;
+  }}
+
+  /* ── Tooltips (Radix Themes 3) — texto blanco sobre fondo oscuro ──
+     v0.15.4: el override anterior solo cubría 2 selectores y muchos
+     tooltips seguían viéndose con texto negro. Ampliamos a TODOS los
+     posibles selectores de Radix Themes (BaseTooltipContent es el
+     interno; rt-TooltipContent el del themes; data-radix-* el de la
+     primitive base). Plus: forzar color en TODOS los descendientes
+     porque a veces el hijo lleva una clase que pinta de negro. */
+  [data-radix-tooltip-content],
+  .rt-TooltipContent,
+  .rt-BaseTooltipContent,
+  .rt-r-tooltip,
+  [role="tooltip"],
+  [class*="TooltipContent"],
+  [class*="BaseTooltipContent"] {{
+    background: rgba(20, 10, 30, 0.96) !important;
+    color: #f0e8f5 !important;
+    border: 1px solid rgba(255,154,238,0.30) !important;
+    box-shadow:
+      0 8px 24px rgba(0,0,0,0.6),
+      0 0 0 1px rgba(255,154,238,0.05) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    border-radius: 8px !important;
+    padding: 7px 12px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    line-height: 1.4 !important;
+    letter-spacing: 0.01em !important;
+    max-width: 280px !important;
+  }}
+  /* Forzar color claro en TODOS los descendientes — algunos tooltips
+     envuelven el texto en un span con clase propia que pinta negro. */
+  [data-radix-tooltip-content] *,
+  .rt-TooltipContent *,
+  .rt-BaseTooltipContent *,
+  [role="tooltip"] *,
+  [class*="TooltipContent"] *,
+  [class*="BaseTooltipContent"] * {{
+    color: #f0e8f5 !important;
+  }}
+  /* La flechita — fill matching del bg oscuro. Excepción al `*` de
+     arriba: aquí queremos `fill`, no `color`. */
+  [data-radix-tooltip-content] svg,
+  .rt-TooltipContent svg,
+  .rt-BaseTooltipContent svg,
+  [role="tooltip"] svg,
+  [class*="TooltipContent"] svg {{
+    fill: rgba(20, 10, 30, 0.96) !important;
+    color: rgba(20, 10, 30, 0.96) !important;
   }}
 
   /* ── Achievement gallery ──────────────────────────── */
