@@ -376,9 +376,13 @@ class State(rx.State):
             return f"/ashley_{m}.jpg"
         return "/ashley_pfp.jpg"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["mood"])
     def mood_overlay_color(self) -> str:
         """Color de overlay del fondo según el humor de Ashley.
+
+        Deps explícitas: solo depende de mood. Si la auto-detección
+        de Reflex falla algún día (como pasa con llm_model_display
+        por imports lazy), el overlay seguiría reactivo.
 
         v0.16.10 — alphas subidos (0.04 → 0.10-0.18) porque el
         overlay ahora vive encima de los paneles con
@@ -752,15 +756,25 @@ class State(rx.State):
                 # Happy path: arranca el detector real
                 ok, reason = _lifecycle.start_detector(
                     model_path=str(model_path),
-                    threshold=0.55,  # subido de 0.4 — user reportaba que
-                                     # Ashley detectaba "de la nada".
-                                     # 0.55 es estricto pero el modelo
-                                     # entrenado con max_negative_weight
-                                     # =5000 mantiene buen recall en speech
-                                     # claro. Si pierde detecciones reales,
-                                     # bajar a 0.5.
+                    threshold=0.65,  # v0.14.5 subido de 0.55 — user
+                                     # reportaba false positives con
+                                     # estornudos / soplidos / mocos.
+                                     # Sneezes son sonidos vocal-like
+                                     # pero no son la palabra "Ashley".
+                                     # 0.65 mata 80%+ de esos falsos +
+                                     # consecutive-check abajo lo
+                                     # complementa.
                     cooldown_seconds=1.5,
                     use_vad=True,
+                    vad_threshold=0.5,    # v0.14.5: 0.3→0.5. VAD más
+                                          # estricto rechaza ruidos
+                                          # explosivos no-speech.
+                    consecutive_required=2,  # v0.14.5: requiere 2 chunks
+                                          # (~160ms) con score alto antes
+                                          # de disparar. Estornudos son
+                                          # impulsos cortos <80ms → no
+                                          # califican. "Ashley" real
+                                          # dura 400-700ms → sobra.
                 )
                 if ok:
                     self.wake_word_status_message = "OK escuchando"
@@ -801,9 +815,11 @@ class State(rx.State):
 
         ok, reason = _lifecycle.start_detector(
             model_path=str(model_path),
-            threshold=0.55,  # mismo razonamiento que toggle_wake_word_enabled
+            threshold=0.65,           # v0.14.5: anti-falsos-positivos
             cooldown_seconds=1.5,
             use_vad=True,
+            vad_threshold=0.5,        # v0.14.5: VAD más estricto
+            consecutive_required=2,   # v0.14.5: rechaza impulsos cortos
         )
         if ok:
             self.wake_word_status_message = "OK escuchando"
@@ -1344,6 +1360,12 @@ class State(rx.State):
         print(f"[Grok Error{label}] {e}")
         self.is_thinking = False
         self.current_response = ""
+        # Limpia los slots module-level keyed por id(self) — si la excepción
+        # ocurrió entre _streaming_loop (set) y _finalize_response (pop)
+        # quedaba huérfano hasta que otro state con el mismo id() lo
+        # sobrescribiera. Memory leak pequeño pero acumulable.
+        _SPECULATIVE_BY_STATE.pop(id(self), None)
+        _TURN_CACHE_BY_STATE.pop(id(self), None)
         ts = now_iso()
         err_template = i18n.ui(self.language)["error_grok"]
         self.messages.append({
@@ -1809,7 +1831,13 @@ class State(rx.State):
             accumulated += text
             chunk_count += 1
 
-            if chunk_count % STREAM_CHUNK_SIZE == 0:
+            # v0.14.2 — yield en el PRIMER chunk inmediatamente (sin
+            # esperar a STREAM_CHUNK_SIZE) para que la respuesta de
+            # Ashley aparezca al instante. Antes el user veía
+            # "pensando..." durante toda la fase de buffering inicial
+            # (5 chunks ~50-150ms), ahora la primera letra aparece
+            # tan pronto como el LLM la emite.
+            if chunk_count == 1 or chunk_count % STREAM_CHUNK_SIZE == 0:
                 self.current_response = self._clean_display(accumulated)
                 # Speculative dispatch — acciones cerradas se ejecutan ya
                 self._maybe_dispatch_speculative(accumulated)
@@ -2471,6 +2499,29 @@ class State(rx.State):
         }
         messages_for_llm = list(self.messages)
 
+        # v0.14.1 — Si el último mensaje del user es image-only (text
+        # vacío + image set), inyectamos un trigger interno para que
+        # el LLM sepa qué hacer. Algunos providers (OpenAI-compat con
+        # `text: ""`) rechazan contenido vacío. Y conceptualmente
+        # Ashley necesita saber "el user te mostró una imagen, dime
+        # qué ves".
+        # NOTA: NO modificamos self.messages — solo la copia para el
+        # LLM. Tu bubble en chat sigue mostrando solo la imagen, sin
+        # texto fantasma.
+        if messages_for_llm:
+            _last = messages_for_llm[-1]
+            if (
+                _last.get("role") == "user"
+                and _last.get("image")
+                and not (_last.get("content") or "").strip()
+            ):
+                _trigger = {
+                    "es": "(te mando una imagen, mírala y dime qué ves o qué te parece)",
+                    "fr": "(je t'envoie une image, regarde-la et dis-moi ce que tu vois ou ce que tu en penses)",
+                    "en": "(I'm sending you an image, look at it and tell me what you see or what you think)",
+                }.get(self.language, "(image attached)")
+                messages_for_llm[-1] = {**_last, "content": _trigger}
+
         # ── Compresión de historial contra in-context repetition ─────────
         # Cuando el historial crece, los últimos N mensajes de Ashley forman
         # un patrón que Grok copia (dice "SQL" porque se dijo "SQL"). Al
@@ -3046,6 +3097,14 @@ class State(rx.State):
     def _send_message_impl(self, form_data: dict):
         user_message = form_data.get("message", "").strip()
 
+        # v0.14.1 — Cancela el startup engagement pendiente.
+        # ANTES del primer yield para evitar race con el bg task.
+        # El bg task usa `async with self:` para grab del lock; mientras
+        # nuestro generator está en mitad del flow no hay yield, el lock
+        # NO se libera, así que un set síncrono aquí es seguro.
+        if self._pending_startup_engagement:
+            self._pending_startup_engagement = False
+
         # ── Caso especial: input vacío ───────────────────────────────────
         # Si el user pulsa Send con el cuadro de texto vacío y sin imagen
         # adjunta, hay dos interpretaciones posibles:
@@ -3086,28 +3145,28 @@ class State(rx.State):
         if self.is_thinking or self.current_response != "":
             return
 
+        # v0.14.2 — RUTA CRÍTICA: lo mínimo necesario antes del primer
+        # yield para que el user VEA su mensaje + el thinking indicator
+        # al instante. Sin esto, el user reportaba lag perceptible
+        # (mantequilla, no se siente fluido). El culpable principal era
+        # _increment_message_counter() — escribe a disco con HMAC sign
+        # + Windows registry mirror, ~50-150ms en Windows. Movido al
+        # path deferido tras el yield.
         self.messages.append(self._prepare_user_message(user_message))
         self._last_user_message = user_message
-        # Reset del agentic loop counter — empieza un nuevo plan.
-        # El counter se incrementa en cada follow-up automático y
-        # corta a 2 iteraciones extras (3 turns total) para evitar
-        # bucles infinitos.
-        self._auto_iter_count = 0
-        # Contador persistente firmado (para política de reembolso).
-        # Se mantiene fuera del try/except para que un fallo en stats NO
-        # bloquee el envío del mensaje.
-        self._increment_message_counter()
-        # Reset del flag de ausencia — el user acaba de volver, así que
-        # el próximo episodio de ausencia prolongada puede disparar otro
-        # mensaje proactivo.
-        self._absence_message_sent = False
-        # El user está aquí → resetear el contador anti-spam proactivo.
-        # Si estaba en 3 (bloqueado), desbloquea para que Ashley pueda
-        # volver a iniciar si procede en las próximas horas.
-        self._consecutive_unanswered_proactive = 0
         self.is_thinking = True
         self.current_response = ""
-        yield
+        yield  # 🚀 user ve su bubble + "pensando..." aquí, sin delay
+
+        # ── Trabajo deferred (no afecta UI inmediata) ──────────────
+        # Resets de flags de sesión — pure assignments, μs, irrelevantes
+        # pero mejor agruparlos lejos del path crítico.
+        self._auto_iter_count = 0
+        self._absence_message_sent = False
+        self._consecutive_unanswered_proactive = 0
+        # Disk I/O: HMAC sign + JSON + Windows registry mirror.
+        # Si falla NO afecta al envío (ya yieldeamos al user).
+        self._increment_message_counter()
 
         try:
             yield from self._stream_grok(user_message)
@@ -3285,6 +3344,21 @@ class State(rx.State):
             return
         file = files[0]
         data = await file.read()
+        # Cap a 10 MB. Grok vision tolera ~20 MB pero el base64 + JSON
+        # añade ~33% de overhead, y los chunks de WebSocket de Reflex
+        # se atragantan con payloads >15 MB. Mejor cortar arriba con un
+        # error in-character que un timeout silencioso o un crash.
+        size_mb = len(data) / (1024 * 1024)
+        if size_mb > 10.0:
+            ts = now_iso()
+            err_template = i18n.ui(self.language)["upload_too_big"]
+            self.messages.append({
+                "role": "assistant",
+                "content": err_template.format(size_mb=size_mb),
+                "timestamp": ts, "id": f"e-{ts}", "image": "",
+            })
+            self.save_history()
+            return
         mime = file.content_type or "image/png"
         self.pending_image = f"data:{mime};base64,{base64.b64encode(data).decode()}"
         self.pending_image_name = file.filename or "imagen"
@@ -3937,13 +4011,41 @@ class State(rx.State):
             finally:
                 _cc.set_compress_regen_in_progress(False)
 
-        # Las dos llamadas LLM en paralelo — independientes entre sí, y
-        # ya que cada una tarda ~3-4s, paralelizar las pone a ~3-4s
-        # total en lugar de ~7s en serie.
+        # ── 3. Pre-warm whisper STT model (v0.16.13) ──────────────────
+        # El modelo Whisper (~480 MB en disco, ~500 MB en RAM) tarda
+        # ~5-15s en cargarse del disco a memoria la primera vez. Antes
+        # esto pasaba LA PRIMERA VEZ que el user activaba voz por sesión
+        # → veía "Cargando modelo..." durante 10s. Cargándolo en background
+        # mientras el user explora la UI, para cuando active voz el modelo
+        # ya está en RAM y la transcripción es instantánea.
+        #
+        # Si el user nunca usa voz, gastamos ~500 MB de RAM extra. En PCs
+        # con 8 GB+ es trivial; en máquinas con poca RAM podría doler. Si
+        # surge queja, condicionamos al toggle de voz.
+        def _do_whisper_warmup():
+            try:
+                from . import whisper_stt as _wstt
+                # warmup() solo arranca un thread; no bloquea.
+                # Pero al estar dentro de run_in_executor, queremos que
+                # el load síncrono complete para bloquear este executor.
+                _wstt._load_model()
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning(
+                    "prewarm whisper failed (non-critical): %s", _e,
+                )
+
+        # Las tres tareas pesadas en paralelo:
+        #   - preoccupation regen (~3-4s LLM call)
+        #   - compress_history (~3-4s LLM call)
+        #   - whisper model load (~5-15s disk → RAM, no LLM)
+        # Independientes entre sí. Paralelizadas, total ~5-15s en lugar
+        # de ~10-25s en serie.
         try:
             await asyncio.gather(
                 loop.run_in_executor(None, _do_preoccupation_regen),
                 loop.run_in_executor(None, _do_compress_warmup),
+                loop.run_in_executor(None, _do_whisper_warmup),
             )
         except Exception as _e:
             import logging
@@ -4154,6 +4256,11 @@ class State(rx.State):
         1. Cada 45 min: discovery de contenido basado en gustos
         2. Cada 10 min: screen awareness proactiva (si auto_actions está ON —
            auto_actions es ahora el toggle maestro para todo awareness del PC)
+
+        Shutdown clean: cuando Reflex/Electron cierra la sesión, asyncio
+        cancela esta tarea raising CancelledError dentro de un sleep o
+        await. Lo capturamos al outermost level para terminar sin spam de
+        stack traces.
         """
         import asyncio
         import re
@@ -4200,7 +4307,24 @@ class State(rx.State):
 
         _ticks = 0  # cada tick = 10 min de sleep
         while True:
-            await asyncio.sleep(600)  # 10 minutos
+            # Sleep largo: aquí es donde asyncio.CancelledError fire 99%
+            # del tiempo cuando Reflex/Electron cierra la sesión. Lo
+            # capturamos limpio para evitar el warning "Task was destroyed
+            # but it is pending" y resetear flags de estado por si la app
+            # se relanza con el mismo state instance.
+            try:
+                await asyncio.sleep(600)  # 10 minutos
+            except asyncio.CancelledError:
+                import logging
+                logging.getLogger("ashley").info("discovery_bg_task cancelled (shutdown)")
+                try:
+                    async with self:
+                        self._bg_discovery_running = False
+                        self.is_thinking = False
+                        self.current_response = ""
+                except Exception:
+                    pass
+                raise
             _ticks += 1
 
             # ── Detección de ausencia prolongada ──────────────────────
@@ -4673,12 +4797,9 @@ class State(rx.State):
 from .components import (  # noqa: E402
     message_item, streaming_bubble, thinking_indicator,
     fact_item, diary_item, taste_item, memory_item, achievement_card,
-    _ashley_portrait_panel, _pill_btn, _pill_btn_orange, _header_quick_menu,
-    _news_panel, _news_pill_with_badge,
+    _news_panel,
     license_gate,
-    manual_button, manual_dialog,
-    # v0.15 — layout 3-columnas (deprecado, retenido para retrocompat)
-    left_sidebar, right_panel,
+    manual_dialog,
     # v0.16 — layout 2-cols boutique noir
     _ambient_lights, left_portrait_panel, _chat_header_bar,
     _light_rays_svg,
@@ -4956,10 +5077,19 @@ def index():
         # ── Manual de usuario ──────────────────────────────────
         manual_dialog(),
 
-        # ── Diálogo de recuerdos ──────────────────────────────
+        # ── Diálogo de recuerdos (v0.14.5 boutique noir) ──────
         rx.dialog.root(
             rx.dialog.content(
-                rx.dialog.title(State.t["mem_title"]),
+                rx.dialog.title(
+                    State.t["mem_title"],
+                    style={
+                        "fontFamily": "'Cormorant Garamond', Georgia, serif",
+                        "fontSize": "26px",
+                        "fontWeight": "600",
+                        "color": COLOR_PRIMARY,
+                        "letterSpacing": "0.02em",
+                    },
+                ),
                 rx.tabs.root(
                     rx.tabs.list(
                         rx.tabs.trigger(State.t["mem_tab_facts"], value="facts"),
@@ -4991,10 +5121,17 @@ def index():
                                     ),
                                 ),
                                 rx.alert_dialog.content(
-                                    rx.alert_dialog.title(State.t["mem_clear_all_confirm_title"]),
+                                    rx.alert_dialog.title(
+                                        State.t["mem_clear_all_confirm_title"],
+                                        style={
+                                            "fontFamily": "'Cormorant Garamond', Georgia, serif",
+                                            "fontSize": "22px",
+                                            "color": "#e8dcc4",
+                                        },
+                                    ),
                                     rx.alert_dialog.description(
                                         State.t["mem_clear_all_confirm_body"],
-                                        color="#ccc", font_size="13px",
+                                        color=COLOR_TEXT_DIM, font_size="13px",
                                     ),
                                     rx.flex(
                                         rx.alert_dialog.cancel(
@@ -5010,8 +5147,9 @@ def index():
                                         ),
                                         spacing="3", justify="end", margin_top="16px",
                                     ),
-                                    bg="#18181f",
-                                    border="1px solid rgba(255,100,120,0.3)",
+                                    bg="#1a0a10",
+                                    border="1px solid rgba(220,80,90,0.35)",
+                                    box_shadow="0 24px 60px rgba(0,0,0,0.7)",
                                 ),
                             ),
                             padding="0 16px 12px 16px", spacing="2",
@@ -5063,9 +5201,20 @@ def index():
                     default_value="facts", width="100%",
                 ),
                 rx.dialog.close(
-                    rx.button(State.t["mem_close"], on_click=State.toggle_memories, margin_top="16px"),
+                    rx.button(
+                        State.t["mem_close"],
+                        on_click=State.toggle_memories,
+                        margin_top="16px",
+                        bg=COLOR_PRIMARY,
+                        color="#1a0a10",
+                        _hover={"bg": COLOR_PRIMARY_HOVER},
+                    ),
                 ),
                 width=DIALOG_WIDTH,
+                bg="#1a0a10",
+                border="1px solid rgba(212,163,115,0.25)",
+                box_shadow="0 24px 60px rgba(0,0,0,0.7)",
+                class_name="ashley-mem-dialog",
             ),
             open=State.show_memories,
         ),

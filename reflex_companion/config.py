@@ -8,15 +8,27 @@ XAI_API_KEY = os.getenv("XAI_API_KEY")
 #  Modelo
 # ─────────────────────────────────────────────
 
-# grok-4-1-fast-reasoning: modelo principal de Ashley. 2M contexto,
-# $0.20/$0.50 per 1M, reasoning antes de generar → mejor matiz en
-# respuestas complejas.
+# grok-4-1-fast-non-reasoning: modelo principal de Ashley.
+#
+# v0.16.13 — cambiado de "grok-4-1-fast-reasoning" a "non-reasoning".
+# Razón: el modo reasoning añade ~3.5s de TTFT antes del primer token
+# (chain-of-thought interno). Medido empíricamente con tools/diagnose_latency.py:
+#   - reasoning:     TTFT 2.3-5.5s (avg ~3.7s)
+#   - non-reasoning: TTFT ~0.6s
+# El user reportaba 6-7s totales por mensaje; cambiar el modo baja a 2-3s
+# manteniendo la misma calidad para 80% de mensajes (chat casual, gestures,
+# tags de acciones simples). Sólo perdemos un poco en multi-step complejas
+# (ej. "abre 3 apps Y cierra 2 tabs Y escribe X"), trade-off aceptable.
+#
+# Ambas variantes (reasoning/non-reasoning) tienen mismo precio ($0.20 in /
+# $0.50 out per 1M tokens) y mismo context (2M). La única diferencia es el
+# reasoning step.
+#
 # OJO: la familia grok-4-1-fast (reasoning o non-reasoning) NO soporta
-# frequency_penalty ni presence_penalty. La variante non-reasoning NO
-# aporta nada aquí: mismo problema con penalties + peor en reasoning.
-# Si en el futuro queremos penalties de forma nativa en el chat principal,
-# hay que cambiar a la familia grok-3 (grok-3-fast soporta penalties).
-GROK_MODEL = "grok-4-1-fast-reasoning"
+# frequency_penalty ni presence_penalty. Si en el futuro queremos penalties
+# de forma nativa en el chat principal, hay que cambiar a la familia grok-3
+# (grok-3-fast soporta penalties pero es 25x más caro y peor en throughput).
+GROK_MODEL = "grok-4-1-fast-non-reasoning"
 
 # ─────────────────────────────────────────────
 #  Archivos de datos
@@ -73,7 +85,13 @@ MAX_HISTORY_MESSAGES = 50
 MAX_FACTS = 300
 MESSAGES_PER_EXTRACTION = 40
 SESSION_TIMEOUT_MINUTES = 30
-STREAM_CHUNK_SIZE = 5
+STREAM_CHUNK_SIZE = 1  # v0.16.13 — 3 → 1 para stream maximamente fluido.
+                       # Yield al UI cada chunk del LLM, sin agrupación.
+                       # El cost es nº yields = nº chunks (~50-200 por
+                       # respuesta), trivial en CPU; el beneficio es que
+                       # cada token aparece en pantalla en ms, no en
+                       # ráfagas de 3. Siente más natural / "máquina de
+                       # escribir" en lugar de saltos.
 
 # ─────────────────────────────────────────────
 #  Colores

@@ -155,6 +155,7 @@ class WakeWordDetector:
         cooldown_seconds: float = COOLDOWN_SECONDS,
         use_vad: bool = True,
         vad_threshold: float = 0.3,
+        consecutive_required: int = 1,
     ):
         """Crea el detector. Configuración:
 
@@ -163,19 +164,23 @@ class WakeWordDetector:
             threshold: score mínimo del wake word (default 0.5)
             cooldown_seconds: tiempo mínimo entre detecciones consecutivas
             use_vad: si True, filtra audio con Voice Activity Detection
-                antes de pasar al wake word. Reduce false positives en
-                silencio/ruido ambiente sin coste de recall (la voz humana
-                tiene VAD score alto consistentemente). openwakeword
-                provee silero_vad.onnx que se usa automáticamente.
+                antes de pasar al wake word.
             vad_threshold: score mínimo del VAD para procesar el chunk
-                (0.0–1.0). 0.3 es buen default — speech típico marca
-                >0.5, ruido <0.1.
+                (0.0–1.0). Speech típico >0.5, ruido <0.1.
+            consecutive_required: cuántos chunks CONSECUTIVOS deben tener
+                score>=threshold antes de disparar el callback. Default
+                1 (legacy: cualquier pico cuenta). Subir a 2-3 filtra
+                impulsos cortos como estornudos / soplidos / golpes —
+                "Ashley" real dura 400-700ms = ~5-9 chunks de 80ms,
+                exigir 2 consecutivos rara vez pierde la palabra real
+                pero descarta los burst <160ms.
         """
         self.model_path = Path(model_path)
         self.threshold = float(threshold)
         self.cooldown_seconds = float(cooldown_seconds)
         self.use_vad = bool(use_vad)
         self.vad_threshold = float(vad_threshold)
+        self.consecutive_required = max(1, int(consecutive_required))
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -183,6 +188,10 @@ class WakeWordDetector:
         self._last_detection_at: float = 0.0
         self._paused: bool = False  # set True during manual recording
         self._lock = threading.Lock()
+        # Contador de chunks consecutivos por encima del threshold.
+        # Se resetea cada vez que un chunk cae bajo. Cuando alcanza
+        # consecutive_required, se dispara el callback.
+        self._consecutive_high: int = 0
 
     @property
     def is_running(self) -> bool:
@@ -320,6 +329,19 @@ class WakeWordDetector:
                     max_score = max(scores.values())
 
                     if max_score < self.threshold:
+                        # Score bajo → reset del contador de consecutivos.
+                        # Si había chunks altos previos, no eran sostenidos
+                        # (impulso corto tipo estornudo) — descarta.
+                        self._consecutive_high = 0
+                        continue
+
+                    # Score alto → incrementa contador.
+                    self._consecutive_high += 1
+                    if self._consecutive_high < self.consecutive_required:
+                        # Necesitamos más chunks consecutivos antes de
+                        # disparar. Esto filtra impulsos <160ms (sneeze,
+                        # soplido, click de mouse cerca del mic) que no
+                        # mantienen score alto durante 2+ chunks.
                         continue
 
                     # Cooldown — evita disparos múltiples por una sola
@@ -328,6 +350,8 @@ class WakeWordDetector:
                     if now - self._last_detection_at < self.cooldown_seconds:
                         continue
                     self._last_detection_at = now
+                    # Reset para el siguiente trigger (después del cooldown)
+                    self._consecutive_high = 0
 
                     log.info("Wake word detected (score=%.3f)", max_score)
                     cb = self._callback

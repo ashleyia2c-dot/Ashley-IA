@@ -319,8 +319,52 @@
 
 
   /* ══════════════════════════════════════════
-     TEXTAREA AUTO-RESIZE + ENTER-TO-SEND
-  ══════════════════════════════════════════ */
+     TEXTAREA AUTO-RESIZE + ENTER-TO-SEND + OPTIMISTIC SEND (v0.14.4)
+  ══════════════════════════════════════════
+     v0.14.4 — el "optimistic UI" anterior NO funcionaba porque mi
+     listener era en bubbling phase del submit → React resetea el
+     form ANTES de bubblear → al leer ta.value yo veía "". Ahora:
+
+       1. Al pulsar Enter (o click Send), interceptamos en el evento
+          ANTES de submit, leemos ta.value cuando aún está poblado.
+       2. Construimos el bubble fake al instante en JS, lo metemos
+          al DOM. Sin animación de fadeIn (instant feel).
+       3. Limpiamos el textarea EN JS también (instant), no esperamos
+          a que Reflex lo haga.
+       4. Llamamos requestSubmit() para que Reflex procese normal.
+       5. Cuando el real llega del backend, el observer lo detecta
+          y elimina el fake.
+
+     Resultado: lo que el user ve es 0ms de delay entre Enter y bubble. */
+
+  function _getPendingImageUrl(form) {
+    if (!form) return null;
+    var parent = form.parentElement;
+    if (!parent) return null;
+    var img = parent.querySelector('img[src^="data:image"]');
+    return img ? img.src : null;
+  }
+
+  function _doOptimisticSend(form) {
+    // Lee texto + imagen del form actual. Crea el bubble fake en DOM
+    // SIN tocar ta.value (clave: si limpiamos antes del submit, Reflex
+    // recibe FormData vacío). Reflex limpia el textarea solo via
+    // reset_on_submit=True después.
+    if (!form) return false;
+    var ta = form.querySelector('textarea#message');
+    if (!ta) return false;
+
+    var text = (ta.value || '').trim();
+    var imageUrl = _getPendingImageUrl(form);
+
+    if (!text && !imageUrl) return false;
+
+    if (typeof _showOptimisticUserBubble === 'function') {
+      _showOptimisticUserBubble(text, imageUrl);
+    }
+    return true;
+  }
+
   function initTextarea() {
     // Auto-resize as user types
     document.addEventListener('input', function (e) {
@@ -331,25 +375,44 @@
       }
     });
 
-    // Enter = submit form, Shift+Enter = newline
+    // Enter = submit form, Shift+Enter = newline.
+    // Disparamos el optimistic ANTES de requestSubmit (síncrono en
+    // el handler del usuario, ta.value todavía poblado).
     document.addEventListener('keydown', function (e) {
       if (e.target && e.target.id === 'message' && e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           var form = e.target.closest('form');
-          if (form) {
-            if (form.requestSubmit) {
-              form.requestSubmit();
-            } else {
-              var btn = form.querySelector('button[type="submit"]');
-              if (btn) btn.click();
-            }
+          if (!form) return;
+
+          _doOptimisticSend(form);
+
+          if (form.requestSubmit) {
+            form.requestSubmit();
+          } else {
+            var btn = form.querySelector('button[type="submit"]');
+            if (btn) btn.click();
           }
         }
       }
     });
 
-    // Reset textarea height after the form clears (Reflex resets value but not height)
+    // Click en send button — interceptamos en CAPTURE phase para
+    // disparar optimistic ANTES de que React maneje el click.
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest && e.target.closest('.ashley-send-btn');
+      if (!btn) return;
+      var form = btn.closest('form');
+      if (!form) return;
+      _doOptimisticSend(form);
+      // No preventDefault — dejamos que el click llegue al button para
+      // que dispare submit del form normal. Reflex procesa el data
+      // que ya capturó del textarea antes de nuestro reset (lo lee
+      // del FormData del submit event que viene a continuación).
+    }, true /* CAPTURE phase, antes de React */);
+
+    // Reset textarea height tras submit del form (Reflex resetea
+    // .value pero no la height auto-resize)
     document.addEventListener('submit', function (e) {
       var ta = e.target && e.target.querySelector('textarea#message');
       if (ta) {
@@ -438,21 +501,36 @@
     // then snapshot the current count as baseline so we never play
     // sounds for messages that were already there on page load.
     setTimeout(function () {
-      var prevMsgCount = box.querySelectorAll('.msg-enter').length;
+      // v0.14.3 — el conteo IGNORA optimistic bubbles. Estos son fakes
+      // que añadimos en JS para feedback instantáneo; cuando el real
+      // de React llega, lo detectamos como un "+1 real" y eliminamos
+      // el fake en el mismo tick para evitar duplicados visibles.
+      var REAL_SEL = '.msg-enter:not(.ashley-optimistic)';
+      var prevMsgCount = box.querySelectorAll(REAL_SEL).length;
       var prevThink    = false;
       var prevStream   = false;
 
       var msgObs = new MutationObserver(function () {
-        var all   = box.querySelectorAll('.msg-enter');
+        var all   = box.querySelectorAll(REAL_SEL);
         var delta = all.length - prevMsgCount;
 
-        // Only play sounds for 1-2 new messages at a time.
-        // A large delta (>2) means it's the initial history load —
-        // we skip it to avoid a burst of sounds on first interaction.
+        // Si llegó un nuevo real, borrar TODOS los optimistic.
+        // El fake fue temporal — su trabajo era cubrir el gap hasta
+        // que el real llegara. Una vez aquí, ya no hace falta.
+        if (delta >= 1 && typeof _purgeOptimistic === 'function') {
+          try { _purgeOptimistic(); } catch (_e) {}
+        }
+
+        // Sonidos: solo 1-2 nuevos a la vez. delta>2 = history load,
+        // skip para no sonar burst al abrir la app.
         if (delta >= 1 && delta <= 2) {
           for (var i = prevMsgCount; i < all.length; i++) {
-            if (all[i].classList.contains('user-msg'))        playSend();
-            else if (all[i].classList.contains('ashley-msg')) playResponse();
+            var el = all[i];
+            // user-msg NO suena aquí — playSend ya sonó al insertar el
+            // optimistic bubble. Si por algún path raro un user-msg llega
+            // sin optimistic previo, aceptamos silencio (mejor que doble
+            // sonido).
+            if (el.classList.contains('ashley-msg')) playResponse();
           }
         }
         prevMsgCount = all.length;
@@ -476,6 +554,204 @@
       }, 100);
 
     }, 600);
+  }
+
+
+  /* ══════════════════════════════════════════
+     OPTIMISTIC UI — bubble fake temporal (v0.16.12 — simple)
+  ══════════════════════════════════════════
+     Filosofía:
+       El user pulsa enter y necesita ver SU mensaje + oír sonido AL
+       INSTANTE. Reflex tarda ~100-200ms en montar el real — durante
+       ese gap mostramos un bubble fake.
+
+     Vida del fake:
+       1. JS lo añade al final del chat al pulsar enter + playSend().
+       2. React monta el real ms después. Observer detecta y BORRA el
+          fake. El real toma su lugar.
+       3. CSS .user-msg.msg-enter { animation: none } evita que el real
+          ejecute slide-up tras el swap → el bubble queda donde estaba
+          el fake, sin "se mueve".
+       4. CSS reset margin del <p>/<h*>/<li> dentro de bubble-* iguala
+          dimensiones del real (que usa Markdown) con el fake (que usa
+          <p style="margin:0">). Sin esto el real es ~32px más alto
+          y el bubble crecía al swap.
+
+     Lo que NO hace este código (a propósito):
+       - NO mantiene el fake permanente — era source de bugs raros
+         al borrar mensajes y al recibir respuestas de Ashley.
+       - NO oculta el real con display:none — rompía la lógica de
+         eliminación de mensajes.
+       - NO posiciona el fake activamente — React maneja el orden via
+         state.messages.
+       Cero pelea contra React: el fake es 100% temporal, el real es
+       el bubble permanente. */
+
+  function _buildFakeBubble(text, imageUrl) {
+    // Bubble simple hand-rolled. Sin botón 🗑️ — el optimistic es facade
+    // visual; el real (oculto) tiene su botón funcional, pero el user
+    // no puede acceder a él. Si hace falta borrar, reload y aparecerá
+    // el real con su botón. Trade-off aceptable para la ilusión sin
+    // artefactos.
+    var wrapper = document.createElement('div');
+    wrapper.className = 'user-msg ashley-optimistic';
+    wrapper.style.cssText =
+      'width:100%;padding-top:4px;padding-bottom:4px;animation:none;';
+    var row = document.createElement('div');
+    row.style.cssText =
+      'display:flex;align-items:center;justify-content:flex-end;' +
+      'width:100%;gap:8px;';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble-user';
+    bubble.style.cssText =
+      'padding:12px 18px;border-radius:22px 4px 22px 22px;' +
+      'max-width:78%;white-space:pre-wrap;word-wrap:break-word;';
+    if (imageUrl) {
+      var img = document.createElement('img');
+      img.src = imageUrl;
+      img.style.cssText =
+        'max-width:220px;border-radius:10px;' +
+        'display:block;margin-bottom:8px;';
+      bubble.appendChild(img);
+    }
+    if (text) {
+      var p = document.createElement('p');
+      p.textContent = text;
+      p.style.cssText = 'margin:0;';
+      bubble.appendChild(p);
+    }
+    row.appendChild(bubble);
+    wrapper.appendChild(row);
+    return wrapper;
+  }
+
+  function _showOptimisticUserBubble(text, imageUrl) {
+    var box = document.getElementById('chat_messages');
+    if (!box) return;
+
+    // Limpiar cualquier fake anterior (defensivo — observer ya lo borra
+    // cuando llega el real, pero si el user envía dos mensajes muy
+    // rápido seguidos, podría quedar uno).
+    var prev = box.querySelectorAll('.ashley-optimistic');
+    for (var i = 0; i < prev.length; i++) prev[i].remove();
+
+    // Crear y añadir al final.
+    var wrapper = _buildFakeBubble(text, imageUrl);
+    box.appendChild(wrapper);
+
+    // Sonido AL INSTANTE — alineado con la aparición visual.
+    if (typeof playSend === 'function') {
+      try { playSend(); } catch (_e) {}
+    }
+
+    // Scroll al fondo.
+    var scrollBox = box.closest('.ashley-chat-scroll') || box;
+    scrollBox.scrollTop = scrollBox.scrollHeight;
+  }
+
+  // Borra todos los fakes activos. Llamada por el observer cuando
+  // detecta que llegó un real (delta positivo de mensajes).
+  function _purgeOptimistic() {
+    var box = document.getElementById('chat_messages');
+    if (!box) return;
+    var fakes = box.querySelectorAll('.ashley-optimistic');
+    for (var i = 0; i < fakes.length; i++) fakes[i].remove();
+  }
+
+  function initOptimisticUI() {
+    document.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (!form || form.tagName !== 'FORM') return;
+      var ta = form.querySelector('textarea#message');
+      if (!ta) return;
+
+      var text = (ta.value || '').trim();
+
+      // Detectar imagen pendiente (preview encima del input — el
+      // selector busca un <img> con src data: cerca del textarea).
+      var imageUrl = null;
+      var pendingImg = form.parentElement &&
+        form.parentElement.querySelector('img[src^="data:image"]');
+      if (pendingImg) imageUrl = pendingImg.src;
+
+      if (text || imageUrl) {
+        _showOptimisticUserBubble(text, imageUrl);
+      }
+    });
+  }
+
+
+  /* ══════════════════════════════════════════
+     IMAGE PASTE — Ctrl+V para pegar imagen al chat (v0.14.1)
+  ══════════════════════════════════════════
+     User pidió "como en las apps pro de IA, si copio una imagen
+     con Ctrl+C poder pegarla con Ctrl+V". El textarea capta el
+     paste, extraemos el File del clipboard, lo inyectamos en el
+     input file oculto del rx.upload via DataTransfer + dispatch
+     change → Reflex procesa via handle_upload existente y rellena
+     pending_image como con el botón 📎.
+
+     Funciona con: screenshot del recortes (Win+Shift+S),
+     copiar imagen del navegador, copiar archivo de imagen del
+     explorador, etc. */
+
+  function initImagePaste() {
+    document.addEventListener('paste', function (e) {
+      // Solo cuando el textarea del chat está focuseado
+      var ta = e.target;
+      if (!ta || ta.id !== 'message') return;
+
+      var cb = e.clipboardData || window.clipboardData;
+      if (!cb || !cb.items) return;
+
+      for (var i = 0; i < cb.items.length; i++) {
+        var item = cb.items[i];
+        if (item.kind !== 'file') continue;
+        if (item.type.indexOf('image') !== 0) continue;
+
+        var file = item.getAsFile();
+        if (!file) continue;
+
+        // El clipboard suele entregar la imagen como "image.png"
+        // sin más. Ponemos un timestamp para distinguir si el user
+        // pega varias en sucesión.
+        var ext = (file.type.split('/')[1] || 'png').split('+')[0];
+        var renamed = new File(
+          [file],
+          'pasted-' + Date.now() + '.' + ext,
+          { type: file.type }
+        );
+
+        // Buscar el input file oculto del rx.upload. Solo hay uno
+        // en la página (id="img_upload" en el wrapper, el input es
+        // hijo). Selector amplio por si Reflex cambia la estructura.
+        var fileInput = document.querySelector('input[type="file"]');
+        if (!fileInput) {
+          console.warn('[ashley-paste] no file input found');
+          return;
+        }
+
+        // DataTransfer es la única forma legal de setear input.files
+        // programáticamente. dispatchEvent('change') hace que react-
+        // dropzone (subyacente a rx.upload) recoja el archivo y llame
+        // al on_drop handler → handle_upload en Python.
+        try {
+          var dt = new DataTransfer();
+          dt.items.add(renamed);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (err) {
+          console.warn('[ashley-paste] failed:', err);
+          return;
+        }
+
+        // No preventDefault sobre el resto — si paste contenía texto
+        // además de imagen (raro pero posible), dejamos que el texto
+        // se pegue normal. Solo absorbemos la imagen.
+        e.preventDefault();
+        return;
+      }
+    });
   }
 
 
@@ -673,12 +949,24 @@
   /* ══════════════════════════════════════════
      AUTO-RELOAD WHEN RETURNING FROM BACKGROUND
   ══════════════════════════════════════════ */
-  // Si la app estuvo oculta >5 min (usuario la minimizó, durmió, etc.),
-  // al volver forzamos un reload para que el backend regenere el time context
-  // con la hora REAL del sistema. Sin esto, Ashley puede decir "son las 2 AM"
-  // cuando en realidad son las 12 PM (estado viejo del WebSocket).
+  // v0.14.3 — antes 5 min era demasiado agresivo. El user reportaba
+  // que minimizar 10-30 min "reseteaba" la sesión: recarga del
+  // frontend, scroll arriba, mood overlay perdido, follow-up proactivo
+  // disparado, etc. Y el motivo original (refrescar time context) ya
+  // no aplica — _build_time_context() usa datetime.now() en cada turn,
+  // así que el time es fresh per-message sin necesidad de reload.
+  //
+  // Subido a 60 min: solo recargamos si la app estuvo oculta >1h
+  // (caso real de "te fuiste a dormir / a trabajar"). Para gaps cortos
+  // <60 min mantenemos la sesión viva — el user vuelve y todo está
+  // como lo dejó.
+  //
+  // ADEMÁS marcamos sessionStorage antes del reload para que la
+  // sesión recargada sepa "esto fue auto-reload, no abrir engagement
+  // proactivo de nuevo" — el user no necesita un saludo cada vez que
+  // vuelve de un break.
   var _hiddenAt = 0;
-  var STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutos
+  var STALE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutos (era 5)
 
   function initVisibilityReload() {
     document.addEventListener('visibilitychange', function () {
@@ -689,6 +977,7 @@
         _hiddenAt = 0;
         if (elapsed > STALE_THRESHOLD_MS) {
           console.log('[ashley-fx] App was hidden for ' + Math.round(elapsed / 60000) + ' min — reloading for fresh state');
+          try { sessionStorage.setItem('ashley_auto_reload', '1'); } catch (e) {}
           location.reload();
         }
       }
@@ -712,7 +1001,9 @@
 
   // ── Floating hearts ──────────────────────
   function _spawnHeart(positive, delta) {
-    var bar = document.querySelector('.affection-bar');
+    // v0.14.5 — antes era .affection-bar (layout viejo). El rediseño
+    // v0.16 sustituyó la barra vertical por el SVG .heart-frame.
+    var bar = document.querySelector('.heart-frame');
     if (!bar) return;
     var rect = bar.getBoundingClientRect();
     var heart = document.createElement('div');
@@ -723,6 +1014,23 @@
     heart.style.top = (rect.top - 10) + 'px';
     document.body.appendChild(heart);
     setTimeout(function() { heart.remove(); }, 2500);
+  }
+
+  // ── Celebrate animation on heart itself (v0.14.5) ────
+  // Disparada cada vez que el afecto cambia. Le da al heart un
+  // bump visual claro: scale + glow burst arriba (subir), shrink+desat
+  // (bajar). Es lo que hace que subir el afecto se sienta tactile,
+  // no solo el numerito cambiando.
+  function _celebrateHeart(isUp) {
+    var heartEl = document.querySelector('.heart-frame');
+    if (!heartEl) return;
+    var cls = isUp ? 'celebrate-up' : 'celebrate-down';
+    heartEl.classList.remove('celebrate-up', 'celebrate-down');
+    // Force reflow para que el reset registre y la animación reinicie
+    void heartEl.offsetWidth;
+    heartEl.classList.add(cls);
+    var dur = isUp ? 800 : 600;
+    setTimeout(function () { heartEl.classList.remove(cls); }, dur);
   }
 
   // ── Tier change event ────────────────────
@@ -807,18 +1115,14 @@
   function initAffectionObserver() {
     _observerStartTime = Date.now();
     setInterval(function() {
-      var bar = document.querySelector('.affection-bar');
-      if (!bar) return;
-      var parent = bar.parentElement;
-      if (!parent) return;
-      // Find the text element showing the number (p or span after the bar)
-      var texts = parent.querySelectorAll('p, span');
-      var current = -1;
-      for (var i = 0; i < texts.length; i++) {
-        var v = parseInt(texts[i].textContent, 10);
-        if (!isNaN(v) && v >= 0 && v <= 100) { current = v; break; }
-      }
-      if (current < 0) return;
+      // v0.14.5 — buscamos el .ashley-affection-number (el "100" del
+      // header del chat). Antes el observer iteraba el parent de
+      // .affection-bar buscando un text con número 0-100, pero ese
+      // selector ya no existe en el layout v0.16.
+      var numEl = document.querySelector('.ashley-affection-number');
+      if (!numEl) return;
+      var current = parseInt(numEl.textContent, 10);
+      if (isNaN(current) || current < 0 || current > 100) return;
 
       if (_lastAffection < 0) {
         // First read — initialize without playing sounds
@@ -853,12 +1157,14 @@
       var newTier = _getTier(current);
       var oldTier = _lastTier;
 
-      // Floating heart
+      // Floating heart + celebrate animation on the heart itself
       if (delta > 0) {
         _spawnHeart(true, delta);
+        _celebrateHeart(true);
         playAffectionUp();
       } else if (delta < 0) {
         _spawnHeart(false, delta);
+        _celebrateHeart(false);
         playAffectionDown();
       }
 
@@ -1003,6 +1309,8 @@
     initTextarea();
     initObservers();
     initInteractiveSounds();  // v0.16.5 — hover/click sounds
+    initImagePaste();          // v0.14.1 — Ctrl+V de imagen al chat
+    initOptimisticUI();        // v0.14.3 — bubble fake instantáneo
     initNotificationObserver();
     initPinOnTopObserver();
     initVisibilityReload();

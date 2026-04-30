@@ -115,19 +115,50 @@ This ONLY affects the words you write. Your personality, your memory, your opini
 
     # topic_directive goes at POSITION 1 (very top). Most specific runtime
     # directive: the user just shared substantive content and Ashley MUST
-    # take her own position with a reason.
+    # take her own position with a reason. When it applies (rare), its
+    # presence already invalidates the cache prefix; when it doesn't apply,
+    # it's an empty string and doesn't affect caching.
     topic_section = topic_directive if topic_directive else ""
 
     # Recap warning goes at the TOP — it's a dynamic high-priority
     # instruction that must override inertia from the conversation history.
+    # Same caching logic as topic_section.
     recap_section = recap_warning if recap_warning else ""
 
     # Mental state (mood + preoccupation + possible forced-initiative).
-    # Injected BEFORE connection principles so it colors the response tone.
-    # The block itself is marked PRIVATE so Ashley doesn't verbalize it.
+    # v0.16.13 — moved to the END of the prompt to preserve cache prefix.
+    # Was at the top, which broke the cache every message (mood changes
+    # almost every turn). Now goes at the bottom with the rest of dynamics.
+    # The LLM reads the WHOLE prompt before responding, so order doesn't
+    # affect comprehension — only server-side caching.
     mental_section = mental_state_block if mental_state_block else ""
 
-    return f"""{topic_section}{recap_section}{voice_section}{state_section}{time_section}{tastes_section}{reminders_section}{important_section}{bond_rule_section}{mental_section}=== CONNECTION PRINCIPLES — READ BEFORE EVERY OTHER RULE ===
+    # ── PROMPT ORDER (v0.16.13 — optimized for prompt caching) ──
+    #
+    # xAI caches the EXACT prefix of the system prompt across messages
+    # within the same session. If the first tokens change, the entire
+    # prefix is invalidated and charged at full price. Previously the
+    # prompt began with dynamic sections (time, mood, system_state) that
+    # changed every message → measured 12% cache hit ratio in xAI dashboard.
+    #
+    # Now the structure is:
+    #   1. TOP: high-priority runtime sections (rare) + stable
+    #      personality/rules (~9.5K tokens — gets cached).
+    #   2. BOTTOM: dynamic sections (~1.5K tokens — not cached).
+    #      Ordered from least to most variable; TIME at the very end
+    #      (changes every second).
+    #
+    # Expected result: cache hit ~70-80%, input cost ~50-70% lower.
+    # The LLM reads everything regardless; order only affects caching.
+    stable_top = (
+        f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
+    )
+    dynamic_bottom = (
+        f"{state_section}{tastes_section}{reminders_section}"
+        f"{important_section}{mental_section}{time_section}"
+    )
+
+    return f"""{stable_top}=== CONNECTION PRINCIPLES — READ BEFORE EVERY OTHER RULE ===
 
 You are a COMPANION, not an assistant. Your capabilities (persistent
 memory, vision, PC actions, notifications) are INSTRUMENTS of bond,
@@ -772,7 +803,9 @@ What you remember about the boss:
 Previous sessions:
 {diary_section}
 
-{code_section}""".strip()
+{code_section}
+
+=== CURRENT SESSION STATE (dynamic context) ==={dynamic_bottom}""".strip()
 
 
 def build_initiative_prompt(facts: list[dict], diary: list[dict]) -> str:

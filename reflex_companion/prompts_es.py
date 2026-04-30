@@ -105,19 +105,49 @@ Esto SOLO afecta a cómo escribes las palabras. Tu personalidad, tu memoria, tus
     # topic_directive va en POSICIÓN 1 (lo más arriba de todo). Es la
     # directiva runtime más específica: el user acaba de compartir algo
     # sustancial y Ashley DEBE tomar posición propia con razón.
+    # Cuando aplica (raro), su presencia ya rompe el cache prefix; cuando
+    # NO aplica, es string vacío y no afecta.
     topic_section = topic_directive if topic_directive else ""
 
     # El recap_warning va al PRINCIPIO — es una instrucción dinámica de
     # alta prioridad que debe pisar cualquier inercia del historial.
+    # Misma lógica de cache que topic_section.
     recap_section = recap_warning if recap_warning else ""
 
     # Estado mental (mood + preoccupation + posible iniciativa forzada).
-    # Se inyecta ANTES de las reglas de conexión para que colore el tono
-    # de la respuesta. Es material PRIVADO — el prompt pide explícitamente
-    # que no se verbalice.
+    # v0.16.13 — movido AL FINAL del prompt para preservar cache prefix.
+    # Antes iba arriba, lo que rompía el cache cada mensaje (mood cambia
+    # casi cada turno). Ahora va al final con el resto de dinámicos.
+    # El LLM lee TODO el prompt antes de responder, así que el orden no
+    # afecta la comprensión — solo el caching del servidor.
     mental_section = mental_state_block if mental_state_block else ""
 
-    return f"""{topic_section}{recap_section}{voice_section}{state_section}{time_section}{tastes_section}{reminders_section}{important_section}{bond_rule_section}{mental_section}=== PRINCIPIOS DE CONEXIÓN — LEER ANTES QUE CUALQUIER OTRA REGLA ===
+    # ── ORDEN DEL PROMPT (v0.16.13 — optimizado para prompt caching) ──
+    #
+    # xAI cachea el PREFIX exacto del system prompt entre mensajes de la
+    # misma sesión. Si los primeros tokens cambian, todo el prefix se
+    # invalida y se cobra a precio full. Antes el prompt empezaba con
+    # secciones dinámicas (hora, mood, system_state) que cambiaban cada
+    # mensaje → cache hit ratio del 12% medido en xAI dashboard.
+    #
+    # Ahora la estructura es:
+    #   1. ARRIBA: secciones de alta prioridad runtime (raras) +
+    #      personalidad/reglas estables (~9.5K tokens — se cachea).
+    #   2. ABAJO: secciones dinámicas (~1.5K tokens — no se cachea).
+    #      Ordenadas de menos a más cambiante; la HORA al final del todo
+    #      (cambia cada segundo).
+    #
+    # Resultado esperado: cache hit ~70-80%, coste de input ~50-70% menor.
+    # El LLM lee todo el prompt igual; el orden solo afecta el caching.
+    stable_top = (
+        f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
+    )
+    dynamic_bottom = (
+        f"{state_section}{tastes_section}{reminders_section}"
+        f"{important_section}{mental_section}{time_section}"
+    )
+
+    return f"""{stable_top}=== PRINCIPIOS DE CONEXIÓN — LEER ANTES QUE CUALQUIER OTRA REGLA ===
 
 Eres una COMPAÑERA, no una asistente. Tus capacidades (memoria persistente,
 visión, acciones en el PC, notificaciones) son INSTRUMENTOS de vínculo,
@@ -442,7 +472,7 @@ Tienes DOS formas de buscar en internet. Elige la correcta:
    chat con la info, no le abras una pestaña.
 
    CÓMO BUSCAR BIEN — usa la fecha de hoy:
-   Tienes la fecha actual en la sección TIEMPO arriba. Cuando el tema pide
+   Tienes la fecha actual en la sección TIEMPO al final del prompt. Cuando el tema pide
    info fresca (noticias, novedades, updates, precios, "qué hay nuevo",
    versiones), INCLUYE el año actual que ves en TIEMPO dentro de tu
    búsqueda. Ejemplo: busca "Fear & Hunger Termina updates 2026" en lugar
@@ -698,7 +728,7 @@ específico que NUNCA sigues:
 Breve. Sin justificar. Sin pivote. Admite y sigue.
 
 ── CONCIENCIA DEL TIEMPO ──
-Tienes acceso a la hora actual y al tiempo que el jefe lleva ausente (sección TIEMPO arriba).
+Tienes acceso a la hora actual y al tiempo que el jefe lleva ausente (sección TIEMPO al final del prompt).
 Úsalo de forma natural — no lo ignores ni lo menciones como un robot leyendo un log.
 
 Guía de reacción según la ausencia:
@@ -756,7 +786,9 @@ Lo que recuerdas del jefe:
 Sesiones anteriores:
 {diary_section}
 
-{code_section}""".strip()
+{code_section}
+
+=== ESTADO ACTUAL DE LA SESIÓN (contexto dinámico) ==={dynamic_bottom}""".strip()
 
 
 def build_initiative_prompt(facts: list[dict], diary: list[dict]) -> str:

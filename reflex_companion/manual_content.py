@@ -117,7 +117,18 @@ _EN = {
                 "the right action, or you want to avoid accidental "
                 "system changes. The toggle is per-session — it "
                 "doesn't persist between restarts unless you change it "
-                "in Settings."
+                "in Settings.\n\n"
+                "**Built-in safety filter**: when Ashley opens an app or "
+                "closes a window, certain characters are blocked from "
+                "the request — `&`, `|`, `;`, `<`, `>`, `\"`, `'`, `` ` ``, "
+                "`$` and newlines. These are command separators and "
+                "escape characters that, in theory, a malicious web page "
+                "scraped by Ashley could try to slip into a request to "
+                "make your computer run arbitrary commands (download a "
+                "file, delete folders, etc.). Real app names never need "
+                "those symbols, so blocking them costs nothing and "
+                "shuts that door completely. If Ashley ever says she "
+                "couldn't open something with a weird name, that's why."
             ),
         },
         {
@@ -398,7 +409,20 @@ _ES = {
                 "tome la acción correcta, o quieres evitar cambios "
                 "accidentales del sistema. El toggle es por sesión — "
                 "no persiste entre reinicios salvo que lo cambies en "
-                "Ajustes."
+                "Ajustes.\n\n"
+                "**Filtro de seguridad integrado**: cuando Ashley abre "
+                "una app o cierra una ventana, ciertos caracteres están "
+                "bloqueados de la petición — `&`, `|`, `;`, `<`, `>`, "
+                "`\"`, `'`, `` ` ``, `$` y saltos de línea. Son "
+                "separadores de comando y caracteres de escape que, en "
+                "teoría, una página web maliciosa que Ashley scrapee "
+                "podría intentar colar en una petición para hacer que "
+                "tu PC ejecute comandos arbitrarios (descargar un "
+                "archivo, borrar carpetas, etc.). Los nombres reales de "
+                "apps nunca necesitan esos símbolos, así que bloquearlos "
+                "no cuesta nada y cierra esa puerta del todo. Si alguna "
+                "vez Ashley dice que no pudo abrir algo con un nombre "
+                "raro, esa es la razón."
             ),
         },
         {

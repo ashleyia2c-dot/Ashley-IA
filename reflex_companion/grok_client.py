@@ -14,6 +14,7 @@ Este módulo implementa exponential backoff (3 intentos: 1s, 2s, 4s) en:
 """
 
 import logging
+import threading
 import time
 from typing import Iterator
 
@@ -21,6 +22,59 @@ from .config import GROK_MODEL, XAI_API_KEY
 
 
 _log = logging.getLogger("ashley.grok")
+
+
+# ─────────────────────────────────────────────
+#  Cliente xAI cacheado a nivel módulo (v0.16.13)
+# ─────────────────────────────────────────────
+#
+# Antes: cada llamada al LLM (stream_response, grok_call, detect_intended_action,
+# regenerate_preoccupation, compress_history) instanciaba un Client(api_key=...)
+# nuevo. Cada nuevo cliente abre una conexión HTTP/2 nueva → pago el handshake
+# TCP+TLS completo (~300-600ms desde Europa a api.x.ai en US-East). En un
+# mensaje normal con 3-4 llamadas LLM eso son ~1.2-2.4 SEGUNDOS de overhead
+# de red puro.
+#
+# Solución: un solo Client compartido, instanciado lazy y reutilizado entre
+# llamadas. El SDK de xAI mantiene un pool HTTP/2 internamente — solo si el
+# Client persiste. Así el handshake se paga una sola vez al iniciar la sesión
+# y los siguientes requests reutilizan la conexión abierta.
+#
+# Thread safety: el SDK xai_sdk es thread-safe (Cliente protegido por su
+# propio lock interno; cada chat.create() devuelve un objeto chat
+# independiente). Aún así envolvemos la creación en un lock para evitar
+# que dos threads creen 2 clientes en paralelo durante el primer uso.
+_xai_client = None
+_xai_client_lock = threading.Lock()
+_xai_client_api_key: str | None = None  # detectar cambio de api_key en runtime
+
+
+def get_xai_client():
+    """Devuelve el Client xAI compartido. Lo crea si no existe.
+
+    Si la api_key cambia (user editó settings), invalida el cache y crea
+    uno nuevo con la nueva key.
+
+    Beneficio medido: ~300-600ms ahorrados por llamada subsiguiente
+    (la primera paga el handshake, las demás reutilizan).
+    """
+    global _xai_client, _xai_client_api_key
+    from xai_sdk import Client
+    current_key = XAI_API_KEY
+    with _xai_client_lock:
+        if _xai_client is None or _xai_client_api_key != current_key:
+            _xai_client = Client(api_key=current_key)
+            _xai_client_api_key = current_key
+        return _xai_client
+
+
+def invalidate_xai_client() -> None:
+    """Fuerza recreación del cliente xAI en la próxima llamada. Llamar si
+    se sabe que la conexión está corrupta (errores repetidos de network)."""
+    global _xai_client, _xai_client_api_key
+    with _xai_client_lock:
+        _xai_client = None
+        _xai_client_api_key = None
 
 
 # ─────────────────────────────────────────────
@@ -157,10 +211,9 @@ def grok_call(system_text: str, user_text: str) -> str:
     def _once():
         if is_openai_compat():
             return openai_compat_simple(system_text, user_text, creative=True)
-        # Path xAI directo (legacy)
-        from xai_sdk import Client
+        # Path xAI directo (legacy) — cliente cacheado para reusar conexión.
         from xai_sdk.chat import system, user as xai_user
-        client = Client(api_key=XAI_API_KEY)
+        client = get_xai_client()
         chat = _chat_create(client, model=GROK_MODEL)
         chat.append(system(system_text))
         chat.append(xai_user(user_text))
@@ -185,7 +238,6 @@ def detect_intended_action(user_message: str, ashley_response: str) -> str | Non
     Con retries: si la llamada falla transitoriamente no rompemos el flujo
     del usuario — simplemente devolvemos None (no hay fallback action).
     """
-    from xai_sdk import Client
     from xai_sdk.chat import system, user as xai_user
 
     system_text = """Eres un detector de intenciones de acciones del sistema.
@@ -251,7 +303,7 @@ Usuario: "qué hora es?"                  →  NONE"""
                 creative=False,
             ).strip()
         else:
-            client = Client(api_key=XAI_API_KEY)
+            client = get_xai_client()
             chat = client.chat.create(model=_FAST_MODEL)
             chat.append(system(system_text))
             chat.append(xai_user(user_text))
@@ -368,8 +420,7 @@ def stream_response(
             raise
         return
 
-    # Path xAI directo (legacy)
-    from xai_sdk import Client
+    # Path xAI directo (legacy) — usa cliente cacheado.
     from xai_sdk.chat import system, user as xai_user, assistant, image as xai_image
     from xai_sdk.tools import web_search
 
@@ -385,7 +436,7 @@ def stream_response(
     def _open_stream():
         """Prepara el chat y devuelve el iterador de chunks de Grok."""
         tools = [web_search()] if use_web_search else []
-        client = Client(api_key=XAI_API_KEY)
+        client = get_xai_client()
         chat = _chat_create(
             client,
             model=_model_to_use,

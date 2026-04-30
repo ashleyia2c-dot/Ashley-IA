@@ -47,8 +47,19 @@ _log = logging.getLogger("ashley.mental")
 # Modelo barato/rápido para regenerar preoccupation. Igual que action detector.
 _MENTAL_MODEL = "grok-3-fast"
 
-# Cadencia de regeneración de preoccupation. 60 min de vida activa o reapertura.
-PREOCCUPATION_TTL_MINUTES = 60
+# Cadencia de regeneración de preoccupation.
+#
+# v0.16.13: subido de 60 → 90 min. Razón:
+#   - El regen es una llamada LLM síncrona (~3.5s) que bloquea el primer
+#     token cuando el pre-warm en background no completó a tiempo.
+#   - 60 min era agresivo: en una sesión activa de >1h se disparaba en
+#     mitad de un chat fluido; el user notaba lag justo cuando estaba
+#     "dentro" de la conversación.
+#   - 90 min mantiene la fresqueza emocional para reaperturas largas
+#     (tras trabajo, dormir) sin disparar mid-session. Sigue corriendo
+#     en background al abrir la app, así que reapertura tras 1.5h
+#     reaprovecha el pre-warm sin bloquear.
+PREOCCUPATION_TTL_MINUTES = 90
 
 # Cada cuántos turnos se fuerza iniciativa conversacional
 INITIATIVE_EVERY_N_TURNS = 3
@@ -426,7 +437,8 @@ def regenerate_preoccupation(
             _skip_xai_path = False
 
         if not _skip_xai_path:
-            client = Client(api_key=XAI_API_KEY)
+            from .grok_client import get_xai_client
+            client = get_xai_client()
             # Penalties moderadas — queremos prosa variada cada regeneración.
             # Solo aplicamos si el modelo no es tipo 'reasoning' (esos
             # rechazan el parámetro).

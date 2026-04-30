@@ -64,6 +64,33 @@ def load_error() -> Optional[str]:
     return _model_error
 
 
+def is_cached_on_disk() -> bool:
+    """v0.16.13 — True si el modelo ya está descargado físicamente en disco.
+
+    Permite distinguir entre "primera descarga real" (~245 MB, ~1-5 min)
+    vs "cargando del disco a RAM" (~5-15s). Antes el frontend mostraba
+    'Descargando 245 MB' aunque el modelo ya estuviera cacheado, porque
+    el código solo verificaba is_loaded() (en memoria), no en disco.
+
+    Verificamos los archivos esperados con tamaño >0. Si el modelo está
+    completo, devuelve True; si falta algo o no existe, False.
+    """
+    try:
+        cache_dir = _cache_dir()
+        local_dir = os.path.join(
+            cache_dir,
+            f"models--Systran--faster-whisper-{_MODEL_SIZE}-direct",
+        )
+        expected = ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")
+        return all(
+            os.path.exists(os.path.join(local_dir, f)) and
+            os.path.getsize(os.path.join(local_dir, f)) > 0
+            for f in expected
+        )
+    except Exception:
+        return False
+
+
 def _ensure_model_local(model_size: str, cache_dir: str) -> str:
     """Asegura que el modelo está físicamente descargado en disk con
     archivos REALES (no symlinks). Devuelve el path local listo para

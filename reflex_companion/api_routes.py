@@ -69,6 +69,7 @@ async def _transcribe_endpoint(request):
     try:
         from .whisper_stt import (
             transcribe_bytes, is_loaded, is_loading, warmup, load_error,
+            is_cached_on_disk,
         )
         # Si el modelo no está listo, informar al frontend y seguir descargando.
         # PERO: si una carga previa falló (load_error está set), reportamos el
@@ -85,7 +86,17 @@ async def _transcribe_endpoint(request):
                     "message_es": f"Whisper no pudo cargarse: {err}",
                 }, status_code=503))
             if not is_loading():
-                warmup()  # iniciar descarga en background
+                warmup()  # iniciar carga en background
+            # v0.16.13 — distinguir "primera descarga real" vs "cargando del
+            # disco a RAM". Antes siempre mostrabamos 'Descargando 245 MB'
+            # aunque el modelo ya estuviera en disco — el user lo veía cada
+            # primera vez por sesión y se frustraba.
+            if is_cached_on_disk():
+                return _with_cors(_StarletteJSON({
+                    "status": "loading",
+                    "message": "Loading speech model from disk... ~10s, only once per session.",
+                    "message_es": "Cargando modelo de voz desde disco... ~10s, solo la primera vez por sesión.",
+                }))
             return _with_cors(_StarletteJSON({
                 "status": "downloading",
                 "message": "Downloading speech model (~245 MB)... This only happens once.",
@@ -103,10 +114,11 @@ async def _whisper_status_endpoint(request):
     """GET /api/whisper/status — indica si el modelo está cargado."""
     if request.method == "OPTIONS":
         return _cors_preflight()
-    from .whisper_stt import is_loaded, is_loading, load_error
+    from .whisper_stt import is_loaded, is_loading, load_error, is_cached_on_disk
     return _with_cors(_StarletteJSON({
         "loaded": is_loaded(),
         "loading": is_loading(),
+        "cached_on_disk": is_cached_on_disk(),  # v0.16.13
         "error": load_error(),
     }))
 
@@ -398,6 +410,51 @@ async def _wake_word_test_trigger(request):
                                           status_code=500))
 
 
+async def _shutdown_endpoint(request):
+    """POST /api/shutdown — graceful shutdown del backend.
+
+    Llamado por Electron antes de matar Reflex con SIGKILL. Da chance al
+    Python de:
+      • parar el wake_word detector → libera el handle del mic (sin esto
+        el icono "alguna app está usando tu mic" queda hasta reboot).
+      • cerrar streams de audio activos.
+      • flushear logs y persistencia pendiente.
+
+    Si Electron no llamó este endpoint (cierre súbito del SO, etc.),
+    seguirá funcionando con el SIGKILL fallback — solo que el mic puede
+    quedar pegado.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+
+    # 1. Parar el detector wake word (libera el mic).
+    try:
+        from .wake_word_lifecycle import stop_detector
+        stop_detector(timeout=1.0)
+    except Exception:
+        pass
+
+    # 2. Programar exit en el siguiente tick para responder al HTTP
+    # request primero — sin esto, el cliente Electron puede recibir un
+    # connection-reset en lugar del 200 OK.
+    import asyncio
+    import os as _os
+
+    def _exit_now():
+        try:
+            _os._exit(0)
+        except Exception:
+            pass
+
+    try:
+        asyncio.get_event_loop().call_later(0.1, _exit_now)
+    except Exception:
+        # Fallback síncrono si el loop está caído.
+        _exit_now()
+
+    return _with_cors(_StarletteJSON({"ok": True, "shutdown": "pending"}))
+
+
 def register_routes(app):
     """Insert API routes at the BEGINNING of the Starlette router.
     Include OPTIONS methods for CORS preflight."""
@@ -416,3 +473,5 @@ def register_routes(app):
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/wake_word/test_trigger", _wake_word_test_trigger,
         methods=["POST", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/shutdown", _shutdown_endpoint, methods=["POST", "OPTIONS"]))

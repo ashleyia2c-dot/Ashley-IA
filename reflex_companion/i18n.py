@@ -215,6 +215,8 @@ UI = {
 
         # Error prefix injected into chat when Grok fails
         "error_grok":         "*sighs* Something went wrong with Grok{label}: {err}",
+        # Image upload too big (>10 MB)
+        "upload_too_big":     "*winces* That image is too big ({size_mb:.1f} MB). Max is 10 MB so I can actually look at it.",
 
         # Achievements
         "mem_tab_achievements": "\U0001f3c6 Achievements",
@@ -420,6 +422,7 @@ UI = {
         "settings_close":           "Cerrar",
 
         "error_grok":         "*suspira* Algo falló con Grok{label}: {err}",
+        "upload_too_big":     "*tuerce el gesto* Esa imagen es demasiado grande ({size_mb:.1f} MB). El máximo son 10 MB para que pueda verla.",
 
         # Achievements
         "mem_tab_achievements": "\U0001f3c6 Logros",
@@ -625,6 +628,7 @@ UI = {
         "settings_close":           "Fermer",
 
         "error_grok":         "*soupire* Quelque chose a foiré avec Grok{label} : {err}",
+        "upload_too_big":     "*grimace* Cette image est trop grosse ({size_mb:.1f} Mo). Le max est 10 Mo pour que je puisse la regarder.",
 
         # Achievements
         "mem_tab_achievements": "\U0001f3c6 Succès",

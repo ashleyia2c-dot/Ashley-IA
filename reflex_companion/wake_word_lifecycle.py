@@ -61,11 +61,18 @@ def start_detector(
     threshold: float = 0.5,
     cooldown_seconds: float = 1.5,
     use_vad: bool = True,
+    vad_threshold: float = 0.3,
+    consecutive_required: int = 1,
 ) -> tuple[bool, str]:
     """Arranca el detector con los parámetros dados.
 
-    Si ya estaba corriendo (e.g. el user toggleó OFF→ON sin que el
-    OFF se procesara), lo paramos y reiniciamos con los nuevos params.
+    Args (v0.14.5 nuevos):
+        vad_threshold: 0-1, score mínimo del VAD para procesar el chunk.
+            Subir reduce false positives en sonidos no-speech (estornudos,
+            soplidos). 0.5 funciona bien.
+        consecutive_required: cuántos chunks consecutivos por encima de
+            threshold antes de disparar. >1 filtra impulsos cortos
+            (sneeze burst <80ms no califica para 2 chunks).
 
     Returns:
         (ok, reason). ok=True si el detector está corriendo después de
@@ -98,6 +105,8 @@ def start_detector(
             threshold=threshold,
             cooldown_seconds=cooldown_seconds,
             use_vad=use_vad,
+            vad_threshold=vad_threshold,
+            consecutive_required=consecutive_required,
         )
         ok, reason = det.start(
             callback=lambda score: wake_word_bridge.signal_detection(score),

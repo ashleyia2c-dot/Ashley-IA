@@ -233,14 +233,6 @@ def global_styles():
                   0 10px 50px rgba(0,0,0,0.8);
     }}
   }}
-  @keyframes pillPulse {{
-    0%, 100% {{ box-shadow: 0 0 6px rgba(255,154,238,0.25); }}
-    50%       {{ box-shadow: 0 0 14px rgba(255,154,238,0.6); }}
-  }}
-  @keyframes pillPulseOrange {{
-    0%, 100% {{ box-shadow: 0 0 6px rgba(255,107,53,0.25); }}
-    50%       {{ box-shadow: 0 0 14px rgba(255,107,53,0.6); }}
-  }}
   @keyframes micListening {{
     0%, 100% {{ box-shadow: 0 0 0 0 rgba(255,80,120,0.6); }}
     50%       {{ box-shadow: 0 0 0 8px rgba(255,80,120,0); }}
@@ -275,11 +267,16 @@ def global_styles():
   }}
 
   /* ── Clases funcionales ──────────────────────────────── */
-  /* Scroll invisible para los pills del header */
-  .pills-row::-webkit-scrollbar {{ display: none; }}
-  .pills-row {{ -ms-overflow-style: none; scrollbar-width: none; }}
-
   .msg-enter         {{ animation: fadeSlideIn 0.25s ease-out both; }}
+  /* ── Optimistic UI (v0.16.12 — simple version) ────────────────
+     El user-msg real NO anima slide-up. Razón: el optimistic JS lo
+     pone en posición INMEDIATAMENTE al pulsar enter; cuando el real
+     llega ms después, el observer borra el optimistic y deja al real.
+     Sin esta regla, el real ejecutaría fadeSlideIn (translateY 12px
+     → 0) tras el swap → el user vería su bubble "moverse" o aparecer
+     de nuevo. Con animation:none, real y optimistic son visualmente
+     intercambiables. */
+  .user-msg.msg-enter {{ animation: none !important; }}
   .avatar-thinking   {{ animation: avatarPulse 1.4s ease-in-out infinite !important; }}
   .portrait-thinking {{ animation: portraitGlow 1.4s ease-in-out infinite !important; }}
   .portrait-idle     {{
@@ -294,17 +291,6 @@ def global_styles():
     animation: cursorBlink 0.9s step-end infinite;
     margin-left: 2px;
   }}
-  .pill-on-pink   {{ animation: pillPulse 2.2s ease-in-out infinite; }}
-  .pill-on-orange {{ animation: pillPulseOrange 2.2s ease-in-out infinite; }}
-
-  @keyframes visionPulse {{
-    0%, 100% {{ text-shadow: 0 0 4px rgba(255,154,238,0.3); }}
-    50%       {{ text-shadow: 0 0 12px rgba(255,154,238,0.8); }}
-  }}
-  .pill-on-vision {{
-    animation: pillPulse 2.2s ease-in-out infinite, visionPulse 3s ease-in-out infinite;
-  }}
-
   /* ── Burbujas estilo wine boutique (v0.16.1) ─────────────────
      Lora serif (más elegante para body de chat que Inter sans).
      Ashley: vino oscuro con borde ámbar suave.
@@ -324,6 +310,25 @@ def global_styles():
     line-height: 1.6 !important;
     letter-spacing: 0.01em !important;
     font-weight: 400 !important;
+  }}
+  /* CRÍTICO: rx.markdown del real renderiza <p> con marginTop/Bottom
+     1em (~16px arriba y 16px abajo). Sin esto, el real es ~32px más
+     alto que el optimistic JS (que usa <p style="margin:0">). Cuando
+     el observer hace el swap (borra optimistic, deja real), el bubble
+     cambia de altura → "se mueve". Forzar margin:0 a TODO bloque dentro
+     de la burbuja iguala dimensiones → swap invisible. */
+  .bubble-ashley p, .bubble-user p,
+  .bubble-ashley h1, .bubble-user h1,
+  .bubble-ashley h2, .bubble-user h2,
+  .bubble-ashley h3, .bubble-user h3,
+  .bubble-ashley h4, .bubble-user h4,
+  .bubble-ashley h5, .bubble-user h5,
+  .bubble-ashley h6, .bubble-user h6,
+  .bubble-ashley ul, .bubble-user ul,
+  .bubble-ashley ol, .bubble-user ol,
+  .bubble-ashley li, .bubble-user li {{
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
   }}
   .bubble-ashley em, .bubble-user em,
   .bubble-ashley i, .bubble-user i {{
@@ -387,59 +392,6 @@ def global_styles():
     -webkit-backdrop-filter: blur(18px) !important;
     border: 1px solid rgba(212,163,115,0.10) !important;
   }}
-  .glass-portrait {{
-    background: rgba(20, 8, 14, 0.20) !important;
-    backdrop-filter: blur(14px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
-    border: 1px solid rgba(212,163,115,0.16) !important;
-  }}
-  .glass-header {{
-    background: rgba(15, 6, 10, 0.55) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
-    border-bottom: 1px solid rgba(212,163,115,0.10) !important;
-  }}
-  .glass-sidebar {{
-    background: rgba(15, 6, 10, 0.45) !important;
-    backdrop-filter: blur(22px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(22px) saturate(140%) !important;
-    border-right: 1px solid rgba(212,163,115,0.10) !important;
-  }}
-  .ashley-sidebar {{
-    position: sticky;
-    top: 50px;  /* alto del header minimal */
-    height: calc(100vh - 50px);
-    overflow-y: auto;
-    padding: 4px 0;
-  }}
-  /* Scroll bar más fino que el chat — el sidebar rara vez scrollea */
-  .ashley-sidebar::-webkit-scrollbar {{ width: 2px; }}
-  .ashley-sidebar::-webkit-scrollbar-thumb {{ background: rgba(255,154,238,0.12); }}
-  .ashley-sidebar {{ scrollbar-width: thin; scrollbar-color: rgba(255,154,238,0.12) transparent; }}
-
-  /* Panel derecho — sticky igual que el sidebar */
-  .ashley-right-panel {{
-    position: sticky;
-    top: 70px;
-    align-self: flex-start;
-    padding: 18px 18px 18px 0;
-  }}
-
-  /* Tarjeta del personaje (top del panel derecho) */
-  .ashley-character-card {{
-    background: rgba(12, 7, 22, 0.45) !important;
-    backdrop-filter: blur(16px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
-    border: 1px solid rgba(255,154,238,0.18) !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4),
-                inset 0 1px 0 rgba(255,255,255,0.04) !important;
-  }}
-
-  /* Items del nav del sidebar (memorias / noticias / acciones / etc.) */
-  .ashley-nav-item {{
-    user-select: none;
-  }}
-
   /* ══════════════════════════════════════════════════════════════
      v0.16 — Layout 2-columnas estilo "boutique noir"
      Portrait gigante a la izquierda + chat a la derecha
@@ -885,6 +837,44 @@ def global_styles():
     z-index: 1 !important;
   }}
 
+  /* ── Memorias dialog — paleta wine boutique (v0.14.5) ────────
+     Antes el dialog mantenía el styling default Radix (texto blanco
+     puro, tabs sin hover warm). Ahora todo se alinea con el resto
+     de la app: bg wine, texto crema, accent ámbar, tabs con
+     active state en ámbar. */
+  .ashley-mem-dialog .rt-TabsList,
+  .ashley-mem-dialog [role="tablist"] {{
+    border-bottom: 1px solid rgba(212,163,115,0.18) !important;
+    margin-bottom: 12px !important;
+  }}
+  .ashley-mem-dialog .rt-TabsTrigger,
+  .ashley-mem-dialog [role="tab"] {{
+    color: #9c8b7e !important;
+    font-weight: 500 !important;
+    transition: color 0.2s ease, border-color 0.2s ease !important;
+  }}
+  .ashley-mem-dialog .rt-TabsTrigger:hover,
+  .ashley-mem-dialog [role="tab"]:hover {{
+    color: #c4b3a4 !important;
+  }}
+  .ashley-mem-dialog .rt-TabsTrigger[data-state="active"],
+  .ashley-mem-dialog [role="tab"][aria-selected="true"] {{
+    color: {COLOR_PRIMARY} !important;
+    border-bottom: 2px solid {COLOR_PRIMARY} !important;
+  }}
+  /* Texto general dentro del dialog → crema warm */
+  .ashley-mem-dialog,
+  .ashley-mem-dialog p,
+  .ashley-mem-dialog span:not([style*="color"]),
+  .ashley-mem-dialog div:not([style*="color"]) {{
+    color: #c4b3a4;
+  }}
+  /* Scrollbar de los tabs scrollables → matching tema */
+  .ashley-mem-dialog [data-state="active"]::-webkit-scrollbar {{ width: 4px; }}
+  .ashley-mem-dialog [data-state="active"]::-webkit-scrollbar-thumb {{
+    background: rgba(212,163,115,0.30); border-radius: 4px;
+  }}
+
   .ashley-chat-header {{
     display: flex;
     align-items: center;
@@ -1059,61 +1049,11 @@ def global_styles():
     text-shadow: 0 1px 8px rgba(212,163,115,0.30);
   }}
 
-  /* ── Adaptación a ventanas pequeñas (v0.15.3) ─────────────────
-     Como Ashley es Electron desktop el caso típico es 1920+, pero
-     el user puede redimensionar a tamaños raros. Reglas:
-       • <1280px: ocultar el panel derecho (avatar 2D + heart) — el
-         chat necesita el ancho. El user puede activar focus mode
-         igual a mano.
-       • <900px: reducir el sidebar izquierdo a 64px (solo iconos,
-         sin texto) para dejarle espacio al chat.
-       • <640px: colapsar sidebar a un bar superior con iconos
-         horizontales (poco probable en desktop pero por si acaso). */
-  @media (max-width: 1280px) {{
-    .ashley-right-panel {{ display: none !important; }}
-  }}
-  @media (max-width: 900px) {{
-    .ashley-sidebar {{
-      width: 64px !important;
-    }}
-    .ashley-sidebar .ashley-nav-item span:nth-child(2),
-    .ashley-sidebar .ashley-nav-item div:nth-child(2) {{
-      /* Ocultar el label de texto, dejar solo el icono.
-         El icono es el primer hijo del hstack interno del item. */
-      display: none !important;
-    }}
-    /* Sección "AJUSTES RAPIDOS" label también */
-    .ashley-sidebar p,
-    .ashley-sidebar h6 {{
-      display: none !important;
-    }}
-  }}
-
-  /* ── Affection heart (v0.15.1, sustituye la barra vertical) ──
-     Estructura DOM:
-       .heart-frame (positioning + outline SVG via ::after)
-         └─ .heart-clip (clip-path al SVG corazón, contiene bg + agua)
-              ├─ .heart-bg (fondo oscuro estático con highlight sutil)
-              └─ .heart-water (rellena bottom-up, height = afecto%)
-                   ├─ ::before (ola 1, animada)
-                   └─ ::after  (ola 2, animada con desfase)
-         └─ .heart-number (cifra de afecto debajo)
-
-     Por qué dos capas (frame + clip):
-       • clip-path corta lo que queda fuera del corazón → el outline
-         con stroke se perdería si lo pusiéramos dentro del clip.
-       • Por eso el outline va en el ::after del frame (capa NO
-         clipeada), dibujado con un SVG path como background-image
-         para que el filter:drop-shadow lo abrace correctamente. */
-
-  /* v0.16 — Corazón outline elegante con respiración constante.
-     Estilo mockup: outline simple (no fill solid), tono ámbar/dorado
-     cálido, animación de breath (escala sutil + glow pulsante).
-     Hover: scale más fuerte + glow intenso, y los rays del exterior
-     se intensifican.
-
-     Cuando afecto >70: animación más rápida + colores más cálidos
-     (rosa-coral) para indicar "estado enamorado". */
+  /* ── Affection heart (v0.16) ──────────────────────────────
+     Outline elegante (no fill solid), tono ámbar/dorado cálido,
+     animación de breath constante (escala sutil + glow pulsante).
+     Hover: scale fuerte + glow intenso. Cuando afecto >70:
+     animación más rápida + colores más cálidos (rosa-coral). */
 
   .heart-frame {{
     position: relative;
@@ -1169,31 +1109,64 @@ def global_styles():
     }}
   }}
 
-  /* Número de afecto debajo del corazón */
-  .heart-number {{
-    position: absolute;
-    bottom: -20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    text-shadow: 0 0 10px rgba(255,102,170,0.5);
-    pointer-events: none;
-    user-select: none;
+  /* ── Celebrate animations al subir/bajar afecto (v0.14.5) ──
+     Esto es lo que hace que subir afecto se sienta GOOD. El
+     heart hace un bump claro (scale 1.5 + flash dorado) cuando
+     el delta es positivo. Cuando baja, shrink + desaturación.
+     ! para pisar la animación de breathe constante. */
+  .heart-frame.celebrate-up .ashley-heart-svg {{
+    animation: heartCelebrateUp 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
   }}
-  .heart-label {{
-    position: absolute;
-    top: -16px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-weight: 700;
-    color: #888;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    pointer-events: none;
-    user-select: none;
+  @keyframes heartCelebrateUp {{
+    0% {{
+      transform: scale(1);
+      filter: drop-shadow(0 0 4px rgba(212,163,115,0.45));
+    }}
+    25% {{
+      transform: scale(1.50);
+      filter: drop-shadow(0 0 28px rgba(255,200,160,1.0))
+              drop-shadow(0 0 14px rgba(255,180,140,0.95))
+              brightness(1.35);
+    }}
+    50% {{
+      transform: scale(1.15);
+      filter: drop-shadow(0 0 18px rgba(255,180,140,0.85))
+              brightness(1.15);
+    }}
+    100% {{
+      transform: scale(1);
+      filter: drop-shadow(0 0 4px rgba(212,163,115,0.45));
+    }}
+  }}
+  .heart-frame.celebrate-down .ashley-heart-svg {{
+    animation: heartCelebrateDown 0.6s ease-out !important;
+  }}
+  @keyframes heartCelebrateDown {{
+    0% {{
+      transform: scale(1);
+      filter: drop-shadow(0 0 4px rgba(212,163,115,0.45));
+    }}
+    40% {{
+      transform: scale(0.82);
+      filter: brightness(0.55) saturate(0.4);
+    }}
+    100% {{
+      transform: scale(1);
+      filter: drop-shadow(0 0 4px rgba(212,163,115,0.45));
+    }}
+  }}
+
+  /* También animamos el NÚMERO al subir afecto: pulse breve con
+     cambio de color (tinte ámbar más vivo brevemente). Indica
+     visualmente que algo cambió sin tener que mirar el heart. */
+  .heart-frame.celebrate-up + .ashley-affection-number,
+  .heart-frame.celebrate-up ~ .ashley-affection-number {{
+    animation: numberCelebrate 0.6s ease-out;
+  }}
+  @keyframes numberCelebrate {{
+    0%   {{ transform: scale(1); color: #e8dcc4; }}
+    35%  {{ transform: scale(1.25); color: #ffc88a; text-shadow: 0 0 14px rgba(255,200,138,0.8); }}
+    100% {{ transform: scale(1); color: #e8dcc4; }}
   }}
 
   /* ── rx.upload sin dashed border (input redesign v0.15.1) ──
@@ -1215,6 +1188,19 @@ def global_styles():
     min-height: auto !important;
     height: auto !important;
     display: inline-flex !important;
+  }}
+  /* Ocultar el <input type="file"> nativo que el browser pinta con
+     "Ningún archivo seleccionado"/"No file chosen". Lo posicionamos
+     fuera de pantalla en lugar de display:none para que siga siendo
+     funcional (Reflex programáticamente lo dispara al click del
+     paperclip button). */
+  .ashley-upload-clean input[type="file"] {{
+    position: absolute !important;
+    left: -9999px !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
   }}
 
   /* ── Chat scroll ─────────────────────────────────────── */
@@ -1238,88 +1224,6 @@ def global_styles():
     position: sticky;
     top: 76px;
     align-self: flex-start;
-  }}
-
-  /* ── Affection water bar ───────────────────────────── */
-  .affection-bar {{
-    width: 36px;
-    height: 100px;
-    border-radius: 18px;
-    border: 2px solid rgba(255,154,238,0.25);
-    background: rgba(0,0,0,0.35);
-    overflow: hidden;
-    position: relative;
-    margin: 0 auto;
-    cursor: pointer;
-  }}
-  .affection-water {{
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    border-radius: 0 0 16px 16px;
-    transition: height 1.8s cubic-bezier(0.4, 0, 0.2, 1),
-                background 2s ease;
-  }}
-  /* Wave effect — constant movement, never stops */
-  .affection-water::before {{
-    content: '';
-    position: absolute;
-    top: -5px;
-    left: -20%;
-    width: 140%;
-    height: 10px;
-    background: inherit;
-    opacity: 0.6;
-    border-radius: 50%;
-    animation: affectionWave1 2.5s ease-in-out infinite;
-  }}
-  .affection-water::after {{
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: -10%;
-    width: 120%;
-    height: 7px;
-    background: inherit;
-    opacity: 0.35;
-    border-radius: 50%;
-    animation: affectionWave2 3.2s ease-in-out infinite;
-  }}
-  @keyframes affectionWave1 {{
-    0%, 100% {{ transform: translateX(-5%) scaleY(1); }}
-    25% {{ transform: translateX(3%) scaleY(1.8); }}
-    50% {{ transform: translateX(5%) scaleY(1); }}
-    75% {{ transform: translateX(-3%) scaleY(1.4); }}
-  }}
-  @keyframes affectionWave2 {{
-    0%, 100% {{ transform: translateX(4%) scaleY(1.2); }}
-    50% {{ transform: translateX(-4%) scaleY(0.8); }}
-  }}
-  /* Hover — water gets agitated like you touched it */
-  .affection-bar:hover .affection-water::before {{
-    animation: affectionWaveHover1 0.8s ease-in-out infinite !important;
-  }}
-  .affection-bar:hover .affection-water::after {{
-    animation: affectionWaveHover2 0.6s ease-in-out infinite !important;
-  }}
-  @keyframes affectionWaveHover1 {{
-    0%, 100% {{ transform: translateX(-8%) scaleY(2.2); }}
-    50% {{ transform: translateX(8%) scaleY(1); }}
-  }}
-  @keyframes affectionWaveHover2 {{
-    0%, 100% {{ transform: translateX(6%) scaleY(1.8); }}
-    50% {{ transform: translateX(-6%) scaleY(0.6); }}
-  }}
-  /* Glow when affection is high (>70) */
-  .affection-glow {{
-    box-shadow: 0 0 14px rgba(255,102,170,0.5),
-                inset 0 0 8px rgba(255,102,170,0.2);
-    animation: affectionGlowPulse 2s ease-in-out infinite;
-  }}
-  @keyframes affectionGlowPulse {{
-    0%, 100% {{ box-shadow: 0 0 10px rgba(255,102,170,0.3), inset 0 0 6px rgba(255,102,170,0.1); }}
-    50% {{ box-shadow: 0 0 20px rgba(255,102,170,0.6), inset 0 0 10px rgba(255,102,170,0.3); }}
   }}
 
   /* ── Floating hearts ───────────────────────────────── */

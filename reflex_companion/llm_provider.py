@@ -48,9 +48,9 @@ OLLAMA_DEFAULT_MODEL = "llama3.2"               # fallback si el user no elige
 # Modelos recomendados para cada proveedor en el dropdown de settings.
 # El formato es (model_id, human_label, notes).
 XAI_MODELS = [
-    ("grok-4-1-fast-reasoning", "Grok 4.1 Fast Reasoning (default)", "Tu modelo actual"),
-    ("grok-4-1-fast-non-reasoning", "Grok 4.1 Fast", "Sin reasoning, más rápido"),
-    ("grok-3-fast", "Grok 3 Fast", "Gen anterior, barato"),
+    ("grok-4-1-fast-reasoning", "Grok 4.1 Fast Reasoning", "Más elaborado, ~3.5s extra de TTFT"),
+    ("grok-4-1-fast-non-reasoning", "Grok 4.1 Fast (default)", "Sin reasoning, ~0.6s TTFT"),
+    ("grok-3-fast", "Grok 3 Fast", "Gen anterior, 25x más caro"),
 ]
 
 OPENROUTER_MODELS = [
@@ -199,11 +199,44 @@ def list_ollama_models() -> list[str]:
 #  OpenAI-compatible path (OpenRouter + Ollama)
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+#  Cliente OpenAI cacheado (v0.16.13)
+# ─────────────────────────────────────────────
+#
+# Igual que el Client xAI: el SDK de OpenAI mantiene un pool HTTP/2 cuando
+# el cliente persiste. Crear uno nuevo cada llamada paga ~300-600ms de
+# handshake TCP+TLS. Lo cacheamos aquí, invalidando si cambia api_key o
+# base_url (cuando el user edita Settings).
+import threading as _threading
+
+_openai_cache_client = None
+_openai_cache_key: tuple[str, str] | None = None
+_openai_cache_lock = _threading.Lock()
+
+
 def _openai_client():
-    """Crea un cliente OpenAI-compatible apuntando al base_url configurado."""
+    """Devuelve el cliente OpenAI-compatible compartido. Lo crea si no
+    existe, o si la api_key/base_url cambiaron desde la última vez."""
+    global _openai_cache_client, _openai_cache_key
     from openai import OpenAI
     cfg = get_active_config()
-    return OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"] or None)
+    current_key = (cfg["api_key"] or "", cfg["base_url"] or "")
+    with _openai_cache_lock:
+        if _openai_cache_client is None or _openai_cache_key != current_key:
+            _openai_cache_client = OpenAI(
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"] or None,
+            )
+            _openai_cache_key = current_key
+        return _openai_cache_client
+
+
+def invalidate_openai_client() -> None:
+    """Fuerza recreación en próxima llamada. Útil tras error de network."""
+    global _openai_cache_client, _openai_cache_key
+    with _openai_cache_lock:
+        _openai_cache_client = None
+        _openai_cache_key = None
 
 
 def _convert_messages_for_openai(messages: list[dict]) -> list[dict]:

@@ -44,7 +44,11 @@
     _vadHasSpeech: false,   // true tras detectar habla por primera vez
     _vadSilentFrames: 0,    // frames consecutivos bajo el threshold
     _VAD_THRESHOLD: 10,     // volumen mínimo para considerar "habla" (0-255)
-    _VAD_SILENCE_SECS: 3,   // segundos de silencio (sin voz) para auto-stop
+    _VAD_SILENCE_SECS: 2,   // v0.16.13 — 3 → 2 para envío más reactivo tras
+                            // que el user calle. Si te corta a mitad de
+                            // frase por pausas naturales largas, subir a 2.5
+                            // o 3. La variable también controla el comentario
+                            // del log en _startVAD.
 
     currentAudio: null,
     lastSpokenMsgId: null,
@@ -183,7 +187,7 @@
         // ignora silently si el detector no estaba corriendo (idempotente).
         this._wakeWordPause();
 
-        // ── VAD: auto-stop tras 3s de silencio después de hablar ──
+        // ── VAD: auto-stop tras 2s de silencio después de hablar ──
         this._startVAD();
       } catch (e) {
         err('MediaRecorder.start() failed:', e);
@@ -350,11 +354,19 @@
         const data = await resp.json();
         log('transcribe result:', data);
 
-        // ── Modelo descargándose — mostrar banner y esperar ──
-        if (data.status === 'downloading') {
-          const msg = this._i18n(data.message || 'Downloading...', data.message_es || 'Descargando...');
+        // ── Modelo descargándose o cargando — mostrar banner y esperar ──
+        // v0.16.13 — distinguimos 2 estados:
+        //   - 'downloading': primera vez real, ~245 MB de internet (~1-5 min).
+        //   - 'loading':     ya en disco, cargando a RAM (~5-15s).
+        // Antes solo había 'downloading' aunque el modelo ya estuviera
+        // descargado, lo que confundía al user en cada primera vez por sesión.
+        if (data.status === 'downloading' || data.status === 'loading') {
+          const msg = this._i18n(
+            data.message || (data.status === 'loading' ? 'Loading...' : 'Downloading...'),
+            data.message_es || (data.status === 'loading' ? 'Cargando...' : 'Descargando...'),
+          );
           this._showDownloadBanner(msg);
-          log('Model downloading — polling /api/whisper/status until ready...');
+          log('Model ' + data.status + ' — polling /api/whisper/status until ready...');
           const ready = await this._waitForModelReady();
           this._hideDownloadBanner();
           if (ready) {
@@ -362,8 +374,10 @@
             return this._transcribe(blob);  // reintentar con el audio original
           } else {
             this._alert(this._i18n(
-              'Model download failed or timed out. Please restart Ashley and try again.',
-              'La descarga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.'
+              'Model ' + data.status + ' failed or timed out. Please restart Ashley and try again.',
+              (data.status === 'loading'
+                ? 'La carga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.'
+                : 'La descarga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.')
             ));
             return;
           }

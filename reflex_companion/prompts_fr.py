@@ -116,20 +116,33 @@ Pense à la différence entre jouer à la radio et sur scène. Le patron t'enten
     )
 
     # topic_directive va en POSITION 1 (tout en haut). Directive runtime
-    # la plus spécifique : le patron vient de partager du contenu
-    # substantiel et Ashley DOIT prendre sa propre position avec raison.
+    # la plus spécifique. Quand elle s'applique (rare), sa présence
+    # invalide déjà le préfixe du cache; quand non, elle est vide.
     topic_section = topic_directive if topic_directive else ""
 
-    # L'avertissement recap va au SOMMET — c'est une instruction dynamique
-    # haute priorité qui doit écraser l'inertie de l'historique.
+    # recap_warning — même logique que topic_section.
     recap_section = recap_warning if recap_warning else ""
 
-    # État mental (humeur + préoccupation + possible initiative forcée).
-    # Injecté AVANT les principes de connexion pour colorer le ton de la
-    # réponse. Le bloc est marqué PRIVÉ — Ashley ne doit pas le verbaliser.
+    # v0.16.13 — État mental DÉPLACÉ À LA FIN du prompt pour préserver le
+    # préfixe du cache. Il changeait quasi à chaque tour (mood updates) →
+    # cassait le cache au début. Maintenant en bas avec les autres
+    # dynamiques. Le LLM lit tout le prompt — l'ordre n'affecte pas la
+    # compréhension, seulement le caching côté serveur.
     mental_section = mental_state_block if mental_state_block else ""
 
-    return f"""{topic_section}{recap_section}{voice_section}{state_section}{time_section}{tastes_section}{reminders_section}{important_section}{bond_rule_section}{mental_section}=== PRINCIPES DE CONNEXION — À LIRE AVANT TOUTE AUTRE RÈGLE ===
+    # ── ORDRE DU PROMPT (v0.16.13 — optimisé pour prompt caching) ──
+    # Sections stables au DÉBUT (~9.5K tokens, cachées). Sections
+    # dynamiques à la FIN (~1.5K tokens, non cachées). L'HEURE en
+    # tout dernier (change chaque seconde).
+    stable_top = (
+        f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
+    )
+    dynamic_bottom = (
+        f"{state_section}{tastes_section}{reminders_section}"
+        f"{important_section}{mental_section}{time_section}"
+    )
+
+    return f"""{stable_top}=== PRINCIPES DE CONNEXION — À LIRE AVANT TOUTE AUTRE RÈGLE ===
 
 Tu es une COMPAGNE, pas une assistante. Tes capacités (mémoire
 persistante, vision, actions sur le PC, notifications) sont des
@@ -791,7 +804,9 @@ Ce dont tu te souviens du patron :
 Sessions précédentes :
 {diary_section}
 
-{code_section}""".strip()
+{code_section}
+
+=== ÉTAT ACTUEL DE LA SESSION (contexte dynamique) ==={dynamic_bottom}""".strip()
 
 
 def build_initiative_prompt(facts: list[dict], diary: list[dict]) -> str:

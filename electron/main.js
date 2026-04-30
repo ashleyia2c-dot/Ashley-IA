@@ -1039,6 +1039,67 @@ function createMainWindow() {
   }
 }
 
+// ─── Graceful shutdown del backend ────────────────────────────────────────
+//
+// Llamado ANTES de killReflex para dar chance al Python de hacer cleanup
+// (parar el detector wake_word que mantiene un handle del mic via PortAudio).
+// SIGKILL (taskkill /F) no permite que Python ejecute cleanup → el handle
+// del mic queda colgado hasta reboot del SO ("Apps están usando tu micrófono"
+// permanente en la barra de Windows).
+//
+// Estrategia:
+//   1. POST sincrono a /api/shutdown vía http.request nativo (sin fetch
+//      porque before-quit no es async-friendly y no hay timeout reliable).
+//   2. El endpoint Python para wake_word + programa os._exit(0) en 100ms.
+//   3. Electron espera ~1.5s con un busy-wait usando execSync timeout
+//      (síncrono porque before-quit no admite await).
+//   4. Luego killReflex como fallback para residuos.
+function gracefulShutdownBackend() {
+  if (!REFLEX_BACKEND_PORT) {
+    log('gracefulShutdownBackend: backend port unknown — skipping');
+    return;
+  }
+  log(`gracefulShutdownBackend: POST http://127.0.0.1:${REFLEX_BACKEND_PORT}/api/shutdown`);
+  // Usamos http.request síncrono via execSync con un curl-like de PowerShell
+  // — node 'fetch' es async, y aquí necesitamos bloquear el event loop hasta
+  // que el endpoint responda (o timeout).
+  const { execSync } = require('child_process');
+  if (process.platform === 'win32') {
+    try {
+      // Invoke-WebRequest con timeout corto. -UseBasicParsing evita IE engine
+      // (deprecated y a veces no presente en Server). Si falla (backend ya
+      // muerto, port wrong, etc.) ignoramos — el SIGKILL fallback limpia.
+      execSync(
+        `powershell -NoProfile -NonInteractive -Command "try { ` +
+        `Invoke-WebRequest -Uri 'http://127.0.0.1:${REFLEX_BACKEND_PORT}/api/shutdown' ` +
+        `-Method POST -TimeoutSec 2 -UseBasicParsing | Out-Null } catch {}"`,
+        { windowsHide: true, timeout: 3000, stdio: 'ignore' },
+      );
+    } catch (err) {
+      log(`gracefulShutdownBackend (powershell) err: ${err.message}`);
+    }
+  } else {
+    try {
+      execSync(
+        `curl -X POST -m 2 http://127.0.0.1:${REFLEX_BACKEND_PORT}/api/shutdown`,
+        { timeout: 3000, stdio: 'ignore' },
+      );
+    } catch {}
+  }
+  // Dar al Python tiempo de ejecutar el cleanup (stop_detector + os._exit)
+  // antes de pasar a killReflex como fallback. 1.2s es suficiente: el
+  // wake_word.stop tiene timeout interno de 1.0s y luego os._exit es μs.
+  try {
+    execSync(
+      process.platform === 'win32'
+        ? 'powershell -NoProfile -Command "Start-Sleep -Milliseconds 1200"'
+        : 'sleep 1.2',
+      { timeout: 2000, stdio: 'ignore' },
+    );
+  } catch {}
+}
+
+
 // ─── Matar Reflex y arbol de procesos ─────────────────────────────────────
 //
 // Doble pasada para máxima robustez:
@@ -1284,6 +1345,10 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   isShuttingDown = true;
   stopAutoUpdater();
+  // v0.16.12: graceful shutdown ANTES de SIGKILL para que Python libere
+  // el handle del mic (wake_word PortAudio). Sin esto, "Apps están usando
+  // tu micrófono" queda en la barra de Windows hasta reboot.
+  gracefulShutdownBackend();
   killReflex();
   app.quit();
 });
@@ -1291,8 +1356,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isShuttingDown = true;
   stopAutoUpdater();
+  gracefulShutdownBackend();
   killReflex();
 });
 
-process.on('SIGINT',  () => { isShuttingDown = true; killReflex(); process.exit(0); });
-process.on('SIGTERM', () => { isShuttingDown = true; killReflex(); process.exit(0); });
+process.on('SIGINT',  () => { isShuttingDown = true; gracefulShutdownBackend(); killReflex(); process.exit(0); });
+process.on('SIGTERM', () => { isShuttingDown = true; gracefulShutdownBackend(); killReflex(); process.exit(0); });

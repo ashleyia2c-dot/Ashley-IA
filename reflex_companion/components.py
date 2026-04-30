@@ -24,10 +24,6 @@ def _get_state():
     return State
 
 
-# ─────────────────────────────────────────────
-#  Low-level helpers
-# ─────────────────────────────────────────────
-
 def _msg_bubble(m: dict[str, str], is_ashley) -> rx.Component:
     return rx.box(
         rx.cond(
@@ -72,10 +68,6 @@ def _ashley_avatar(size: str = "46px", src: str = "/ashley_pfp.jpg") -> rx.Compo
         background_position="center",
     )
 
-
-# ─────────────────────────────────────────────
-#  Message components
-# ─────────────────────────────────────────────
 
 def message_item(m: dict[str, str]):
     State = _get_state()
@@ -190,10 +182,6 @@ def thinking_indicator():
     )
 
 
-# ─────────────────────────────────────────────
-#  Memory / diary / taste items
-# ─────────────────────────────────────────────
-
 def fact_item(f: dict[str, str]):
     State = _get_state()
     return rx.hstack(
@@ -247,23 +235,28 @@ def diary_item(e: dict[str, str]):
 
 
 def taste_item(t: dict[str, str]):
+    """v0.14.5 — actualizado a paleta wine boutique. Antes: rosa neón
+    hardcodeado (#ff9aee + #2a0f3d), no encajaba en el dialog tras
+    el rediseño."""
     State = _get_state()
     return rx.hstack(
         rx.box(
-            rx.text(t["categoria"], font_size="10px", font_weight="bold", color="#ff9aee"),
-            bg="#2a0f3d", padding="2px 8px", border_radius="99px",
+            rx.text(t["categoria"], font_size="10px", font_weight="bold",
+                    color=COLOR_PRIMARY),
+            bg=COLOR_BG_FACT_BADGE,
+            padding="2px 8px", border_radius="99px",
         ),
-        rx.text(t["valor"], flex="1", color="#dddddd", font_size="13px"),
+        rx.text(t["valor"], flex="1", color=COLOR_TEXT_FACT, font_size="13px"),
         rx.button(
             "×",
             on_click=State.delete_taste(t["id"]),
-            size="1", variant="ghost", color="#ff6666",
+            size="1", variant="ghost", color="#c8a47d",
             cursor="pointer",
-            _hover={"color": "#ff3333"},
+            _hover={"color": "#e6b888"},
         ),
         spacing="3", align="center",
         padding_y="6px",
-        border_bottom="1px solid #1f1f1f",
+        border_bottom="1px solid rgba(212,163,115,0.10)",
     )
 
 
@@ -294,461 +287,6 @@ def achievement_card(a: dict[str, str]):
             "achievement-card unlocked",
             "achievement-card locked",
         ),
-    )
-
-
-# ─────────────────────────────────────────────
-#  Affection bar
-# ─────────────────────────────────────────────
-
-def _affection_bar() -> rx.Component:
-    """Barra de agua visual del nivel de afecto."""
-    State = _get_state()
-    return rx.vstack(
-        rx.box(
-            # The water
-            rx.box(
-                height=State.affection_pct,
-                bg=State.affection_color,
-                class_name="affection-water",
-            ),
-            class_name=rx.cond(
-                State.affection > 70,
-                "affection-bar affection-glow",
-                "affection-bar",
-            ),
-        ),
-        rx.text(
-            State.affection,
-            font_size="10px",
-            color=State.affection_color,
-            font_weight="600",
-        ),
-        spacing="1",
-        align="center",
-    )
-
-
-# ─────────────────────────────────────────────
-#  Portrait panel + pill buttons
-# ─────────────────────────────────────────────
-
-def _ashley_portrait_panel() -> rx.Component:
-    """Panel derecho con el retrato grande de Ashley (sticky)."""
-    State = _get_state()
-    return rx.box(
-        rx.vstack(
-            # ── Imagen grande ──────────────────────────
-            rx.box(
-                rx.image(
-                    src=State.current_image,
-                    width="100%", height="100%",
-                    object_fit="cover",
-                ),
-                width="260px", height="260px",
-                border_radius="22px",
-                overflow="hidden",
-                background_image="url('/ashley_pfp.jpg')",
-                background_size="cover",
-                background_position="center",
-                class_name=rx.cond(
-                    State.is_thinking | (State.current_response != ""),
-                    "portrait-thinking",
-                    "portrait-idle",
-                ),
-            ),
-
-            # ── Nombre ───────────────────────────────
-            rx.text(
-                "Ashley",
-                font_size="22px", font_weight="800",
-                color=COLOR_PRIMARY, text_align="center",
-                letter_spacing="0.04em",
-                style={"textShadow": f"0 0 18px rgba(255,154,238,0.4)"},
-            ),
-            rx.text(
-                State.t["brand_subtitle"],
-                color=COLOR_TEXT_MUTED, font_size="11px", text_align="center",
-                letter_spacing="0.06em",
-            ),
-
-            # ── Estado ───────────────────────────────
-            rx.cond(
-                State.is_thinking,
-                rx.hstack(
-                    rx.box(
-                        width="8px", height="8px", border_radius="50%", bg=COLOR_PRIMARY,
-                        style={"animation": "avatarPulse 1.2s ease-in-out infinite"},
-                    ),
-                    rx.text(State.t["status_thinking"], color=COLOR_PRIMARY,
-                            font_size="12px", font_style="italic"),
-                    spacing="2", align="center",
-                ),
-                rx.cond(
-                    State.current_response != "",
-                    rx.hstack(
-                        rx.box(
-                            width="8px", height="8px", border_radius="50%", bg=COLOR_STATUS_WRITING,
-                            style={"animation": "avatarPulse 1.2s ease-in-out infinite"},
-                        ),
-                        rx.text(State.t["status_speaking"], color=COLOR_STATUS_WRITING,
-                                font_size="12px", font_style="italic"),
-                        spacing="2", align="center",
-                    ),
-                    rx.hstack(
-                        rx.box(width="8px", height="8px", border_radius="50%",
-                               bg=COLOR_STATUS_ONLINE),
-                        rx.text(State.t["status_online"], color=COLOR_STATUS_ONLINE, font_size="12px"),
-                        spacing="2", align="center",
-                    ),
-                ),
-            ),
-
-            # ── Affection meter ─────────────────────
-            _affection_bar(),
-
-            spacing="3", align="center",
-        ),
-        padding="26px 20px",
-        border_radius="26px",
-        width="310px",
-        flex_shrink="0",
-        class_name="ashley-panel glass-portrait",
-    )
-
-
-def _pill_btn(
-    icon: str,
-    label: str,
-    on_click,
-    active,
-    disabled=False,
-) -> rx.Component:
-    """Botón pill toggle para el header — variante rosa (defecto)."""
-    return rx.button(
-        rx.hstack(
-            rx.text(icon, font_size="12px"),
-            rx.text(label, font_size="11px", font_weight="600"),
-            spacing="1", align="center",
-        ),
-        on_click=on_click,
-        bg=rx.cond(active, "rgba(255,154,238,0.18)", "rgba(255,255,255,0.04)"),
-        color=rx.cond(active, COLOR_PRIMARY, "#6a6a7a"),
-        border=rx.cond(
-            active,
-            "1px solid rgba(255,154,238,0.5)",
-            "1px solid rgba(255,255,255,0.07)",
-        ),
-        box_shadow=rx.cond(active, SHADOW_BUTTON, "none"),
-        border_radius="99px",
-        padding="0 10px",
-        height="28px",
-        flex_shrink="0",
-        transition="all 0.2s ease",
-        _hover={
-            "bg": "rgba(255,154,238,0.12)",
-            "color": COLOR_PRIMARY,
-            "border": "1px solid rgba(255,154,238,0.35)",
-            "transform": "scale(1.04)",
-        },
-        cursor="pointer",
-        disabled=disabled,
-        class_name=rx.cond(active, "pill-on-pink", ""),
-    )
-
-
-def _pill_btn_orange(
-    icon: str,
-    label: str,
-    on_click,
-    active,
-) -> rx.Component:
-    """Botón pill toggle — variante naranja (acciones)."""
-    return rx.button(
-        rx.hstack(
-            rx.text(icon, font_size="12px"),
-            rx.text(label, font_size="11px", font_weight="600"),
-            spacing="1", align="center",
-        ),
-        on_click=on_click,
-        bg=rx.cond(active, "rgba(255,107,53,0.2)", "rgba(255,255,255,0.04)"),
-        color=rx.cond(active, "#ff7b45", "#6a6a7a"),
-        border=rx.cond(
-            active,
-            "1px solid rgba(255,107,53,0.5)",
-            "1px solid rgba(255,255,255,0.07)",
-        ),
-        box_shadow=rx.cond(active, "0 4px 15px rgba(255,107,53,0.4)", "none"),
-        border_radius="99px",
-        padding="0 10px",
-        height="28px",
-        flex_shrink="0",
-        transition="all 0.2s ease",
-        _hover={
-            "bg": "rgba(255,107,53,0.12)",
-            "color": "#ff7b45",
-            "border": "1px solid rgba(255,107,53,0.35)",
-            "transform": "scale(1.04)",
-        },
-        cursor="pointer",
-        class_name=rx.cond(active, "pill-on-orange", ""),
-    )
-
-
-# ─────────────────────────────────────────────
-#  Header quick menu (consolida toggles secundarios en un dropdown)
-# ─────────────────────────────────────────────
-#
-# Antes del v0.13 el header tenía 9-10 botones tirados en una sola fila —
-# visualmente ruidoso. Ahora solo quedan VISIBLES:
-#   🧠 Memorias          (acción frecuente, abre dialog)
-#   ⚡ Actions           (toggle maestro crítico, afecta comportamiento)
-#   ⚙ Menu desplegable  (TODO lo demás vive aquí)
-#
-# Dentro del dropdown (orden = frecuencia de uso esperada):
-#   ✨ Iniciativa       (acción de Ashley)
-#   🔊/🔈 TTS           (toggle altavoz)
-#   🗣 Modo natural     (toggle voz sin gestos)
-#   ⛶  Focus mode      (toggle oculta panel derecho)
-#   📌 Pin on top       (toggle ventana encima)
-#   🔔 Notificaciones   (toggle Windows)
-#   🌐 Idioma           (cicla EN → ES → FR)
-#   ───────────
-#   ⚙ Ajustes completos (abre modal con providers, TTS, etc.)
-
-
-def _quick_menu_toggle_item(
-    icon_on: str,
-    icon_off: str,
-    label: str,
-    active,
-    on_click,
-) -> rx.Component:
-    """Item del quick menu que actúa como toggle.
-
-    IMPORTANTE: NO usamos rx.menu.item porque Radix cierra el menú al
-    hacer click en un Item. Para que el user pueda cambiar varios
-    toggles sin re-abrir el menú, usamos un rx.box custom con
-    on_click. Radix no reconoce el box como Item → no cierra el menú.
-    Imitamos el look de menu.item con class y estilos inline.
-    """
-    return rx.box(
-        rx.hstack(
-            rx.text(rx.cond(active, icon_on, icon_off),
-                    font_size="14px", width="20px", text_align="center"),
-            rx.text(label, font_size="12px"),
-            rx.spacer(),
-            rx.cond(
-                active,
-                rx.text("✓", color=COLOR_PRIMARY, font_size="12px", font_weight="700"),
-                rx.text("", width="10px"),
-            ),
-            width="100%", align="center", spacing="2",
-        ),
-        on_click=on_click,
-        cursor="pointer",
-        padding="6px 10px",
-        border_radius="6px",
-        color="#eee",
-        transition="background 0.15s ease, color 0.15s ease",
-        _hover={
-            "background": "rgba(255,154,238,0.12)",
-            "color": "#ff9aee",
-        },
-        class_name="ashley-menu-toggle-item",
-    )
-
-
-def _quick_menu_action_item(
-    icon: str,
-    label: str,
-    on_click,
-    disabled=False,
-    right_slot=None,
-) -> rx.Component:
-    """Item del menu para acciones (initiative / language).
-    También usa rx.box custom para NO cerrar el menú al hacer click."""
-    row = [
-        rx.text(icon, font_size="14px", width="20px", text_align="center"),
-        rx.text(label, font_size="12px"),
-    ]
-    if right_slot is not None:
-        row.extend([rx.spacer(), right_slot])
-    return rx.box(
-        rx.hstack(*row, width="100%", align="center", spacing="2"),
-        on_click=on_click,
-        cursor=rx.cond(disabled, "not-allowed", "pointer"),
-        opacity=rx.cond(disabled, "0.5", "1"),
-        padding="6px 10px",
-        border_radius="6px",
-        color="#eee",
-        transition="background 0.15s ease, color 0.15s ease",
-        _hover={
-            "background": "rgba(255,154,238,0.12)",
-            "color": "#ff9aee",
-        },
-        class_name="ashley-menu-toggle-item",
-    )
-
-
-def _header_quick_menu() -> rx.Component:
-    """Dropdown menu ⚙ que consolida todos los toggles secundarios +
-    la acción de iniciativa + idioma + acceso a settings completos."""
-    State = _get_state()
-    return rx.menu.root(
-        rx.menu.trigger(
-            rx.button(
-                "⚙",
-                bg="rgba(255,255,255,0.04)",
-                color="#888",
-                border="1px solid rgba(255,255,255,0.08)",
-                border_radius="99px",
-                padding="0 10px",
-                height="28px",
-                font_size="13px",
-                flex_shrink="0",
-                cursor="pointer",
-                transition="all 0.2s ease",
-                _hover={
-                    "bg": "rgba(255,154,238,0.12)",
-                    "color": COLOR_PRIMARY,
-                    "border": "1px solid rgba(255,154,238,0.4)",
-                    "transform": "rotate(45deg)",
-                },
-                title=State.t["settings_tooltip"],
-            ),
-        ),
-        rx.menu.content(
-            # Ningún item usa rx.menu.item — todos son rx.box custom vía
-            # _quick_menu_*_item, que NO disparan el cierre del menú. Así
-            # el user puede tocar varios toggles de una sentada. El menú
-            # sólo se cierra haciendo click FUERA o en la rueda ⚙.
-            # NOTA (v0.13.7): "Iniciativa de Ashley" se sacó de este
-            # dropdown y se movió al lado del input — es una acción del
-            # flujo del chat, no de configuración.
-
-            # ── Toggles ──────────────────────────────
-            _quick_menu_toggle_item(
-                "🔊", "🔈",
-                State.t["menu_tts"],
-                State.tts_enabled,
-                State.toggle_tts,
-            ),
-            _quick_menu_toggle_item(
-                "🗣", "🗣",
-                State.t["pill_natural"],
-                State.voice_mode,
-                State.toggle_voice_mode,
-            ),
-            _quick_menu_toggle_item(
-                "⛶", "⛶",
-                State.t["pill_focus"],
-                State.focus_mode,
-                State.toggle_focus_mode,
-            ),
-            _quick_menu_toggle_item(
-                "📌", "📍",
-                State.t["menu_pin"],
-                State.pin_on_top,
-                State.toggle_pin_on_top,
-            ),
-            _quick_menu_toggle_item(
-                "🔔", "🔕",
-                State.t["pill_notifications"],
-                State.notifications_enabled,
-                State.toggle_notifications,
-            ),
-            rx.menu.separator(),
-
-            # ── Idioma (cicla EN → ES → FR) ──────────
-            _quick_menu_action_item(
-                "🌐",
-                State.t["lang_label"],
-                State.toggle_language,
-                right_slot=rx.text(State.language_label,
-                    color=COLOR_PRIMARY, font_size="11px",
-                    font_weight="700", letter_spacing="0.08em"),
-            ),
-            rx.menu.separator(),
-
-            # ── Full settings (abre el modal grande) ─
-            _quick_menu_action_item(
-                "⚙",
-                State.t["menu_settings"],
-                State.toggle_settings,
-            ),
-
-            # Estilo del content — más ancho para que nada se trunque
-            align="end",
-            side_offset=6,
-            style={"min_width": "240px"},
-        ),
-    )
-
-
-# ─────────────────────────────────────────────
-#  News pill (header) + news panel (vista alternativa al chat)
-# ─────────────────────────────────────────────
-
-
-def _news_pill_with_badge() -> rx.Component:
-    """Pill 📰 en el header con badge numérico si hay unread items."""
-    State = _get_state()
-    return rx.button(
-        rx.hstack(
-            rx.text("📰", font_size="12px"),
-            rx.text(State.t["pill_news"], font_size="11px", font_weight="600"),
-            rx.cond(
-                State.news_unread > 0,
-                rx.box(
-                    State.news_unread.to_string(),
-                    bg=COLOR_PRIMARY,
-                    color="black",
-                    border_radius="99px",
-                    padding="0 6px",
-                    font_size="10px",
-                    font_weight="700",
-                    line_height="16px",
-                    min_width="18px",
-                    text_align="center",
-                ),
-                rx.box(),
-            ),
-            spacing="1", align="center",
-        ),
-        on_click=State.toggle_news_panel,
-        bg=rx.cond(
-            State.show_news,
-            "rgba(194,136,255,0.2)",
-            rx.cond(State.news_unread > 0, "rgba(255,154,238,0.1)", "rgba(255,255,255,0.04)"),
-        ),
-        color=rx.cond(
-            State.show_news,
-            "#c288ff",
-            rx.cond(State.news_unread > 0, COLOR_PRIMARY, "#6a6a7a"),
-        ),
-        border=rx.cond(
-            State.show_news,
-            "1px solid rgba(194,136,255,0.5)",
-            rx.cond(
-                State.news_unread > 0,
-                "1px solid rgba(255,154,238,0.4)",
-                "1px solid rgba(255,255,255,0.07)",
-            ),
-        ),
-        border_radius="99px",
-        padding="0 10px",
-        height="28px",
-        flex_shrink="0",
-        transition="all 0.2s ease",
-        _hover={
-            "bg": "rgba(194,136,255,0.15)",
-            "color": "#c288ff",
-            "border": "1px solid rgba(194,136,255,0.4)",
-            "transform": "scale(1.04)",
-        },
-        cursor="pointer",
-        title=State.t["news_tooltip_on"],
     )
 
 
@@ -1021,10 +559,6 @@ def _news_panel() -> rx.Component:
     )
 
 
-# ─────────────────────────────────────────────
-#  License gate (se muestra cuando LICENSE_CHECK_ENABLED y no hay licencia)
-# ─────────────────────────────────────────────
-
 def license_gate() -> rx.Component:
     """Pantalla que bloquea el acceso a Ashley hasta que el user active su key.
 
@@ -1161,10 +695,6 @@ def license_gate() -> rx.Component:
     )
 
 
-# ─────────────────────────────────────────────
-#  Manual de usuario — dialog modal con accordion
-# ─────────────────────────────────────────────
-
 def _manual_section_item(section: dict) -> rx.Component:
     """Una sección del manual = un AccordionItem colapsable.
     section = {"id": str, "icon": str, "title": str, "content_md": str}
@@ -1274,303 +804,6 @@ def manual_dialog() -> rx.Component:
     )
 
 
-def manual_button() -> rx.Component:
-    """Botón ❓ que abre el manual. Se coloca en el header (top-left)."""
-    State = _get_state()
-    return rx.tooltip(
-        rx.button(
-            "❓",
-            on_click=State.open_manual,
-            size="2",
-            variant="ghost",
-            color_scheme="pink",
-            cursor="pointer",
-            font_size="18px",
-            padding="6px 10px",
-        ),
-        content=rx.match(
-            State.language,
-            ("es", "Manual de usuario"),
-            ("fr", "Manuel utilisateur"),
-            "User manual",
-        ),
-    )
-
-
-# ─────────────────────────────────────────────
-#  Layout 3-columnas estilo c.ai (v0.15)
-# ─────────────────────────────────────────────
-
-def _sidebar_nav_item(
-    icon: str,
-    label,  # rx.Var o string
-    on_click,
-    active=None,
-    badge=None,
-    accent_color: str = COLOR_PRIMARY,
-    title=None,
-) -> rx.Component:
-    """Item del sidebar izquierdo. Acción primaria (Memorias/Noticias/Acciones).
-
-    accent_color permite a Acciones usar el naranja distintivo en lugar
-    del rosa del resto. badge es un componente opcional (típicamente el
-    contador de noticias unread). active enciende el highlight de la
-    barra lateral izquierda + el fondo sutil + el color del icono.
-    """
-    bg_active   = f"linear-gradient(90deg, rgba(255,255,255,0.04) 0%, transparent 100%)"
-    bg_hover    = "rgba(255,255,255,0.04)"
-    txt_active  = accent_color
-    txt_idle    = "#a8a8b8"
-
-    if active is None:
-        # Item sin estado activo (acción pura, ej: ⚙ Ajustes, ❓ Manual)
-        bg = "transparent"
-        txt = txt_idle
-        border_left = "3px solid transparent"
-    else:
-        bg = rx.cond(active, bg_active, "transparent")
-        txt = rx.cond(active, txt_active, txt_idle)
-        border_left = rx.cond(
-            active,
-            f"3px solid {accent_color}",
-            "3px solid transparent",
-        )
-
-    children = [
-        rx.text(icon, font_size="15px", width="22px", text_align="center"),
-        rx.text(label, font_size="13px", font_weight="500", flex="1"),
-    ]
-    if badge is not None:
-        children.append(badge)
-
-    return rx.box(
-        rx.hstack(*children, align="center", spacing="3", width="100%"),
-        on_click=on_click,
-        cursor="pointer",
-        padding="10px 14px",
-        padding_left="11px",  # 14 - 3 del border-left
-        border_radius="0 10px 10px 0",
-        background=bg,
-        color=txt,
-        border_left=border_left,
-        transition="background 0.15s ease, color 0.15s ease",
-        _hover={
-            "background": bg_hover,
-            "color": accent_color,
-        },
-        title=title or "",
-        class_name="ashley-nav-item",
-    )
-
-
-def _sidebar_toggle_row(icon_on: str, icon_off: str, label, active, on_click) -> rx.Component:
-    """Fila compacta para toggles secundarios (TTS, Natural, Focus, Pin, Notif).
-
-    Más compacto que _sidebar_nav_item — pensado para la sección de
-    abajo donde van toggles que NO son la acción principal del momento.
-    Incluye un check ✓ a la derecha cuando está activo, para que sea
-    obvio el estado sin tener que adivinar por el color.
-    """
-    return rx.box(
-        rx.hstack(
-            rx.text(
-                rx.cond(active, icon_on, icon_off),
-                font_size="13px", width="20px", text_align="center",
-            ),
-            rx.text(label, font_size="12px", flex="1"),
-            rx.cond(
-                active,
-                rx.text("●", color=COLOR_PRIMARY, font_size="9px"),
-                rx.text("○", color="#444", font_size="9px"),
-            ),
-            spacing="2", align="center", width="100%",
-        ),
-        on_click=on_click,
-        cursor="pointer",
-        padding="6px 14px",
-        border_radius="6px",
-        color=rx.cond(active, "#ddd", "#888"),
-        transition="background 0.15s ease, color 0.15s ease",
-        _hover={
-            "background": "rgba(255,255,255,0.04)",
-            "color": COLOR_PRIMARY,
-        },
-    )
-
-
-def _sidebar_section_label(text) -> rx.Component:
-    """Subtítulo de sección dentro del sidebar (uppercase, pequeño, gris).
-
-    text puede ser un rx.Var (i18n) o un string literal en inglés.
-    """
-    return rx.text(
-        text,
-        font_size="10px",
-        color="#666",
-        font_weight="700",
-        letter_spacing="0.1em",
-        text_transform="uppercase",
-        padding="0 14px",
-        margin_top="4px",
-    )
-
-
-def _sidebar_news_badge() -> rx.Component:
-    """Badge con el contador de noticias unread, solo visible si >0."""
-    State = _get_state()
-    return rx.cond(
-        State.news_unread > 0,
-        rx.box(
-            State.news_unread.to_string(),
-            bg=COLOR_PRIMARY,
-            color="black",
-            border_radius="99px",
-            padding="0 6px",
-            font_size="10px",
-            font_weight="700",
-            line_height="16px",
-            min_width="18px",
-            text_align="center",
-        ),
-        rx.box(),
-    )
-
-
-def left_sidebar() -> rx.Component:
-    """Sidebar izquierdo de navegación — sustituye a los pills del header.
-
-    Estructura:
-      • ACCIONES PRIMARIAS — Memorias, Noticias (con badge), Acciones (naranja)
-      • TOGGLES — Natural, TTS, Focus, Pin on top, Notificaciones
-      • FOOTER — Idioma (cicla), Ajustes, Manual
-
-    El sidebar es sticky (no se va con el scroll del chat) y tiene su
-    propio fondo glassmorphism distinto al del chat (ligeramente más
-    oscuro para diferenciarse).
-    """
-    State = _get_state()
-
-    return rx.vstack(
-        # ── Sección: acciones primarias ─────────────────────────
-        rx.vstack(
-            _sidebar_nav_item(
-                "🧠",
-                State.t["pill_memories"],
-                State.toggle_memories,
-                active=State.show_memories,
-            ),
-            _sidebar_nav_item(
-                "📰",
-                State.t["pill_news"],
-                State.toggle_news_panel,
-                active=State.show_news,
-                badge=_sidebar_news_badge(),
-            ),
-            _sidebar_nav_item(
-                "⚡",
-                State.t["pill_actions"],
-                State.toggle_auto_actions,
-                active=State.auto_actions,
-                accent_color="#ff7b45",  # naranja distintivo (igual que el pill)
-            ),
-            spacing="0", align="stretch", width="100%",
-            padding_y="8px",
-        ),
-
-        # ── Separador ────────────────────────────────────────────
-        rx.divider(border_color="rgba(255,255,255,0.05)", margin_y="0"),
-
-        # ── Sección: toggles secundarios ──────────────────────────
-        rx.vstack(
-            _sidebar_section_label(rx.match(
-                State.language,
-                ("es", "AJUSTES RÁPIDOS"),
-                ("fr", "RÉGLAGES RAPIDES"),
-                "QUICK SETTINGS",
-            )),
-            _sidebar_toggle_row(
-                "🗣", "🗣",
-                State.t["pill_natural"],
-                State.voice_mode,
-                State.toggle_voice_mode,
-            ),
-            _sidebar_toggle_row(
-                "🔊", "🔈",
-                State.t["menu_tts"],
-                State.tts_enabled,
-                State.toggle_tts,
-            ),
-            _sidebar_toggle_row(
-                "⛶", "⛶",
-                State.t["pill_focus"],
-                State.focus_mode,
-                State.toggle_focus_mode,
-            ),
-            _sidebar_toggle_row(
-                "📌", "📍",
-                State.t["menu_pin"],
-                State.pin_on_top,
-                State.toggle_pin_on_top,
-            ),
-            _sidebar_toggle_row(
-                "🔔", "🔕",
-                State.t["pill_notifications"],
-                State.notifications_enabled,
-                State.toggle_notifications,
-            ),
-            spacing="0", align="stretch", width="100%",
-            padding_y="8px",
-        ),
-
-        # ── Spacer empuja el footer al fondo ─────────────────────
-        rx.spacer(),
-
-        # ── Footer: idioma, ajustes, manual ──────────────────────
-        rx.divider(border_color="rgba(255,255,255,0.05)", margin_y="0"),
-        rx.vstack(
-            _sidebar_nav_item(
-                "🌐",
-                rx.hstack(
-                    rx.text(State.t["lang_label"], font_size="13px"),
-                    rx.spacer(),
-                    rx.text(
-                        State.language_label,
-                        color=COLOR_PRIMARY,
-                        font_size="10px",
-                        font_weight="700",
-                        letter_spacing="0.08em",
-                    ),
-                    width="100%", align="center",
-                ),
-                State.toggle_language,
-            ),
-            _sidebar_nav_item(
-                "⚙",
-                State.t["menu_settings"],
-                State.toggle_settings,
-            ),
-            _sidebar_nav_item(
-                "❓",
-                rx.match(
-                    State.language,
-                    ("es", "Manual"),
-                    ("fr", "Manuel"),
-                    "Manual",
-                ),
-                State.open_manual,
-            ),
-            spacing="0", align="stretch", width="100%",
-            padding_y="8px",
-        ),
-
-        spacing="0", align="stretch",
-        height="100%",
-        width=SIDEBAR_LEFT_WIDTH,
-        flex_shrink="0",
-        class_name="ashley-sidebar glass-sidebar",
-    )
-
-
 def _affection_heart() -> rx.Component:
     """v0.16 — corazón outline elegante con respiración constante.
 
@@ -1617,10 +850,6 @@ def _affection_heart() -> rx.Component:
         ),
     )
 
-
-# ─────────────────────────────────────────────
-#  Layout 2-cols boutique noir (v0.16)
-# ─────────────────────────────────────────────
 
 def _ambient_lights() -> rx.Component:
     """Capas de luz ambient animadas detrás del layout — efecto vela
@@ -1882,10 +1111,22 @@ def left_portrait_panel() -> rx.Component:
         # Overlay con nombre/status/actions
         _portrait_overlay(),
 
+        # v0.16.8 — portrait-thinking marca al panel mientras Ashley
+        # piensa o stream. ashley_fx.js la detecta vía querySelector
+        # para disparar playThinking(). Antes el selector vivía en
+        # componentes muertos (deleted v0.16) y el sonido no sonaba.
         class_name=rx.cond(
-            State.view_3d_mode,
-            "ashley-portrait-panel mode-3d",
-            "ashley-portrait-panel mode-2d",
+            State.is_thinking,
+            rx.cond(
+                State.view_3d_mode,
+                "ashley-portrait-panel mode-3d portrait-thinking",
+                "ashley-portrait-panel mode-2d portrait-thinking",
+            ),
+            rx.cond(
+                State.view_3d_mode,
+                "ashley-portrait-panel mode-3d",
+                "ashley-portrait-panel mode-2d",
+            ),
         ),
     )
 
@@ -1904,8 +1145,57 @@ def _chat_header_bar() -> rx.Component:
     return rx.box(
         # Lado izquierdo: nombre serif
         rx.text("Ashley", class_name="ashley-serif", font_size="32px"),
-        # Lado derecho: focus toggle + corazón outline + cifra
+        # Lado derecho: manual + focus toggle + corazón outline + cifra
         rx.box(
+            # Botón del manual (?). v0.16 — el manual_button del header
+            # antiguo se borró en la limpieza de dead code; éste lo
+            # reemplaza en la UI nueva.
+            rx.tooltip(
+                rx.box(
+                    rx.icon("circle-help", size=18, stroke_width=1.7),
+                    on_click=State.open_manual,
+                    class_name="ashley-header-action",
+                ),
+                content=rx.match(
+                    State.language,
+                    ("es", "Manual de usuario"),
+                    ("fr", "Manuel d'utilisateur"),
+                    "User manual",
+                ),
+            ),
+            # Toggle TTS — voz de Ashley ON/OFF (v0.16.12). Antes vivía
+            # en el sidebar viejo que se borró en la limpieza dead code.
+            # Icono Volume2 cuando ON, VolumeX cuando OFF.
+            rx.tooltip(
+                rx.box(
+                    rx.cond(
+                        State.tts_enabled,
+                        rx.icon("volume-2", size=18, stroke_width=1.7),
+                        rx.icon("volume-x", size=18, stroke_width=1.7),
+                    ),
+                    on_click=State.toggle_tts,
+                    class_name=rx.cond(
+                        State.tts_enabled,
+                        "ashley-header-action active",
+                        "ashley-header-action",
+                    ),
+                ),
+                content=rx.cond(
+                    State.tts_enabled,
+                    rx.match(
+                        State.language,
+                        ("es", "Voz de Ashley: ACTIVADA (click para silenciar)"),
+                        ("fr", "Voix d'Ashley : ACTIVÉE (clic pour couper)"),
+                        "Ashley's voice: ON (click to mute)",
+                    ),
+                    rx.match(
+                        State.language,
+                        ("es", "Voz de Ashley: silenciada (click para activar)"),
+                        ("fr", "Voix d'Ashley : coupée (clic pour activer)"),
+                        "Ashley's voice: muted (click to enable)",
+                    ),
+                ),
+            ),
             # Focus mode toggle — el icono cambia según estado
             rx.tooltip(
                 rx.box(
@@ -1953,292 +1243,3 @@ def _chat_header_bar() -> rx.Component:
     )
 
 
-def _ashley_character_card() -> rx.Component:
-    """Tarjeta superior del panel derecho con avatar + nombre + status.
-
-    Versión más compacta del portrait panel actual — el área grande de
-    abajo se reserva para el modelo 3D futuro. Mantiene la info clave:
-    avatar (que cambia con el mood), nombre, status pulse, y el corazón
-    de afecto a la derecha (en vez de barra horizontal, mucho más bonito).
-    """
-    State = _get_state()
-
-    return rx.hstack(
-        # ── Lado izquierdo: avatar + info textual ────────────────
-        rx.vstack(
-            # Avatar pequeño + nombre + status en horizontal
-            rx.hstack(
-                rx.box(
-                    rx.image(
-                        src=State.current_image,
-                        width="100%", height="100%",
-                        object_fit="cover",
-                    ),
-                    width="56px", height="56px",
-                    border_radius="50%",
-                    overflow="hidden",
-                    border=f"2px solid {COLOR_PRIMARY}",
-                    flex_shrink="0",
-                    background_image="url('/ashley_pfp.jpg')",
-                    background_size="cover",
-                    background_position="center",
-                    class_name=rx.cond(
-                        State.is_thinking | (State.current_response != ""),
-                        "portrait-thinking",
-                        "portrait-idle",
-                    ),
-                ),
-                rx.vstack(
-                    rx.text(
-                        "Ashley",
-                        font_size="17px", font_weight="800",
-                        color=COLOR_PRIMARY, letter_spacing="0.04em",
-                        style={"textShadow": "0 0 12px rgba(255,154,238,0.35)"},
-                    ),
-                    # Status row (igual que portrait pero menos vertical)
-                    rx.cond(
-                        State.is_thinking,
-                        rx.hstack(
-                            rx.box(
-                                width="7px", height="7px", border_radius="50%", bg=COLOR_PRIMARY,
-                                style={"animation": "avatarPulse 1.2s ease-in-out infinite"},
-                            ),
-                            rx.text(State.t["status_thinking"], color=COLOR_PRIMARY,
-                                    font_size="11px", font_style="italic"),
-                            spacing="2", align="center",
-                        ),
-                        rx.cond(
-                            State.current_response != "",
-                            rx.hstack(
-                                rx.box(
-                                    width="7px", height="7px", border_radius="50%", bg=COLOR_STATUS_WRITING,
-                                    style={"animation": "avatarPulse 1.2s ease-in-out infinite"},
-                                ),
-                                rx.text(State.t["status_speaking"], color=COLOR_STATUS_WRITING,
-                                        font_size="11px", font_style="italic"),
-                                spacing="2", align="center",
-                            ),
-                            rx.hstack(
-                                rx.box(width="7px", height="7px", border_radius="50%",
-                                       bg=COLOR_STATUS_ONLINE),
-                                rx.text(State.t["status_online"], color=COLOR_STATUS_ONLINE, font_size="11px"),
-                                spacing="2", align="center",
-                            ),
-                        ),
-                    ),
-                    spacing="1", align="start",
-                ),
-                spacing="3", align="center", width="100%",
-            ),
-
-            # Subtítulo / brand
-            rx.text(
-                State.t["brand_subtitle"],
-                color=COLOR_TEXT_MUTED, font_size="10px",
-                letter_spacing="0.05em",
-                margin_top="2px",
-            ),
-
-            spacing="2",
-            align="stretch",
-            flex="1",
-            min_width="0",
-        ),
-
-        # ── Lado derecho: el corazón de afecto ──────────────────
-        # padding_bottom mantiene espacio para la cifra (que está en
-        # absolute bottom:-20 dentro del heart-frame).
-        rx.box(
-            _affection_heart(),
-            padding_top="2px",
-            padding_bottom="24px",
-            flex_shrink="0",
-        ),
-
-        spacing="3",
-        align="center",
-        padding="16px 18px",
-        border_radius="14px",
-        width="100%",
-        class_name="ashley-character-card",
-    )
-
-
-def _view_2d_3d_toggle() -> rx.Component:
-    """Toggle pill 2D | 3D para alternar la vista del panel derecho.
-
-    v0.15.4: el 2D (imagen mood-image cuadrada) ya funciona; el 3D
-    (placeholder vertical) está reservado para cuando el viewer real
-    aterrice. El user puede hacer ping-pong entre vistas.
-    """
-    State = _get_state()
-
-    def _seg(label: str, is_active, on_click):
-        return rx.button(
-            label,
-            on_click=on_click,
-            type="button",
-            bg=rx.cond(is_active, COLOR_PRIMARY, "transparent"),
-            color=rx.cond(is_active, "black", "#aaa"),
-            border="none",
-            border_radius="0",
-            padding="5px 14px",
-            font_size="11px",
-            font_weight="800",
-            letter_spacing="0.05em",
-            cursor="pointer",
-            transition="all 0.18s ease",
-            _hover={
-                "bg": rx.cond(is_active, COLOR_PRIMARY, "rgba(255,154,238,0.10)"),
-                "color": rx.cond(is_active, "black", COLOR_PRIMARY),
-            },
-        )
-
-    return rx.hstack(
-        _seg("2D", ~State.view_3d_mode, State.set_view_3d_mode_false),
-        _seg("3D",  State.view_3d_mode, State.set_view_3d_mode_true),
-        spacing="0",
-        background="rgba(15,8,25,0.85)",
-        border="1px solid rgba(255,154,238,0.30)",
-        border_radius="99px",
-        overflow="hidden",
-        backdrop_filter="blur(14px)",
-        style={
-            "WebkitBackdropFilter": "blur(14px)",
-            "boxShadow": "0 4px 14px rgba(0,0,0,0.4)",
-        },
-        position="absolute",
-        top="12px",
-        right="12px",
-        z_index="10",
-    )
-
-
-def _ashley_2d_view() -> rx.Component:
-    """Vista 2D — imagen mood-image en un área CUADRADA.
-
-    aspect-ratio 1/1 → la imagen no se deforma. object-fit: cover hace
-    crop centrado si el asset no es 1:1, pero mantiene proporciones.
-    """
-    State = _get_state()
-    return rx.box(
-        rx.image(
-            src=State.current_image,
-            width="100%", height="100%",
-            object_fit="cover",
-            style={"objectPosition": "center top"},
-        ),
-        width="100%",
-        # aspect-ratio = 1/1 → cuadrado perfecto, height = width
-        style={"aspectRatio": "1 / 1"},
-        background_image="url('/ashley_pfp.jpg')",
-        background_size="cover",
-        background_position="center",
-        class_name=rx.cond(
-            State.is_thinking | (State.current_response != ""),
-            "ashley-2d-portrait portrait-thinking",
-            "ashley-2d-portrait portrait-idle",
-        ),
-        border_radius="18px",
-        overflow="hidden",
-    )
-
-
-def _ashley_3d_placeholder() -> rx.Component:
-    """Vista 3D — placeholder VERTICAL para el futuro modelo 3D.
-
-    Vertical (aspect-ratio 3/4) anticipa el formato típico de un VRM
-    full-body o Live2D rig. Cuando el viewer real esté listo, el
-    contenido interior se reemplaza pero el contenedor mantiene sus
-    proporciones.
-    """
-    State = _get_state()
-    return rx.center(
-        rx.vstack(
-            rx.text(
-                "✨",
-                font_size="56px",
-                style={"filter": "drop-shadow(0 0 24px rgba(255,154,238,0.6))"},
-            ),
-            rx.text(
-                rx.match(
-                    State.language,
-                    ("es", "Modelo 3D"),
-                    ("fr", "Modèle 3D"),
-                    "3D Model",
-                ),
-                color="#dadaee", font_size="15px", font_weight="700",
-                letter_spacing="0.10em",
-                margin_top="8px",
-            ),
-            rx.text(
-                rx.match(
-                    State.language,
-                    ("es", "próximamente"),
-                    ("fr", "bientôt disponible"),
-                    "coming soon"),
-                color="#888", font_size="12px", font_style="italic",
-                letter_spacing="0.05em",
-            ),
-            spacing="1", align="center",
-        ),
-        width="100%",
-        # 3:4 — más alto que ancho, anticipa el viewer full-body
-        style={"aspectRatio": "3 / 4"},
-        background="linear-gradient(160deg, rgba(255,154,238,0.06) 0%, rgba(60,30,90,0.10) 50%, rgba(20,10,40,0.06) 100%)",
-        border="1px solid rgba(255,154,238,0.18)",
-        border_radius="18px",
-        box_shadow="inset 0 0 80px rgba(255,154,238,0.06), 0 8px 32px rgba(0,0,0,0.4)",
-        overflow="hidden",
-    )
-
-
-def _model_3d_placeholder() -> rx.Component:
-    """Área grande del panel derecho — toggle 2D ↔ 3D (v0.15.4).
-
-    La estructura es un wrapper relative + el toggle absoluto arriba a
-    la derecha + el contenido (2D o 3D según State.view_3d_mode).
-    """
-    State = _get_state()
-    return rx.box(
-        # Toggle pill 2D | 3D arriba-derecha
-        _view_2d_3d_toggle(),
-
-        # Contenido — switch según mode
-        rx.cond(
-            State.view_3d_mode,
-            _ashley_3d_placeholder(),
-            _ashley_2d_view(),
-        ),
-
-        width="100%",
-        position="relative",
-    )
-
-
-def right_panel() -> rx.Component:
-    """Panel derecho — tarjeta de Ashley arriba + área 2D/3D abajo.
-
-    v0.15.4: el área de visualización ya no usa flex=1 (que estiraba
-    la imagen 2D y la deformaba). Ahora usa aspect-ratio:
-       • 2D mode → 1/1 cuadrado (no deforma la portrait)
-       • 3D mode → 3/4 vertical (anticipa el VRM full-body)
-    El user alterna con el toggle pill 2D | 3D arriba-derecha del área.
-
-    Sticky igual que el sidebar izquierdo. Si el contenido total cabe
-    en el viewport, queda fijo; si no, scrollea naturalmente con la
-    página. focus_mode oculta todo el panel.
-    """
-    State = _get_state()
-    return rx.vstack(
-        _ashley_character_card(),
-        _model_3d_placeholder(),
-        spacing="3",
-        align="stretch",
-        # Sin height fijo: el panel toma el espacio que necesita su
-        # contenido (card + área aspect-ratio). En 4K queda compacto
-        # arriba-derecha y se ven las estrellas debajo.
-        width=PANEL_RIGHT_WIDTH,
-        flex_shrink="0",
-        class_name="ashley-right-panel",
-    )

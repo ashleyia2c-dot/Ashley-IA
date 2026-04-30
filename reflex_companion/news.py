@@ -119,10 +119,22 @@ def add_news_item(
         del mismo evento (ej: 'patch League 26.8') varias veces.
     """
     # Limpiar primero — los tags pueden corromper el title/body antes
-    # incluso de aplicar el cap de 200 chars (un [affection:+1] puede
-    # ocupar 16 chars del title y luego mostrarse al user).
-    title = _strip_residual_tags((title or "").strip())[:200]
-    body = _strip_residual_tags((body or "").strip())[:2000]
+    # incluso de aplicar el cap (un [affection:+1] puede ocupar 16
+    # chars del title y luego mostrarse al user).
+    title_clean = _strip_residual_tags((title or "").strip())
+    body_clean  = _strip_residual_tags((body or "").strip())
+
+    # v0.14.5 — fix de "mensajes cortados". Antes: title[:200] hacía
+    # un slice raw que cortaba mid-palabra mid-frase ("...sale hoy
+    # mismo para"). Ahora usamos _smart_truncate que respeta la
+    # boundary de palabras y mueve el overflow al body, así nada
+    # se pierde. Plus subimos el cap de 200 → 320 para acomodar
+    # primeras frases largas (parse_ashley_discovery ya genera títulos
+    # hasta 280, antes el [:200] cortaba lo que ya estaba OK).
+    title, title_overflow = _smart_truncate(title_clean, 320)
+    if title_overflow:
+        body_clean = (title_overflow + " " + body_clean).strip()
+    body = body_clean[:2000]
     if not title and not body:
         raise ValueError("news item needs title or body")
     if not title:

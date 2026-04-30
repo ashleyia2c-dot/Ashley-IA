@@ -46,7 +46,15 @@ KEEP_RECENT = 12
 # Cuántos mensajes nuevos (por encima de lo que cubre el resumen) tienen
 # que acumularse antes de regenerar el resumen. Sin esto regenaríamos
 # cada turno — caro y innecesario.
-REGEN_AFTER_NEW_MSGS = 8
+#
+# v0.16.13: subido de 8 a 15. Cada regen es una llamada LLM síncrona en
+# el path crítico (~3.5-3.9s) y bloquea el primer token. En conversación
+# típica (5-10 msgs por sesión) con threshold 8 muchas veces el regen
+# disparaba justo a la mitad de un chat fluido. Con 15 baja la frecuencia
+# a la mitad sin perder contexto significativo — el resumen va siendo
+# stale ~7 mensajes antes de regenerar pero KEEP_RECENT=12 ya cubre los
+# últimos al LLM en crudo, así que el LLM siempre ve lo reciente bien.
+REGEN_AFTER_NEW_MSGS = 15
 
 # Modelo rápido y barato para el resumen. Mismo que usa el critic y el
 # detector de acciones.
@@ -156,9 +164,9 @@ def _call_fast_summarizer(dialogue_text: str, language: str) -> str:
                 creative=True,
             ).strip()
         else:
-            from xai_sdk import Client
             from xai_sdk.chat import system, user as xai_user
-            client = Client(api_key=XAI_API_KEY)
+            from .grok_client import get_xai_client
+            client = get_xai_client()
             # Penalties altas aquí — queremos que el resumen NO copie las frases
             # literales de Ashley. Solo aplica si el modelo no es 'reasoning'.
             from .grok_client import _model_supports_penalties
