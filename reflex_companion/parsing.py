@@ -142,15 +142,23 @@ def clean_display(text: str) -> str:
     # Backtick único suelto al final (residuo de cleanup previo).
     # Igual: solo si el carácter anterior no es otro backtick.
     text = re.sub(r'\n*[ \t]*(?<!`)`\s*$', '', text)
-    # ── Meta-narrativa sobre acciones (red de seguridad v0.16.14) ──
-    # A veces el LLM verbaliza su decisión interna sobre acciones —
-    # típicamente al final de la respuesta, en inglés aunque la conversación
-    # sea en otro idioma. El user reportó "No actions needed." apareciendo
-    # tras una respuesta en español. El prompt YA tiene instrucción
-    # explícita de no hacerlo, pero como red de seguridad lo filtramos
-    # post-stream también. Patrones cortos típicos en EN/ES/FR.
+    # ── Meta-narrativa sobre la propia respuesta (red de seguridad) ──
+    # A veces el LLM verbaliza juicios sobre su propia respuesta — sobre
+    # si emitió acciones, sobre el estilo de la conversación, etc. —
+    # típicamente al final, como un "cierre" tipo evaluación. El prompt
+    # ya tiene la instrucción de no hacerlo, pero como red de seguridad
+    # filtramos post-stream también.
+    #
+    # v0.17.4 — ampliado: antes solo cubríamos acciones explícitas tipo
+    # "no actions needed". Ahora cubrimos también:
+    #   • "No actions." sin "needed"
+    #   • "Conversación fluida." y variantes (LLM alucinaba esto sin estar
+    #     en el prompt — patrón de auto-evaluación inventado)
+    #   • Catch-all genérico: fragmento final tras coma/punto que contiene
+    #     keyword de meta-evaluación y no tiene estructura conversacional
     _META_ACTION_PATTERNS = [
-        r'\bno\s+actions?\s+(?:needed|required|necessary|to\s+take|to\s+execute)\.?\s*',
+        # Acciones — explícito (existentes)
+        r'\bno\s+actions?\s+(?:needed|required|necessary|to\s+take|to\s+execute|taken|executed|performed)\.?\s*',
         r'\bnothing\s+to\s+do\s+here\.?\s*',
         r'\bno\s+action\s+is\s+(?:needed|required)\.?\s*',
         r'\bno\s+(?:se\s+)?necesita(?:n)?\s+acci[oó]n(?:es)?\.?\s*',
@@ -158,9 +166,42 @@ def clean_display(text: str) -> str:
         r'\bsin\s+acci[oó]n(?:es)?\s+que\s+(?:ejecutar|tomar)\.?\s*',
         r'\bpas\s+d[\'’]action\s+(?:n[eé]cessaire|requise)\.?\s*',
         r'\baucune\s+action\s+(?:requise|n[eé]cessaire)\.?\s*',
+        # Bare "No actions." al final (sin "needed/required") — v0.17.4
+        r'(?:^|[\.\n])\s*no\s+actions?\.?\s*$',
+        r'(?:^|[\.\n])\s*sin\s+acci[oó]n(?:es)?\.?\s*$',
+        r'(?:^|[\.\n])\s*pas\s+d[\'’]actions?\.?\s*$',
+        r'(?:^|[\.\n])\s*aucune\s+action\.?\s*$',
+        # Meta sobre conversación / estilo (NUEVO v0.17.4) — el LLM
+        # alucina "conversación fluida" como cierre evaluativo
+        r',?\s*conversaci[oó]n\s+(?:fluida|natural|fluida\s+y\s+natural)\.?\s*$',
+        r',?\s*conversation\s+(?:flowing|fluid|natural|flowing\s+naturally)\.?\s*$',
+        r',?\s*conversation\s+(?:fluide|naturelle)\.?\s*$',
+        r',?\s*flujo\s+(?:natural|fluido|de\s+conversaci[oó]n)\.?\s*$',
+        r',?\s*natural\s+(?:flow|conversation\s+flow)\.?\s*$',
+        r',?\s*r[eé]ponse\s+(?:naturelle|fluide)\.?\s*$',
     ]
     for _pat in _META_ACTION_PATTERNS:
-        text = re.sub(_pat, '', text, flags=re.IGNORECASE)
+        text = re.sub(_pat, '', text, flags=re.IGNORECASE | re.MULTILINE)
+    # ── Catch-all genérico v0.17.4 ──
+    # Detecta fragmentos finales tipo ", <frase corta con keyword meta>."
+    # que se le escapan al LLM y no están en los patrones específicos.
+    # Estructura: tras coma/punto al final, frase de 1-4 palabras que
+    # contiene UN keyword meta-evaluativo (no es diálogo natural).
+    # Riesgo controlado: solo aplica al final del texto Y la frase debe ser
+    # corta + contener keyword reconocido. False positives muy poco probables.
+    _META_KEYWORDS_RE = (
+        r'(?:fluid[ae]?|fluide|flowing|naturalmente|naturellement|narrativ[oa]?|'
+        r'narrative|grindeand[oa]?|conversaci[oó]n|conversation|response|'
+        r'r[eé]ponse|respuesta|conclusi[oó]n|conclusion|ending|cierre)'
+    )
+    _CATCH_ALL_TRAILING = re.compile(
+        r'(?:[,.!?]\s+|\s*\n\s*)'  # separador (coma, punto, nueva línea)
+        r'(?:\([^)]{0,40}\)|\b\w+(?:\s+\w+){0,3}\s+)'  # paren breve o 1-4 palabras
+        r'\b' + _META_KEYWORDS_RE + r'\b'
+        r'[\s.!?]*$',  # cierre opcional + EOT
+        re.IGNORECASE,
+    )
+    text = _CATCH_ALL_TRAILING.sub('', text)
     # Elimina líneas vacías consecutivas que quedan tras limpiar tags
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()

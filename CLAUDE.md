@@ -2,10 +2,11 @@
 
 > **Nota para Claude**: este archivo describe el "qué" técnico de cada módulo. Para "si me piden X, ¿dónde modifico?" ver [`PROJECT_MAP.md`](./PROJECT_MAP.md).
 
-Versión actual: **v0.17.3** (servidor HTTP embebido reemplaza sirv → fast-path en producción → arranque cae de ~15s a ~4-6s. Port detection optimizado. `done_important` idempotente — Ashley ya no genera notificaciones duplicadas al re-emitir el tag sobre el mismo item).
+Versión actual: **v0.17.4** (prompts sin ejemplos específicos de meta-frases prohibidas — Ashley los copiaba verbatim. Filtro post-stream ampliado con catch-all genérico para meta-comentarios alucinados tipo "No actions.", "Conversación fluida." que se le escapan al LLM al final de las respuestas).
 
 Hitos recientes:
-- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, scroll mantequilla, mood images precargadas, settings instant-open, Ashley más sentimental, prompts limpios sin ejemplos específicos.
+- v0.17.3 — servidor HTTP embebido reemplaza sirv → fast-path en producción → arranque cae de ~15s a ~4-6s. Port detection optimizado. `done_important` idempotente.
+- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, scroll mantequilla, mood images precargadas, settings instant-open, Ashley más sentimental.
 
 ## Commands
 
