@@ -168,6 +168,10 @@ class State(rx.State):
     kokoro_voice: str = "af_bella"
     voicevox_url: str = "http://localhost:50021"
     voicevox_speaker: str = "1"
+    # Velocidad de la voz (v0.16.14). 1.0 = normal. Aplicada server-side
+    # cuando el provider lo soporta (ElevenLabs turbo_v2_5, Kokoro,
+    # VoiceVox). UI: slider 0.75-1.5; clamp duro 0.5-2.0 en i18n.
+    voice_speed: float = 1.0
 
     # ── Discovery proactivo (v0.13) ────────────
     # OFF por defecto: al abrir la app, Ashley retoma el hilo en lugar de
@@ -334,12 +338,12 @@ class State(rx.State):
     #  Computed vars
     # ─────────────────────────────────────────
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["affection"])
     def affection_pct(self) -> str:
         """Porcentaje de afecto para CSS height."""
         return f"{self.affection}%"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["affection"])
     def affection_color(self) -> str:
         """Color del agua según nivel de afecto."""
         a = self.affection
@@ -349,7 +353,7 @@ class State(rx.State):
         if a < 80: return "#ff88cc"      # rosa cálido
         return "#ff66aa"                  # rosa intenso con amor
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["is_thinking", "current_response", "mood"])
     def current_image(self) -> str:
         """Imagen de Ashley según su estado actual.
 
@@ -411,17 +415,17 @@ class State(rx.State):
         }
         return colors.get(self.mood, "rgba(0,0,0,0)")
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["language"])
     def t(self) -> dict[str, str]:
         """Diccionario de traducciones del UI para el idioma actual.
         Uso en componentes: State.t["key"] (reactivo a self.language)."""
         return i18n.ui(self.language)
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["language"])
     def is_english(self) -> bool:
         return self.language == "en"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["language"])
     def language_label(self) -> str:
         """Etiqueta del toggle de idioma — código en mayúsculas del idioma actual."""
         return (self.language or "en").upper()
@@ -506,6 +510,7 @@ class State(rx.State):
             discovery_enabled=self.discovery_enabled,
             cdp_enabled=self.cdp_enabled,
             wake_word_enabled=self.wake_word_enabled,
+            voice_speed=self.voice_speed,
         )
 
     def toggle_discovery_enabled(self):
@@ -927,6 +932,18 @@ class State(rx.State):
 
     def set_kokoro_voice(self, voice: str):
         self.kokoro_voice = (voice or "").strip() or "af_bella"
+
+    def set_voice_speed(self, value):
+        """Set la velocidad de la voz (0.75-1.5 desde el slider).
+        Persistido a voice.json. Usado tanto server-side (cuando el
+        provider lo soporta) como cliente-side (audio.playbackRate)."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            v = 1.0
+        # Clamp duro a un rango sensato — más allá la voz suena artificial.
+        self.voice_speed = max(0.5, min(2.0, v))
+        self._persist_voice()
         self._persist_voice()
 
     def set_voicevox_url(self, url: str):
@@ -937,7 +954,7 @@ class State(rx.State):
         self.voicevox_speaker = (speaker or "").strip() or "1"
         self._persist_voice()
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_model", "llm_provider"])
     def llm_model_display(self) -> str:
         """Modelo actual para el Select.
 
@@ -955,19 +972,19 @@ class State(rx.State):
             return OLLAMA_DEFAULT_MODEL
         return XAI_MODELS[0][0]
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_provider"])
     def is_openrouter_provider(self) -> bool:
         return self.llm_provider == "openrouter"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_provider"])
     def is_ollama_provider(self) -> bool:
         return self.llm_provider == "ollama"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_provider"])
     def is_xai_provider(self) -> bool:
         return self.llm_provider == "xai"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_provider"])
     def web_search_supported(self) -> bool:
         """True si el provider activo soporta búsqueda web nativa.
         Hoy solo xAI tiene web_search integrado en el SDK — OpenRouter y
@@ -976,7 +993,7 @@ class State(rx.State):
         que depende de web_search no está disponible)."""
         return self.llm_provider == "xai"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["llm_provider"])
     def llm_provider_label(self) -> str:
         """Label legible del provider activo (para mensajes UI tipo
         'Not available with [Provider]')."""
@@ -984,63 +1001,86 @@ class State(rx.State):
         return {"xai": "Grok (xAI)", "openrouter": "OpenRouter",
                 "ollama": "Ollama"}.get(p, p)
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["voice_provider"])
     def is_voice_kokoro(self) -> bool:
         return self.voice_provider == "kokoro"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["voice_provider"])
     def is_voice_voicevox(self) -> bool:
         return self.voice_provider == "voicevox"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["voice_provider"])
     def is_voice_elevenlabs(self) -> bool:
         return self.voice_provider == "elevenlabs"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["voice_provider"])
     def voice_provider_marker(self) -> str:
         """Leído por ashley_voice.js via data-voice-provider para routing."""
         return self.voice_provider or "webspeech"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["tts_enabled"])
     def tts_marker_attr(self) -> str:
         """'on' | 'off' — lo lee ashley_voice.js desde data-tts."""
         return "on" if self.tts_enabled else "off"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["notifications_enabled"])
     def notifications_marker_attr(self) -> str:
         """'on' | 'off' — lo lee ashley_fx.js desde data-notifications
         para decidir si disparar notificaciones Windows cuando la ventana
         no está focuseada."""
         return "on" if self.notifications_enabled else "off"
 
-    @rx.var
+    @rx.var(auto_deps=False, deps=["pin_on_top"])
     def pin_marker_attr(self) -> str:
         """'on' | 'off' — lo lee ashley_fx.js desde data-pin para llamar a
         window.ashleyWindow.setAlwaysOnTop() en el main process."""
         return "on" if self.pin_on_top else "off"
 
-    @rx.var(cache=False)
+    @rx.var(cache=True)
     def backend_port_marker(self) -> str:
         """Puerto del backend Python (Starlette) donde viven las rutas /api/*.
         Es DISTINTO del frontend port (Next.js). El JS lo usa para hacer
-        fetch directo al backend en vez de al frontend (que devuelve 405)."""
+        fetch directo al backend en vez de al frontend (que devuelve 405).
+
+        v0.16.14 — cambiado a cache=True. La env var ASHLEY_BACKEND_PORT
+        se setea UNA vez al arrancar Electron y nunca cambia durante la
+        vida de la app. Con cache=False, Reflex recomputaba esto en cada
+        state tick (cada vez que cualquier var del state cambiaba),
+        leyendo os.environ × N veces por segundo. Con cache=True se
+        computa una vez y se reusa.
+        """
         import os as _os
         return _os.environ.get("ASHLEY_BACKEND_PORT", "17801")
 
-    @rx.var(cache=False)
+    @rx.var(cache=True)
     def grok_key_status(self) -> str:
         """Indicador en Settings de si hay Grok key configurada.
-        No depende de state reactivo — se evalúa on demand."""
+
+        v0.16.14 — cambiado a cache=True. _cfg.XAI_API_KEY se lee del
+        Electron safeStorage UNA vez al startup (ver electron/main.js).
+        Durante la sesión NO cambia — el user solo puede actualizarla
+        vía onboarding y eso requiere reinicio de la app. Antes con
+        cache=False, Reflex re-evaluaba en cada state tick = waste."""
         from . import config as _cfg
         return "configured" if (_cfg.XAI_API_KEY and len(_cfg.XAI_API_KEY) > 10) else "missing"
 
     # ── Settings dialog ─────────────────────────────────────
     def toggle_settings(self):
+        """Abre/cierra Settings.
+
+        v0.16.14 — convertido en generator para que el `yield` empuje el
+        cambio de show_settings al frontend ANTES del ping a Ollama. Antes
+        el ping (timeout 0.8s) bloqueaba síncronamente y Settings tardaba
+        ~1 segundo entero en abrirse para users con Ollama. Ahora la
+        ventana se abre instantáneamente y la lista de modelos llega
+        unos cientos de ms después — el user puede empezar a interactuar
+        con Settings inmediatamente.
+        """
         self.show_settings = not self.show_settings
-        # Al abrir Settings, refrescamos el estado de Ollama (detección +
-        # lista de modelos locales). No bloquea — el ping es de 800ms máx.
+        yield  # 🚀 push UI update inmediato — Settings se abre YA
         if self.show_settings and self.llm_provider == "ollama":
             self.refresh_ollama_status()
+            yield  # push lista de modelos cuando llega
 
     def save_voice_settings(self, form_data: dict):
         """Guarda cambios desde el modal de settings."""
@@ -1154,6 +1194,12 @@ class State(rx.State):
         self.kokoro_voice = vcfg.get("kokoro_voice", "af_bella") or "af_bella"
         self.voicevox_url = vcfg.get("voicevox_url", "http://localhost:50021") or "http://localhost:50021"
         self.voicevox_speaker = vcfg.get("voicevox_speaker", "1") or "1"
+        # v0.16.14 — velocidad de voz persistida.
+        try:
+            _vs_raw = float(vcfg.get("voice_speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            _vs_raw = 1.0
+        self.voice_speed = max(0.5, min(2.0, _vs_raw))
         # Discovery proactivo (v0.13) — default OFF
         self.discovery_enabled = bool(vcfg.get("discovery_enabled", False))
         # v0.13.25: modo browser moderno (CDP) — opt-in
@@ -1732,6 +1778,15 @@ class State(rx.State):
             prefer_cdp=self.cdp_enabled,  # v0.13.25
         )
         self.browser_opened = result.get("browser_opened", self.browser_opened)
+
+        # v0.17.3 — Si la acción fue NO-OP (ej: done_important sobre item ya
+        # marcado), no añadimos burbuja de sistema al chat ni la registramos
+        # en action_log. Mantenemos browser_opened y otras side effects pero
+        # evitamos ruido visual y de auditoría sobre algo que no cambió nada.
+        # Sin esto Ashley re-emitiendo el tag generaba notificaciones duplicadas
+        # ("Marcado como hecho: X" 3-4 veces sobre el mismo item).
+        if result.get("noop"):
+            return result
 
         # Snapshot DESPUÉS — la acción acaba de ejecutar. El state pudo
         # cambiar (ej: volumen), así que invalidamos el caché y leemos
@@ -2740,8 +2795,9 @@ class State(rx.State):
         ts = now_iso()
         # Red de seguridad: clean_display una vez más por si algún tag raro
         # se escapó de extract_mood / extract_affection / extract_action.
+        _final_content = _clean_display_fn(clean_text)
         self.messages.append({
-            "role": "assistant", "content": _clean_display_fn(clean_text),
+            "role": "assistant", "content": _final_content,
             "timestamp": ts, "id": f"a-{ts}", "image": "",
         })
         if len(self.messages) > MAX_HISTORY_MESSAGES:
@@ -3095,7 +3151,13 @@ class State(rx.State):
 
 
     def _send_message_impl(self, form_data: dict):
-        user_message = form_data.get("message", "").strip()
+        # v0.16.14 — `or ""` defensivo: Reflex envía `{"message": None}`
+        # cuando el textarea está vacío en algunos casos (no `{"message": ""}`
+        # como asume `.get(key, default)`). Sin esto, `.strip()` crasheaba
+        # con AttributeError: 'NoneType' object has no attribute 'strip'
+        # — mismo síntoma que el user reportó: "le doy a enviar y no se
+        # envia". Tests en test_send_message_none_safe.py.
+        user_message = (form_data.get("message") or "").strip()
 
         # v0.14.1 — Cancela el startup engagement pendiente.
         # ANTES del primer yield para evitar race con el bg task.
@@ -3181,6 +3243,17 @@ class State(rx.State):
 
     def delete_message(self, msg_id: str):
         self.messages = [m for m in self.messages if m.get("id") != msg_id]
+        # v0.16.14 — reset flags de UI por si quedaron colgados de un
+        # proceso anterior (stream de Ashley que crasheó sin resetear,
+        # error de network mid-stream, etc.). Sin esto, _input_disabled
+        # permanecía True (=is_thinking|current_response!="") y el botón
+        # send quedaba clickable visualmente pero NO procesaba el click,
+        # forzando al user a reiniciar la app para volver a enviar.
+        # Trade-off: si el user borra MIENTRAS Ashley realmente está
+        # streamando, interrumpe el stream — aceptable porque el user
+        # borró intencionalmente.
+        self.is_thinking = False
+        self.current_response = ""
         self.save_history()
 
     # ─────────────────────────────────────────
@@ -4925,6 +4998,10 @@ def index():
                 "data-pin": State.pin_marker_attr,
                 # v0.12: voice_provider controls which TTS backend JS uses
                 "data-voice-provider": State.voice_provider_marker,
+                # v0.16.14: velocidad de voz (lo lee ashley_voice.js para
+                # Web Speech utterance.rate; para backend providers se
+                # envía via voice.json al endpoint /api/tts).
+                "data-voice-speed": State.voice_speed.to_string(),
             },
         ),
 
@@ -5266,6 +5343,16 @@ def index():
         ),
 
         # ── Diálogo de Settings (3 secciones claras) ────────
+        # v0.16.14 — LAZY MOUNT del form. Antes el form (~750 líneas con
+        # rx.cond anidados, inputs, sliders, radio groups, foreaches)
+        # estaba SIEMPRE en el DOM aunque show_settings=False. React
+        # evaluaba todas las condicionales en cada state change → lag
+        # general en toda la app + Settings tardaba 1 segundo en abrir
+        # por la primera mount masiva.
+        # Ahora con rx.cond, el form solo se monta cuando show_settings
+        # está True. Trade-off: primera apertura tarda 100-200ms más
+        # (mount inicial), pero el resto de la app va MUCHÍSIMO más
+        # fluida (React no procesa el subtree gigante en cada update).
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title(
@@ -5275,8 +5362,10 @@ def index():
                         spacing="2", align="center",
                     ),
                 ),
-                rx.form(
-                    rx.vstack(
+                rx.cond(
+                    State.show_settings,
+                    rx.form(
+                        rx.vstack(
                         # ═══════════════════════════════════════════════
                         #  REQUIRED — Grok key status
                         # ═══════════════════════════════════════════════
@@ -5862,6 +5951,38 @@ def index():
                                     rx.box(),
                                 ),
 
+                                # ─── Slider velocidad de voz (v0.16.14) ────
+                                rx.box(
+                                    rx.hstack(
+                                        rx.text(State.t["settings_voice_speed_label"],
+                                                color="#ccc", font_size="12px",
+                                                font_weight="500"),
+                                        rx.spacer(),
+                                        rx.text(
+                                            State.voice_speed.to_string() + "x",
+                                            color="#ffa500", font_size="12px",
+                                            font_weight="700",
+                                            font_family="Consolas, monospace",
+                                        ),
+                                        spacing="2", align="center", width="100%",
+                                    ),
+                                    rx.slider(
+                                        default_value=[1.0],
+                                        min=0.75,
+                                        max=1.5,
+                                        step=0.05,
+                                        value=[State.voice_speed],
+                                        on_change=lambda v: State.set_voice_speed(v[0]),
+                                        size="2",
+                                        width="100%",
+                                    ),
+                                    rx.text(State.t["settings_voice_speed_hint"],
+                                            color="#666", font_size="10px",
+                                            line_height="1.4"),
+                                    margin_top="10px",
+                                    width="100%",
+                                ),
+
                                 spacing="2", align="stretch",
                             ),
                             padding="14px 16px",
@@ -5983,6 +6104,8 @@ def index():
                     ),
                     on_submit=State.save_voice_settings,
                     width="100%",
+                ),
+                    rx.fragment(),  # cierre del rx.cond — cuando show_settings=False
                 ),
                 width="600px",
                 max_height="85vh",

@@ -1,6 +1,11 @@
 # CLAUDE.md
 
-Versión actual: **v0.16.13** (velocidad x5, costes -75%, optimistic UI sin bugs).
+> **Nota para Claude**: este archivo describe el "qué" técnico de cada módulo. Para "si me piden X, ¿dónde modifico?" ver [`PROJECT_MAP.md`](./PROJECT_MAP.md).
+
+Versión actual: **v0.17.3** (servidor HTTP embebido reemplaza sirv → fast-path en producción → arranque cae de ~15s a ~4-6s. Port detection optimizado. `done_important` idempotente — Ashley ya no genera notificaciones duplicadas al re-emitir el tag sobre el mismo item).
+
+Hitos recientes:
+- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, scroll mantequilla, mood images precargadas, settings instant-open, Ashley más sentimental, prompts limpios sin ejemplos específicos.
 
 ## Commands
 
@@ -11,7 +16,7 @@ ashley-electron.bat          # en el escritorio
 # Dev server (browser directo — puertos en rxconfig.py)
 cd reflex-companion && venv\Scripts\activate && reflex run
 
-# Tests (610 tests, ~6s)
+# Tests (784 tests, ~6s)
 venv\Scripts\python.exe -m pytest tests/ -v
 
 # Build installer (.exe) — prebuild-frontend se ejecuta automático antes
@@ -24,15 +29,22 @@ venv\Scripts\python.exe tools/diagnose_latency.py
 venv\Scripts\python.exe tools/simulate_token_usage.py
 ```
 
-### Frontend build invariant (v0.13.4)
+### Frontend build invariant (v0.13.4) + fast-path en producción (v0.17.3)
 
 Reflex compila los componentes Python a JSX que vive en `.web/build/client/`. Electron tiene dos caminos de arranque:
-- **Fast-path** (6s): reusa el `.web/build/client/` existente si está al día.
-- **Slow-path** (14s): llama a `reflex run --env prod` que recompila.
+- **Fast-path** (~3-5s tras v0.17.3): backend Python (--backend-only) + servidor HTTP embebido en main.js sirviendo `.web/build/client/`. Antes solo en dev — ahora **también en producción** desde v0.17.3.
+- **Slow-path** (~14s): llama a `reflex run --env prod` que recompila el frontend Next.js.
 
 El `main.js` decide automáticamente comparando **mtime de cada `.py` en `reflex_companion/` + cada asset en `assets/`** contra `mtime` de `.web/build/client/index.html`. Si cualquier fuente es más nueva → slow-path. Invariante: **el user (dev o final) NUNCA ve una UI stale respecto al código**.
 
 En el installer, `electron/prebuild.js` corre antes de `electron-builder` y hace `reflex export --frontend-only` forzado. Si falla, el installer NO se genera (fail-loud).
+
+**Embedded frontend server (v0.17.3):**
+- `_startEmbeddedFrontendServer()` en main.js sustituye sirv-cli.
+- Es un `http.createServer` que sirve `.web/build/client/` con MIME types correctos, SPA fallback, y Cache-Control inmutable para `/assets/*`.
+- Vive en el proceso principal de Electron → cero subprocesos, cero spawn overhead, cero cuelgues silenciosos como pasaba con sirv en producción (v0.13.2 bug).
+- `waitForReflex()` ahora pollea `/api/whisper/status` del backend cuando el embedded server está activo (porque el frontend embedded responde instantáneo y no es señal útil de readiness).
+- Tests guard: `tests/test_startup_optimization.py` (16 tests).
 
 ## Architecture
 
@@ -47,31 +59,31 @@ En el installer, `electron/prebuild.js` corre antes de `electron-builder` y hace
 
 | File | Lines | Role |
 |------|-------|------|
-| `reflex_companion/reflex_companion.py` | ~6,017 | State class, `index()` page, app setup |
+| `reflex_companion/reflex_companion.py` | ~6,131 | State class, `index()` page, app setup |
 | `reflex_companion/components.py` | ~1,245 | UI components (chat header, portrait panel, dialogs) |
-| `reflex_companion/styles.py` | ~1,553 | CSS animations, glassmorphism, boutique noir theme |
-| `reflex_companion/parsing.py` | ~250 | Tag extraction (mood, action), safe actions list |
-| `reflex_companion/api_routes.py` | ~477 | Starlette endpoints: `/api/transcribe`, `/api/tts`, `/api/whisper/status`, `/api/wake_word/*`, `/api/shutdown` |
+| `reflex_companion/styles.py` | ~1,576 | CSS animations, glassmorphism, boutique noir theme |
+| `reflex_companion/parsing.py` | ~295 | Tag extraction (mood, action), safe actions list |
+| `reflex_companion/api_routes.py` | ~499 | Starlette endpoints: `/api/transcribe`, `/api/tts`, `/api/whisper/status`, `/api/wake_word/*`, `/api/shutdown` |
 | `reflex_companion/actions.py` | ~2,382 | Windows system actions (apps, volume, tabs, keyboard) + shell injection guards |
 | `reflex_companion/grok_client.py` | ~467 | xAI Grok API streaming + cliente cacheado + retry |
 | `reflex_companion/llm_provider.py` | ~399 | Multi-provider dispatch (xAI / OpenRouter / Ollama) + cliente cacheado |
-| `reflex_companion/prompts.py` | ~42 | Language dispatcher (→ prompts_en.py / prompts_es.py / prompts_fr.py) |
-| `reflex_companion/prompts_en.py` | ~866 | Ashley's English personality prompt (cache-friendly order) |
-| `reflex_companion/prompts_es.py` | ~846 | Ashley's Spanish personality prompt |
-| `reflex_companion/prompts_fr.py` | ~868 | Ashley's French personality prompt |
-| `reflex_companion/i18n.py` | ~1,052 | UI translations, voice config persistence |
+| `reflex_companion/prompts.py` | ~162 | Language dispatcher (→ prompts_en.py / prompts_es.py / prompts_fr.py) |
+| `reflex_companion/prompts_en.py` | ~967 | Ashley's English personality prompt (cache-friendly order) |
+| `reflex_companion/prompts_es.py` | ~957 | Ashley's Spanish personality prompt |
+| `reflex_companion/prompts_fr.py` | ~987 | Ashley's French personality prompt |
+| `reflex_companion/i18n.py` | ~1,071 | UI translations, voice config persistence |
 | `reflex_companion/memory.py` | ~277 | JSON persistence (chat, facts, diary) |
 | `reflex_companion/mental_state.py` | ~601 | Mood axes + preoccupation regen + initiative counter |
 | `reflex_companion/context_compression.py` | ~294 | History compression cache (regen cada 15 msgs) |
-| `reflex_companion/reminders.py` | ~168 | Reminders + important items |
-| `reflex_companion/tastes.py` | ~64 | User taste preferences + discovery timing |
+| `reflex_companion/reminders.py` | ~298 | Reminders + important items |
+| `reflex_companion/tastes.py` | ~66 | User taste preferences + discovery timing |
 | `reflex_companion/whisper_stt.py` | ~407 | Local Whisper STT + auto-warmup + cache detection |
-| `reflex_companion/wake_word.py` | ~ | openwakeword detector (sounddevice + VAD silero) |
-| `reflex_companion/wake_word_lifecycle.py` | ~ | Singleton thread-safe del detector |
-| `reflex_companion/config.py` | ~157 | Model names, file paths, colors, thresholds |
-| `electron/main.js` | ~1,364 | Electron wrapper (splash, port mgmt, permisos, graceful shutdown) |
-| `assets/ashley_voice.js` | ~774 | TTS (Web Speech / ElevenLabs) + STT (MediaRecorder + Whisper) + VAD |
-| `assets/ashley_fx.js` | ~1,352 | Starfield, sounds, optimistic UI, image paste, MutationObservers |
+| `reflex_companion/wake_word.py` | ~366 | openwakeword detector (sounddevice + VAD silero) |
+| `reflex_companion/wake_word_lifecycle.py` | ~175 | Singleton thread-safe del detector |
+| `reflex_companion/config.py` | ~162 | Model names, file paths, colors, thresholds |
+| `electron/main.js` | ~1,439 | Electron wrapper (splash, port mgmt, permisos, graceful shutdown) |
+| `assets/ashley_voice.js` | ~876 | TTS (Web Speech / ElevenLabs) + STT (MediaRecorder + Whisper) + VAD |
+| `assets/ashley_fx.js` | ~1,458 | Starfield, sounds, optimistic UI, image paste, MutationObservers |
 
 ### Tools (no se incluyen en el build, solo dev)
 
@@ -149,7 +161,7 @@ Ashley embeds tags in responses:
 - `_prewarm_session_state` paraleliza con `asyncio.gather`: preoccupation regen + compress_history + whisper model load. Las 3 tareas independientes corren mientras el user explora la UI.
 
 **Constantes**:
-- `STREAM_CHUNK_SIZE = 1` (yield al UI cada token, fluidez visual)
+- `STREAM_CHUNK_SIZE = 2` (v0.16.14 — bajado de 4 a 2 tras revisión visual; balance entre fluidez y throughput)
 - `REGEN_AFTER_NEW_MSGS = 15` (compress regen menos frecuente)
 - `PREOCCUPATION_TTL_MINUTES = 90` (preoccupation regen menos frecuente)
 
@@ -184,7 +196,7 @@ Manual del user explica qué caracteres están bloqueados y por qué (sección `
 
 ### Tests
 
-610 tests organizados por área:
+784 tests organizados por área:
 
 - `test_optimistic_ui_assets.py` (15) — CSS animation:none, margin reset, observer behavior, no regresión a lógica compleja.
 - `test_llm_client_cache.py` (15) — Cache singleton, thread-safe, invalidación.

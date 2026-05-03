@@ -89,12 +89,23 @@ try { fs.mkdirSync(ASHLEY_DATA_DIR, { recursive: true }); } catch {}
 
 // ─── Estado ───────────────────────────────────────────────────────────────
 let reflexProcess = null;
-let frontendProcess = null;         // sirv serviendo .web/build/client cuando hay precompilado
+let frontendProcess = null;         // (legacy) sirv subprocess — ya no se usa. Mantengo el var
+                                    // por compatibilidad con killReflex() en caso de rollback.
+let embeddedFrontendServer = null;  // v0.17.3 — servidor HTTP embebido que sirve .web/build/client.
+                                    // Reemplaza sirv-cli para activar fast-path en producción.
+                                    // Vive en el proceso de main.js → cero subprocesos extra.
 let mainWindow = null;
 let splashWindow = null;
 let onboardingWindow = null;
 let reflexApiKey = null;            // guardada para reusar en auto-restart
 let isShuttingDown = false;         // true cuando el usuario cierra la app
+// v0.16.14 — flag global para conditional clearCache.
+// True si el frontend se rebuildeó esta sesión (slow-path) → clear cache
+// para evitar UI stale con hashes viejos.
+// False si se reusó build precompilado (fast-path) → conservar cache
+// para que imágenes y assets carguen instantáneamente entre launches.
+// Default true (safe).
+let frontendWasRebuiltThisSession = true;
 let reflexRestartCount = 0;
 const MAX_REFLEX_RESTARTS = 5;
 
@@ -246,7 +257,11 @@ function isPortInUse(port) {
     const socket = new net.Socket();
     let settled = false;
     const finish = (used) => { if (!settled) { settled = true; resolve(used); } };
-    socket.setTimeout(400);
+    // v0.17.3 — 400ms → 80ms. Las conexiones a 127.0.0.1 son <5ms en hardware
+    // moderno; un timeout >50ms ya es seguro. 80ms es defensive (CPU ocupada,
+    // antivirus interceptando, etc.) pero ahorra 320ms × N puertos al buscar
+    // libre. Con 30 candidatos × 320ms = 9.6s de timeout potencial → 2.4s.
+    socket.setTimeout(80);
     socket.once('connect', () => { socket.destroy(); finish(true); });
     socket.once('timeout', () => { socket.destroy(); finish(false); });
     socket.once('error',  () => { socket.destroy(); finish(false); });
@@ -361,8 +376,11 @@ async function pickReflexPorts() {
     killProcessesOnPort(FRONTEND_PORT_BASE),
     killProcessesOnPort(BACKEND_PORT_BASE),
   ]);
-  // Pequeña espera para que Windows libere los sockets
-  await new Promise(r => setTimeout(r, 300));
+  // v0.17.3 — 300ms → 100ms. Windows libera sockets locales en <50ms tras
+  // taskkill /F. 100ms es safety margin generoso. En arranque limpio (sin
+  // zombies) este sleep es desperdiciado tiempo — pero respetamos el caso
+  // de zombies recién matados que pueden necesitar el delay.
+  await new Promise(r => setTimeout(r, 100));
 
   // Ahora sí, busca puerto libre (por TCP connect, robusto contra 0.0.0.0)
   REFLEX_FRONTEND_PORT = await findFreePort(FRONTEND_PORT_BASE);
@@ -481,27 +499,29 @@ const SPLASH_STRINGS = {
   fr: { sub: 'démarrage...', status: 'lancement du backend' },
 };
 
-// ─── Hardening: bloquear DevTools, View Source, context menu en produccion
+// ─── Hardening: bloquear View Source y context menu en produccion
+//
+// v0.16.14 — DevTools (F12 / Ctrl+Shift+I) ya NO se bloquea en producción.
+// Razón: el user reporta bugs en runtime que solo se diagnostican con
+// consola. El bloqueo previo era "hardening" pero impedía soporte real.
+// Mantenemos bloqueado View Source (Ctrl+U) y context menu (clic derecho)
+// porque esos no aportan a diagnóstico — solo dan a un user curioso una
+// vía de leer/copiar el HTML interno sin razón legítima.
 function hardenWindow(win) {
   if (DEV_MODE) return;
 
-  // Bloquear atajos de DevTools / View Source
+  // Bloquear View Source. F12 / Ctrl+Shift+I quedan permitidos.
   win.webContents.on('before-input-event', (event, input) => {
     const key = (input.key || '').toLowerCase();
     const ctrl = input.control || input.meta;
-    const shift = input.shift;
-
-    // F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C (elem inspector), Ctrl+U (view source)
-    if (key === 'f12') return event.preventDefault();
-    if (ctrl && shift && (key === 'i' || key === 'j' || key === 'c')) return event.preventDefault();
-    if (ctrl && key === 'u') return event.preventDefault();
+    if (ctrl && key === 'u') return event.preventDefault();  // view source
   });
 
   // Bloquear menu contextual (clic derecho)
   win.webContents.on('context-menu', (e) => e.preventDefault());
 
-  // Bloquear aperturas programaticas de DevTools
-  win.webContents.on('devtools-opened', () => win.webContents.closeDevTools());
+  // (eliminado) win.webContents.on('devtools-opened', ...) — antes cerraba
+  // DevTools si se abrían programáticamente. Ahora se permite.
 
   // Cualquier navegacion a URLs no localhost → abrir externo, NO dentro de la app
   win.webContents.on('will-navigate', (e, url) => {
@@ -630,14 +650,22 @@ function runOnboarding() {
     let completed = false;
 
     const onSubmit = (_event, data) => {
-      if (!data || !data.apiKey) return;
+      if (!data) return;
+      // v0.16.14 — el user puede "skip key" para usar Ollama (gratis,
+      // local, sin API key). En ese caso data.skipKey=true y data.apiKey
+      // viene vacío. Aceptamos completar el onboarding sin clave; el
+      // user configurará Ollama en Settings al primer launch.
+      const skipKey = data.skipKey === true;
+      if (!skipKey && !data.apiKey) return;
       try {
-        saveApiKey(data.apiKey);
+        if (data.apiKey) {
+          saveApiKey(data.apiKey);
+        }
         markDisclosureAccepted();
         if (data.language) saveLanguage(data.language);
         completed = true;
         if (onboardingWindow) onboardingWindow.close();
-        resolve(data.apiKey);
+        resolve(data.apiKey || '');
       } catch (err) {
         reject(err);
       }
@@ -670,6 +698,17 @@ async function resolveApiKey() {
   if (fromEnv) {
     log('API key cargada de .env (modo dev)');
     return fromEnv;
+  }
+
+  // v0.16.14 — si NO hay clave guardada PERO el user ya pasó el
+  // onboarding (DISCLOSURE_FLAG existe), significa que eligió "skip key"
+  // para usar Ollama. No relanzamos onboarding; arrancamos con clave
+  // vacía. Reflex Python recibirá XAI_API_KEY='' — los providers cloud
+  // (xAI/OpenRouter) fallarían si los usase, pero Ollama (local) no
+  // necesita clave y va a funcionar perfectamente.
+  if (disclosureAccepted()) {
+    log('No hay API key pero onboarding aceptado — modo Ollama (skip key)');
+    return '';
   }
 
   // Si llegamos aquí SIN key, puede ser primera ejecución legítima (no
@@ -737,30 +776,32 @@ function startReflex(apiKey) {
   const hasPrecompiled = fs.existsSync(precompiledFrontend);
   const isFresh = hasPrecompiled && _isFrontendBuildFresh(precompiledFrontend);
 
-  const sirvBin = path.join(PROJECT_ROOT, '.web', 'node_modules', 'sirv-cli', 'bin.js');
-  const hasSirv = fs.existsSync(sirvBin);
-
-  // Fast-path SOLO en dev (!app.isPackaged). En producción el spawn
-  // de sirv via Electron-as-node se cuelga silenciosamente — el
-  // frontend nunca responde el health check y Ashley queda esperando
-  // hasta que se cumple el timeout de 180s. v0.13.2 lo activamos en
-  // producción y los users vieron arranques de 3 minutos. v0.13.3:
-  // de vuelta a slow-path en prod (arranque ~14s pero confiable).
-  const isDev = !app.isPackaged;
-
-  if (isDev && hasPrecompiled && isFresh && hasSirv) {
-    log('DEV mode + frontend precompilado + sirv — fast-path');
+  // v0.17.3 — Fast-path ahora funciona en PRODUCCIÓN gracias al servidor
+  // HTTP embebido (reemplaza sirv-cli). Antes:
+  //   • Dev: spawn sirv via Electron-as-node → funcionaba
+  //   • Prod: spawn sirv via Electron-as-node → se colgaba silenciosamente
+  //     (frontend nunca respondía health check, timeout 180s, arranques
+  //      de 3 minutos). Workaround era usar slow-path siempre en prod.
+  //
+  // Ahora _startSplitProcesses sirve el frontend desde un http.createServer
+  // dentro del propio main.js → cero subprocesos, sin posibilidad de cuelgue,
+  // funciona idéntico en dev y prod. Ahorro: ~10s en cold start de prod.
+  if (hasPrecompiled && isFresh) {
+    log('Frontend precompilado y fresh — fast-path (embedded HTTP server)');
+    // v0.16.14 — marcar que NO se rebuildeó. Esto evita el clearCache
+    // posterior y hace que las imágenes mood (y otros assets) se
+    // reutilicen desde el disk cache de Electron entre launches.
+    frontendWasRebuiltThisSession = false;
     _startSplitProcesses(apiKey);
   } else {
-    if (!isDev) {
-      log('Producción — slow-path (reflex run --env prod)');
-    } else if (hasPrecompiled && !isFresh) {
+    if (hasPrecompiled && !isFresh) {
       log('Frontend precompilado pero STALE — slow-path para rebuild');
-    } else if (!hasSirv) {
-      log('sirv-cli no disponible — slow-path');
     } else {
       log('Frontend no precompilado — slow-path para build inicial');
     }
+    // Slow-path = Reflex rebuildea o produce fresh build → assets pueden
+    // tener hashes nuevos → mejor invalidar cache para evitar UI stale.
+    frontendWasRebuiltThisSession = true;
     _startSingleReflexProcess(apiKey);
   }
 }
@@ -813,7 +854,8 @@ function _isFrontendBuildFresh(indexHtmlPath) {
   return true;
 }
 
-// Fast-path: backend Python + frontend sirv como procesos separados.
+// Fast-path: backend Python (--backend-only) + frontend servido por
+// servidor HTTP embebido en este mismo proceso (sin subprocesos).
 function _startSplitProcesses(apiKey) {
   const webDir = path.join(PROJECT_ROOT, '.web');
   const buildDir = path.join(webDir, 'build', 'client');
@@ -832,6 +874,15 @@ function _startSplitProcesses(apiKey) {
       XAI_API_KEY: apiKey,
       ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
       ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
+      // v0.16.14 — fuerza UTF-8 en stdin/stdout/stderr de Python. Sin esto,
+      // si Ashley responde con caracteres no-ASCII (→, emojis, café, etc.) y
+      // ALGÚN print/log los toca, Python en Windows cmd cp1252 lanza
+      // UnicodeEncodeError. Esa excepción se atrapa en _send_message_impl
+      // y dispara el path de error → la respuesta real se pierde y el user
+      // ve "Algo falló: 'charmap' codec can't encode character '→'..."
+      // PYTHONIOENCODING=utf-8 cubre TODOS los prints/logs sin necesidad de
+      // sanitizar cada string a mano.
+      PYTHONIOENCODING: 'utf-8',
     },
     shell: false,
     windowsHide: true,
@@ -840,45 +891,123 @@ function _startSplitProcesses(apiKey) {
   reflexProcess.stderr.on('data', makeLineLogger('reflex', true));
   _wireReflexExitHandlers();
 
-  // ── Frontend estático (sirv lee el build ya hecho) ──
-  // El caller (startReflex) ya verificó que sirv-cli existe antes de
-  // llegar aquí. Si por alguna razón se llamó sin sirv, lanzamos un
-  // error en vez del intento npm que daba spawn EINVAL.
-  const sirvBin = path.join(webDir, 'node_modules', 'sirv-cli', 'bin.js');
-  if (!fs.existsSync(sirvBin)) {
-    throw new Error(
-      `_startSplitProcesses: sirv-cli not found at ${sirvBin}. ` +
-      'This should never happen — the caller must check hasSirv first.'
-    );
-  }
-  const spawnCmd = process.execPath;  // electron como node via ELECTRON_RUN_AS_NODE
-  const spawnArgs = [
-    sirvBin,
-    buildDir,
-    '--single', '404.html',
-    '--host',
-    '--port', String(REFLEX_FRONTEND_PORT),
-  ];
+  // ── Frontend estático (servidor HTTP embebido, NO subproceso) ──
+  // v0.17.3 — Reemplaza sirv-cli. El build de Reflex (.web/build/client/)
+  // es 100% estático (Next.js export con --frontend-only): index.html +
+  // assets hashados + imágenes. Servirlo desde un http.createServer del
+  // propio main.js es:
+  //   • Más rápido (cero spawn overhead)
+  //   • Más confiable (no se cuelga como pasaba con sirv vía Electron-as-node)
+  //   • Cero subprocesos extra (mejora cleanup y debug)
+  //   • Funciona igual en dev y producción
+  embeddedFrontendServer = _startEmbeddedFrontendServer(buildDir, REFLEX_FRONTEND_PORT);
+}
 
-  frontendProcess = spawn(spawnCmd, spawnArgs, {
-    cwd: webDir,
-    env: {
-      ...process.env,
-      PORT: String(REFLEX_FRONTEND_PORT),
-      // ELECTRON_RUN_AS_NODE hace que el proceso node de Electron se comporte
-      // como Node "puro" en vez de abrir otra instancia de Electron.
-      ELECTRON_RUN_AS_NODE: '1',
-    },
-    shell: false,
-    windowsHide: true,
+// ─── Servidor HTTP embebido para el frontend estático ─────────────────────
+//
+// Sirve el build de Reflex (.web/build/client/) sobre HTTP localhost.
+// Implementa lo mínimo que necesita Reflex:
+//   • Servir archivos del directorio (con MIME types correctos)
+//   • SPA fallback: rutas no-archivo → index.html (single-page app routing)
+//   • Cache-Control inmutable para /assets/* (bundles con hash)
+//   • Range requests no necesarios (no servimos vídeos grandes)
+//
+// SEGURIDAD: solo bind a 127.0.0.1, sanitización de path traversal.
+function _startEmbeddedFrontendServer(buildDir, port) {
+  const MIME = {
+    '.html':  'text/html; charset=utf-8',
+    '.htm':   'text/html; charset=utf-8',
+    '.js':    'application/javascript; charset=utf-8',
+    '.mjs':   'application/javascript; charset=utf-8',
+    '.css':   'text/css; charset=utf-8',
+    '.json':  'application/json; charset=utf-8',
+    '.svg':   'image/svg+xml',
+    '.png':   'image/png',
+    '.jpg':   'image/jpeg',
+    '.jpeg':  'image/jpeg',
+    '.gif':   'image/gif',
+    '.webp':  'image/webp',
+    '.ico':   'image/x-icon',
+    '.woff':  'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf':   'font/ttf',
+    '.otf':   'font/otf',
+    '.txt':   'text/plain; charset=utf-8',
+    '.xml':   'application/xml; charset=utf-8',
+    '.map':   'application/json; charset=utf-8',
+  };
+
+  const indexPath = path.join(buildDir, 'index.html');
+
+  function serveFile(res, filePath, urlPath) {
+    fs.stat(filePath, (err, stats) => {
+      if (err || !stats.isFile()) {
+        // Fallback SPA: si el path no existe, servir index.html
+        // para que React Router en el cliente maneje el ruteo.
+        if (filePath !== indexPath) {
+          return serveFile(res, indexPath, urlPath);
+        }
+        res.statusCode = 404;
+        res.end('Not Found');
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+      res.setHeader('Content-Length', stats.size);
+      // Bundles hashados (cualquier cosa en /assets/) son inmutables — el
+      // hash en el nombre garantiza que cambios producen archivos nuevos.
+      // Cache forever, ahorra requests entre launches.
+      if (urlPath.startsWith('/assets/')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (ext === '.html') {
+        // Index siempre fresco — no quiero quedarme con HTML viejo apuntando
+        // a hashes de bundles que el clearCache borró tras un slow-path.
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+      const stream = fs.createReadStream(filePath);
+      stream.pipe(res);
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.end('500');
+        }
+      });
+    });
+  }
+
+  const server = http.createServer((req, res) => {
+    // Parse + sanitizar URL
+    let urlPath = (req.url || '/').split('?')[0].split('#')[0];
+    try { urlPath = decodeURIComponent(urlPath); } catch { /* malformed URI */ }
+    // Anti path-traversal: bloquear .. tras decodificar
+    if (urlPath.includes('..')) {
+      res.statusCode = 400;
+      res.end('Bad Request');
+      return;
+    }
+    // / → index.html
+    if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
+
+    const filePath = path.join(buildDir, urlPath);
+    // Doble check: el path resuelto debe estar dentro de buildDir
+    if (!filePath.startsWith(buildDir)) {
+      res.statusCode = 400;
+      res.end('Bad Request');
+      return;
+    }
+    serveFile(res, filePath, urlPath);
   });
-  frontendProcess.stdout.on('data', makeLineLogger('frontend', false));
-  frontendProcess.stderr.on('data', makeLineLogger('frontend', true));
-  frontendProcess.on('exit', (code, signal) => {
-    log(`Frontend process exited (code=${code}, signal=${signal})`);
-    frontendProcess = null;
+
+  server.on('error', (err) => log(`Embedded frontend server error: ${err.message}`));
+  server.on('clientError', (err, socket) => {
+    log(`Embedded frontend client error: ${err.message}`);
+    try { socket.destroy(); } catch {}
   });
-  frontendProcess.on('error', (err) => log(`Frontend spawn error: ${err.message}`));
+  server.listen(port, '127.0.0.1', () => {
+    log(`Embedded frontend server listening on 127.0.0.1:${port} (serving ${buildDir})`);
+  });
+
+  return server;
 }
 
 // Slow-path original: un solo proceso reflex que compila + sirve todo.
@@ -896,6 +1025,8 @@ function _startSingleReflexProcess(apiKey) {
       XAI_API_KEY: apiKey,
       ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
       ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
+      // v0.16.14 — ver comentario en _startSplitProcesses (mismo motivo).
+      PYTHONIOENCODING: 'utf-8',
     },
     shell: false,
     windowsHide: true,
@@ -943,7 +1074,28 @@ function _wireReflexExitHandlers() {
 }
 
 // ─── Esperar a que Reflex responda ────────────────────────────────────────
+//
+// La URL a hacer polling depende del path que tomamos:
+//
+//   • Fast-path (embedded frontend server activo): el frontend responde
+//     en ms (es nuestro http.createServer), así que polling ese puerto da
+//     un "ready" falso mientras Python sigue arrancando. Hacemos polling
+//     al backend (`/api/whisper/status`) que solo responde cuando Starlette
+//     terminó de cargar — eso indica Python listo de verdad.
+//
+//   • Slow-path (Reflex run --env prod sirve frontend+backend): ambos
+//     arrancan juntos pero Next.js compila más lento. Polling el frontend
+//     garantiza que TODO está listo (Next compiló + Starlette levantó).
+//
+// Polling cada 200ms (antes 600ms) — la fase de "casi listo" es corta y
+// queremos detectar el ready en cuanto pase, no esperar otros 600ms.
 function waitForReflex(timeoutMs) {
+  const targetUrl = embeddedFrontendServer
+    ? `http://127.0.0.1:${REFLEX_BACKEND_PORT}/api/whisper/status`
+    : REFLEX_URL;
+  const pathType = embeddedFrontendServer ? 'fast-path/backend' : 'slow-path/frontend';
+  log(`waitForReflex: polling ${pathType} → ${targetUrl}`);
+
   return new Promise((resolve, reject) => {
     const start = Date.now();
     let done = false;
@@ -951,13 +1103,13 @@ function waitForReflex(timeoutMs) {
     const scheduleRetry = () => {
       if (done) return;
       if (Date.now() - start > timeoutMs) finish(new Error(`Reflex no arrancó en ${timeoutMs}ms`));
-      else setTimeout(check, 600);
+      else setTimeout(check, 200);
     };
     const check = () => {
       if (done) return;
       let settled = false;
       const fail = () => { if (settled) return; settled = true; scheduleRetry(); };
-      const req = http.get(REFLEX_URL, { timeout: 2000 }, (res) => {
+      const req = http.get(targetUrl, { timeout: 2000 }, (res) => {
         res.resume();
         if (settled) return;
         settled = true;
@@ -993,26 +1145,46 @@ function createMainWindow() {
       // explícitamente pasado por contextBridge.exposeInMainWorld().
       sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
+      // v0.16.14 — FIX Bug 2: TTS no sonaba en chat (sí en Settings).
+      // Causa: Chrome autoplay policy. La "transient user activation"
+      // del click en Send dura ~5s, y para cuando el stream termina y
+      // audio.play() se llama, la activación ya expiró → NotAllowedError.
+      // En Settings el "Probar voz" reproduce inmediatamente, por eso
+      // funciona. Solución: en una app desktop como Ashley NO necesitamos
+      // protección anti-autoplay (la app es de confianza, el user la
+      // instaló). Permitimos autoplay sin gesto.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
 
-  // ── Cache buster (v0.13.4) ───────────────────────────────────────────
-  // Electron cachea agresivamente los assets de http://127.0.0.1:<port>.
-  // Cuando actualizamos el frontend (dev o auto-update), el browser puede
-  // seguir sirviendo JS/CSS viejos durante días — los hashes de archivo
-  // cambian pero el cache del navegador no se da cuenta si la respuesta
-  // previa tenía un Cache-Control laxo.
+  // ── Cache buster CONDICIONAL (v0.16.14) ──────────────────────────────
+  // Antes (v0.13.4) hacíamos clearCache() en CADA launch para evitar UI
+  // stale. Pero eso borraba TODO el caché incluidas las imágenes mood
+  // (~2.7MB en JPGs) que se re-descargaban cada vez → flash negro entre
+  // transiciones de mood reportado por el user.
   //
-  // Fix simple: limpiar el disk cache de la session ANTES de cargar la
-  // URL. Cuesta ~20ms y elimina TODA posibilidad de ver UI stale. Los
-  // assets se re-descargan, pero vienen de localhost (instant) así que
-  // el user ni nota la diferencia.
-  mainWindow.webContents.session.clearCache().then(() => {
+  // Ahora: solo clearCache si el frontend SE REBUILDEÓ esta sesión
+  // (slow-path tomó la ruta de rebuild). En fast-path (build precompilado
+  // reusado) los hashes de assets son los mismos que la sesión anterior,
+  // así que el cache es válido y lo conservamos.
+  //
+  // Coste: si el cache cachea contenido muy viejo en algún edge case
+  // que no detectamos vía mtime, podría haber UI stale. Pero el mtime
+  // check de _isFrontendBuildFresh() es robusto: si CUALQUIER .py o
+  // asset cambió, vamos slow-path → clearCache. Es decir, solo no
+  // limpiamos cuando estamos 100% seguros que nada cambió.
+  if (frontendWasRebuiltThisSession) {
+    log('Frontend rebuilt → clearCache (evitar UI stale)');
+    mainWindow.webContents.session.clearCache().then(() => {
+      mainWindow.loadURL(REFLEX_URL);
+    }).catch((err) => {
+      log(`clearCache failed (non-fatal): ${err.message}`);
+      mainWindow.loadURL(REFLEX_URL);
+    });
+  } else {
+    log('Frontend reused (fast-path) → conservar cache (imágenes mood)');
     mainWindow.loadURL(REFLEX_URL);
-  }).catch((err) => {
-    log(`clearCache failed (non-fatal): ${err.message}`);
-    mainWindow.loadURL(REFLEX_URL);
-  });
+  }
 
   // Links externos → navegador del sistema
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1034,6 +1206,9 @@ function createMainWindow() {
 
   hardenWindow(mainWindow);
 
+  // DevTools solo en dev mode (`--dev` flag). En producción se queda
+  // CERRADO al arrancar — el user puede abrirlo a mano con F12 o
+  // Ctrl+Shift+I si lo necesita (no lo bloqueamos, ver hardenWindow).
   if (DEV_MODE) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
@@ -1111,6 +1286,20 @@ function gracefulShutdownBackend() {
 // Así garantizamos cero zombies incluso si Reflex spawn procesos que
 // perdieron a su padre por el camino.
 function killReflex() {
+  // v0.17.3 — Cerrar servidor HTTP embebido primero. Vive en este proceso,
+  // así que basta con server.close() para liberar el puerto. Si NO lo
+  // cerramos antes de spawn restart, el puerto queda en TIME_WAIT y la
+  // próxima sesión tarda en encontrar puerto libre.
+  if (embeddedFrontendServer) {
+    try {
+      embeddedFrontendServer.close();
+      log('Embedded frontend server cerrado');
+    } catch (err) {
+      log(`Error cerrando embedded frontend server: ${err.message}`);
+    }
+    embeddedFrontendServer = null;
+  }
+
   const backendPid = reflexProcess && !reflexProcess.killed ? reflexProcess.pid : null;
   const frontendPid = frontendProcess && !frontendProcess.killed ? frontendProcess.pid : null;
   const pidsToKill = [backendPid, frontendPid].filter(Boolean);
@@ -1314,7 +1503,13 @@ app.whenReady().then(async () => {
   try {
     // 1. Resolver API key (puede disparar onboarding)
     const apiKey = await resolveApiKey();
-    if (!apiKey) throw new Error('No hay API key disponible');
+    // v0.16.14 — apiKey puede ser '' si el user eligió "skip key" en
+    // onboarding (va a usar Ollama). En ese caso disclosure está
+    // aceptado y arrancamos sin clave. Solo throw si NI hay clave NI
+    // disclosure (caso anómalo: cancelaron onboarding).
+    if (!apiKey && !disclosureAccepted()) {
+      throw new Error('No hay API key disponible');
+    }
 
     // 2. Splash mientras Reflex arranca
     createSplash();

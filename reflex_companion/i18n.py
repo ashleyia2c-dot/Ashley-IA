@@ -129,6 +129,9 @@ UI = {
         "settings_voicevox_url_hint": "Install VoiceVox from voicevox.hiroshiba.jp and run the engine.",
         "settings_voicevox_speaker_label": "VoiceVox speaker ID",
         "settings_voicevox_speaker_hint": "Numeric ID (e.g. 1, 2, 3). See the VoiceVox Engine for full list.",
+        # v0.16.14 — voice speed slider
+        "settings_voice_speed_label": "Voice speed",
+        "settings_voice_speed_hint": "How fast Ashley talks. 1.0 = normal, 1.5 = clearly faster, 0.75 = slower. Applied natively when the provider supports it (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); falls back to browser playback rate.",
 
         # Quick menu labels (header dropdown ⚙) — cortos para no truncar
         "menu_tts":          "Voice",
@@ -341,6 +344,9 @@ UI = {
         "settings_voicevox_url_hint": "Instala VoiceVox desde voicevox.hiroshiba.jp y arranca el motor.",
         "settings_voicevox_speaker_label": "ID del speaker VoiceVox",
         "settings_voicevox_speaker_hint": "ID numérico (p.ej. 1, 2, 3). Consulta el motor para la lista completa.",
+        # v0.16.14 — slider velocidad de voz
+        "settings_voice_speed_label": "Velocidad de la voz",
+        "settings_voice_speed_hint": "Cuán rápido habla Ashley. 1.0 = normal, 1.5 = claramente más rápido, 0.75 = más lento. Aplicado nativamente cuando el provider lo soporta (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); fallback al playbackRate del navegador.",
 
         # Quick menu labels
         "menu_tts":          "Voz",
@@ -547,6 +553,9 @@ UI = {
         "settings_voicevox_url_hint": "Installe VoiceVox depuis voicevox.hiroshiba.jp et lance le moteur.",
         "settings_voicevox_speaker_label": "ID du speaker VoiceVox",
         "settings_voicevox_speaker_hint": "ID numérique (ex. 1, 2, 3). Voir le moteur VoiceVox pour la liste complète.",
+        # v0.16.14 — slider vitesse de voix
+        "settings_voice_speed_label": "Vitesse de la voix",
+        "settings_voice_speed_hint": "À quelle vitesse Ashley parle. 1.0 = normal, 1.5 = nettement plus rapide, 0.75 = plus lent. Appliqué nativement quand le provider le supporte (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); sinon fallback playbackRate navigateur.",
 
         # Quick menu labels
         "menu_tts":          "Voix",
@@ -960,6 +969,11 @@ def load_voice_config() -> dict:
         # Ashley mantiene un loop de mic en background con el modelo local
         # ashley.onnx — al oír "Ashley" arranca grabación STT sola.
         "wake_word_enabled": False,
+        # Velocidad de la voz (v0.16.14). 1.0 = normal. >1 = más rápido,
+        # <1 = más lento. Aplicada server-side donde el provider lo soporta
+        # (ElevenLabs turbo_v2_5, Kokoro, VoiceVox); cliente fallback con
+        # audio.playbackRate. Range UI: 0.75-1.5 (más allá suena artificial).
+        "voice_speed": 1.0,
     }
     data = load_json(VOICE_FILE, None)
     if data is None:
@@ -988,6 +1002,9 @@ def load_voice_config() -> dict:
             "discovery_enabled": bool(data.get("discovery_enabled", False)),
             "cdp_enabled": bool(data.get("cdp_enabled", False)),
             "wake_word_enabled": bool(data.get("wake_word_enabled", False)),
+            # Clamp en lectura: si alguien edita voice.json con un valor
+            # absurdo, tope a un rango razonable.
+            "voice_speed": max(0.5, min(2.0, float(data.get("voice_speed", 1.0) or 1.0))),
         }
     except Exception:
         return default
@@ -1006,7 +1023,8 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       voicevox_speaker: str = "1",
                       discovery_enabled: bool = False,
                       cdp_enabled: bool = False,
-                      wake_word_enabled: bool = False) -> None:
+                      wake_word_enabled: bool = False,
+                      voice_speed: float = 1.0) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
     entera. Con save_json atómico + .bak, nunca pasa."""
@@ -1030,6 +1048,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "discovery_enabled": bool(discovery_enabled),
             "cdp_enabled": bool(cdp_enabled),
             "wake_word_enabled": bool(wake_word_enabled),
+            "voice_speed": max(0.5, min(2.0, float(voice_speed or 1.0))),
         })
     except Exception as e:
         import logging

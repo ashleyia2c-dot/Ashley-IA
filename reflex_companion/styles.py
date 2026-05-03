@@ -62,8 +62,11 @@ def global_styles():
     position: fixed;
     pointer-events: none;
     z-index: 0;
-    will-change: transform, opacity;
-    filter: blur(80px);
+    /* v0.16.14 — Quitado `will-change: transform, opacity` y reducido
+       blur de 80px → 30px. El blur(80px) sobre elementos a 70vw/60vw =
+       millones de pixels procesados por frame × 3 capas × 60fps.
+       30px sigue dando el efecto suave de halo/vela sin matar la GPU. */
+    filter: blur(30px);
   }}
   .ambient-glow-1 {{
     top: -15vh; left: -10vw;
@@ -347,27 +350,28 @@ def global_styles():
                 ("leather" — distinto pero todavía warm boutique)
      Ambos siguen siendo cálidos, pero el contraste de tono (púrpura
      vs ocre) es claro de un vistazo. */
+  /* v0.16.14 — REMOVIDO backdrop-filter de las burbujas. Era el principal
+     causante de tirones al scrollear: con 50 burbujas en el chat, cada
+     scroll frame el compositor recalculaba 50 blur masks. Las burbujas
+     ya tenían background con alpha 0.82 sobre fondo casi negro, así que
+     visualmente la diferencia es mínima — pero el scroll va MUCHO más
+     fluido. Mantenemos el blur solo en .glass-chat (panel padre, una
+     sola instancia, no se multiplica) y en .ashley-input-pill. */
   .bubble-ashley {{
-    position: relative;  /* para que ::before del tail se posicione */
+    position: relative;
     background: linear-gradient(135deg,
-      rgba(50, 26, 38, 0.82) 0%,
-      rgba(40, 20, 32, 0.82) 100%) !important;
-    backdrop-filter: blur(14px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+      rgba(50, 26, 38, 0.92) 0%,
+      rgba(40, 20, 32, 0.92) 100%) !important;
     border: 1px solid rgba(212,163,115, 0.22) !important;
     box-shadow: 0 4px 20px rgba(0,0,0,0.30),
                 inset 0 1px 0 rgba(232,220,196,0.06) !important;
-    /* v0.16.7 — texto más brillante para mejor contraste sobre fondo
-       chat negro. Antes #e8dcc4, ahora #f5ebd5 (más blanco-crema). */
     color: #f5ebd5 !important;
   }}
   .bubble-user {{
-    position: relative;  /* para tail */
+    position: relative;
     background: linear-gradient(135deg,
-      rgba(82, 55, 38, 0.78) 0%,
-      rgba(64, 42, 28, 0.78) 100%) !important;
-    backdrop-filter: blur(14px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+      rgba(82, 55, 38, 0.92) 0%,
+      rgba(64, 42, 28, 0.92) 100%) !important;
     border: 1px solid rgba(232,202,158, 0.30) !important;
     box-shadow: 0 4px 22px rgba(0,0,0,0.30),
                 inset 0 1px 0 rgba(255,235,200,0.10) !important;
@@ -420,7 +424,17 @@ def global_styles():
     border-right: 1px solid rgba(212,163,115,0.10);
   }}
 
-  /* Imagen mood que llena el panel — con vignette y spotlight */
+  /* Imagen mood que llena el panel — con vignette y spotlight.
+     v0.16.14 — Fix anti-flash entre transiciones de mood se logra
+     ÚNICAMENTE via JS preload (preloadMoodImages en ashley_fx.js) que
+     mete las 10 imágenes en el cache del browser al arranque. Cuando
+     React cambia el inline backgroundImage, el browser ya tiene la
+     imagen → swap instantáneo, sin flash.
+     INTENTO PREVIO (revertido): añadir aquí background-color y un
+     fallback `background-image: url(...)` rompía el inline style en
+     producción — el panel se quedaba completamente negro. La imagen
+     real viene del inline style en components.py (rx.box con
+     style.backgroundImage). */
   .ashley-mood-image {{
     position: absolute;
     inset: 0;
@@ -753,9 +767,14 @@ def global_styles():
       rgba(212,163,115,0.08) 35%,
       transparent 65%);
     pointer-events: none;
-    filter: blur(50px);
+    /* v0.16.14 — blur(50px) → blur(25px). Halo grande (max 800px) con
+       blur extremo era costoso por frame de animación. 25px sigue dando
+       el efecto soft. */
+    filter: blur(25px);
     z-index: 1;
-    animation: portraitHaloPulse 6s ease-in-out infinite;
+    /* Animación 6s → 12s: misma sensación de "respiración suave" pero
+       60% menos repaints por minuto. */
+    animation: portraitHaloPulse 12s ease-in-out infinite;
   }}
   @keyframes portraitHaloPulse {{
     0%, 100% {{ opacity: 0.7; }}
@@ -890,6 +909,10 @@ def global_styles():
     overflow-y: auto;
     padding: 24px 36px;
     min-height: 0;
+    /* v0.16.14 — sin promoción manual a capa GPU. Los hints de
+       composición forzada en este container provocan subpixel jumps
+       al scrollear (saltitos visibles). Con el blur quitado de las
+       burbujas (fix #1) el scroll va fluido sin necesidad de forzarlo. */
   }}
 
   .ashley-chat-input-row {{

@@ -3,165 +3,318 @@
 <head>
   <meta charset="UTF-8">
   <title>Ashley — Initial setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    /* v0.16.14 — restyle: boutique noir matching la app principal.
+       Antes: negro + rosa fucsia + Segoe UI plano (estilo dev).
+       Ahora: vinos profundos + ámbar dorado + Cormorant Garamond
+       serif para "Ashley" branding. Mismas decisiones que el chat
+       principal para que el user sienta continuidad desde el
+       primer momento. */
     * { box-sizing: border-box; }
+
+    :root {
+      --bg-deep:      #0d060a;
+      --bg-panel:     rgba(30, 14, 22, 0.55);
+      --bg-input:     rgba(15, 7, 12, 0.85);
+      --border-soft:  rgba(212, 163, 115, 0.18);
+      --border-mid:   rgba(212, 163, 115, 0.32);
+      --border-hot:   rgba(232, 202, 158, 0.55);
+      --text-bright:  #f5ebd5;
+      --text-mid:     #c4b3a4;
+      --text-soft:    #8a7a6b;
+      --accent:       #e8ca9e;
+      --accent-warm:  #d4a373;
+      --shadow-deep:  0 12px 48px rgba(0, 0, 0, 0.65);
+    }
+
     body {
       margin: 0;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      background: #0a0a0a;
-      color: #e8e8e8;
-      padding: 28px 32px;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg-deep);
+      color: var(--text-bright);
+      padding: 32px 38px 28px;
       user-select: none;
       height: 100vh;
       overflow-y: auto;
+      position: relative;
+      letter-spacing: 0.005em;
     }
+
+    /* Capas de luz ambient — réplica suave del estilo del main app */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20vh; left: -10vw;
+      width: 70vw; height: 70vh;
+      background: radial-gradient(ellipse,
+        rgba(212,163,115,0.16) 0%,
+        rgba(212,163,115,0.06) 40%,
+        transparent 65%);
+      filter: blur(35px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -15vh; right: -10vw;
+      width: 60vw; height: 60vh;
+      background: radial-gradient(ellipse,
+        rgba(140, 60, 70, 0.12) 0%,
+        rgba(140, 60, 70, 0.05) 40%,
+        transparent 65%);
+      filter: blur(35px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Todo el contenido encima de los glows */
+    .lang-toggle, h1, .subtitle, section, .actions {
+      position: relative;
+      z-index: 1;
+    }
+
     .lang-toggle {
       position: absolute;
-      top: 14px;
-      right: 18px;
+      top: 18px;
+      right: 22px;
       display: flex;
-      gap: 4px;
-      background: #141414;
-      border: 1px solid #2a2a2a;
+      gap: 2px;
+      background: rgba(20, 8, 14, 0.7);
+      border: 1px solid var(--border-soft);
       border-radius: 99px;
       padding: 3px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
     .lang-toggle button {
       background: transparent;
       border: none;
-      color: #888;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-weight: 700;
+      color: var(--text-soft);
+      padding: 5px 12px;
+      font-size: 10.5px;
+      font-weight: 600;
       border-radius: 99px;
       cursor: pointer;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
+      transition: color 0.18s ease, background 0.18s ease;
+      font-family: inherit;
     }
+    .lang-toggle button:hover { color: var(--text-mid); }
     .lang-toggle button.active {
-      background: #ff9aee;
-      color: #0a0a0a;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-warm) 100%);
+      color: var(--bg-deep);
     }
+
     h1 {
       margin: 0 0 4px;
-      color: #ff9aee;
-      font-size: 26px;
-      font-weight: 400;
-      letter-spacing: 1px;
+      color: var(--accent);
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 38px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      line-height: 1.1;
+      text-shadow: 0 2px 24px rgba(232, 202, 158, 0.18);
     }
     .subtitle {
-      color: #888;
-      font-size: 13px;
-      margin-bottom: 22px;
+      color: var(--text-soft);
+      font-size: 12.5px;
+      margin-bottom: 26px;
+      letter-spacing: 0.04em;
+      font-style: italic;
     }
+
     section {
-      background: #141414;
-      border: 1px solid #2a2a2a;
-      border-radius: 8px;
-      padding: 16px 18px;
-      margin-bottom: 16px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-soft);
+      border-radius: 14px;
+      padding: 18px 22px;
+      margin-bottom: 14px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28),
+                  inset 0 1px 0 rgba(232, 220, 196, 0.04);
     }
     section h2 {
-      margin: 0 0 10px;
-      font-size: 14px;
-      color: #ff9aee;
-      font-weight: 500;
-      letter-spacing: 0.5px;
+      margin: 0 0 12px;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
+      font-family: 'Inter', sans-serif;
     }
+
     .perm-list {
       list-style: none;
       padding: 0;
       margin: 0;
       font-size: 13px;
-      line-height: 1.55;
-      color: #ccc;
+      line-height: 1.65;
+      color: var(--text-mid);
     }
     .perm-list li {
-      padding: 4px 0 4px 18px;
+      padding: 3px 0 3px 22px;
       position: relative;
     }
     .perm-list li::before {
-      content: "▸";
-      color: #ff9aee;
+      content: "◆";
+      color: var(--accent-warm);
       position: absolute;
       left: 0;
+      font-size: 9px;
+      top: 9px;
+      opacity: 0.85;
     }
+
     .privacy {
-      font-size: 12px;
-      color: #999;
-      line-height: 1.5;
+      font-size: 12.5px;
+      color: var(--text-mid);
+      line-height: 1.6;
     }
-    .privacy strong { color: #ddd; }
+    .privacy strong { color: var(--text-bright); font-weight: 600; }
+
     label {
       display: block;
-      font-size: 13px;
-      margin-bottom: 8px;
-      color: #bbb;
+      font-size: 12.5px;
+      margin-bottom: 10px;
+      color: var(--text-mid);
+      letter-spacing: 0.01em;
     }
+    label code {
+      background: rgba(232, 202, 158, 0.1);
+      color: var(--accent);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: 'Consolas', 'SF Mono', monospace;
+    }
+
     input[type="password"], input[type="text"] {
       width: 100%;
-      padding: 10px 12px;
-      background: #0a0a0a;
-      border: 1px solid #333;
-      border-radius: 6px;
-      color: #fff;
+      padding: 11px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-mid);
+      border-radius: 8px;
+      color: var(--text-bright);
       font-size: 13px;
-      font-family: 'Consolas', monospace;
+      font-family: 'Consolas', 'SF Mono', monospace;
       user-select: text;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      letter-spacing: 0.02em;
     }
+    input::placeholder { color: var(--text-soft); opacity: 0.6; }
     input:focus {
       outline: none;
-      border-color: #ff9aee;
+      border-color: var(--border-hot);
+      box-shadow: 0 0 0 3px rgba(232, 202, 158, 0.08);
     }
+
     .hint {
-      font-size: 11px;
-      color: #666;
-      margin-top: 6px;
+      font-size: 11.5px;
+      color: var(--text-soft);
+      margin-top: 8px;
+      line-height: 1.55;
     }
-    .hint a { color: #ff9aee; text-decoration: none; cursor: pointer; }
-    .hint a:hover { text-decoration: underline; }
+    .hint a {
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      border-bottom: 1px dotted rgba(232, 202, 158, 0.4);
+      transition: color 0.18s ease, border-color 0.18s ease;
+    }
+    .hint a:hover {
+      color: #f5ebd5;
+      border-bottom-color: var(--accent);
+    }
+
     .actions {
       display: flex;
       justify-content: flex-end;
-      gap: 10px;
-      margin-top: 20px;
+      gap: 12px;
+      margin-top: 24px;
     }
+
     button {
-      padding: 10px 20px;
+      padding: 11px 22px;
       border: none;
-      border-radius: 6px;
-      font-size: 13px;
+      border-radius: 10px;
+      font-size: 12.5px;
       cursor: pointer;
-      font-weight: 500;
-      transition: all 0.15s;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      transition: all 0.2s ease;
+      font-family: 'Inter', sans-serif;
     }
     button.primary {
-      background: #ff9aee;
-      color: #0a0a0a;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-warm) 100%);
+      color: var(--bg-deep);
+      box-shadow: 0 4px 18px rgba(232, 202, 158, 0.25),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.2);
     }
     button.primary:hover:not(:disabled) {
-      background: #ffb8f5;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 22px rgba(232, 202, 158, 0.35),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.25);
     }
+    button.primary:active:not(:disabled) { transform: translateY(0); }
     button.primary:disabled {
-      background: #333;
-      color: #666;
+      background: rgba(40, 28, 22, 0.6);
+      color: var(--text-soft);
       cursor: not-allowed;
+      box-shadow: none;
     }
+
     button.secondary {
       background: transparent;
-      color: #aaa;
-      border: 1px solid #333;
+      color: var(--text-mid);
+      border: 1px solid var(--border-mid);
     }
-    button.secondary:hover { background: #1a1a1a; color: #ddd; }
+    button.secondary:hover {
+      background: rgba(212, 163, 115, 0.06);
+      color: var(--text-bright);
+      border-color: var(--border-hot);
+    }
+
     .checkbox-row {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      margin-top: 12px;
+      gap: 12px;
+      margin-top: 14px;
       font-size: 12px;
-      color: #bbb;
+      color: var(--text-mid);
+      line-height: 1.5;
     }
-    .checkbox-row input { margin-top: 3px; }
+    .checkbox-row input[type="checkbox"] {
+      margin-top: 2px;
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .checkbox-row label { margin: 0; cursor: pointer; }
+
+    /* Custom scrollbar warm */
+    body::-webkit-scrollbar { width: 6px; }
+    body::-webkit-scrollbar-track { background: transparent; }
+    body::-webkit-scrollbar-thumb {
+      background: rgba(212, 163, 115, 0.18);
+      border-radius: 6px;
+    }
+    body::-webkit-scrollbar-thumb:hover {
+      background: rgba(212, 163, 115, 0.32);
+    }
+
+    /* Fade-in suave de la página entera */
+    body { animation: pageEnter 0.5s ease-out; }
+    @keyframes pageEnter {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -185,10 +338,15 @@
   </section>
 
   <section>
-    <h2 id="h-key">Your xAI API key</h2>
-    <label for="api-key" id="key-label">Paste your key (starts with <code>xai-</code>):</label>
-    <input type="password" id="api-key" placeholder="xai-..." spellcheck="false" autocomplete="off">
+    <h2 id="h-key">Your AI provider key</h2>
+    <label for="api-key" id="key-label">Paste a key for xAI (Grok) or OpenRouter, or skip for Ollama:</label>
+    <input type="password" id="api-key" placeholder="xai-... / sk-or-..." spellcheck="false" autocomplete="off">
     <div class="hint" id="key-hint"></div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="skip-key">
+      <label for="skip-key" id="skip-label" style="margin:0;"></label>
+    </div>
 
     <div class="checkbox-row">
       <input type="checkbox" id="accept-terms">
@@ -208,19 +366,22 @@
         subtitle: "First-run setup",
         hPerms: "What Ashley can do",
         perms: [
-          "Read titles of open windows and browser tabs",
-          "Open and close applications, browser tabs and windows",
-          "Control keyboard and mouse when you ask for specific actions",
-          "Take screenshots when you request them",
-          "Control system volume",
-          "Search information on the internet to answer you"
+          "Real conversation with long-term memory of you (facts, diary, preferences)",
+          "Voice — listens via offline Whisper, speaks via ElevenLabs / Kokoro / VoiceVox / Web Speech",
+          "Wake word — say \"Ashley\" and she activates hands-free",
+          "Sees your screen when you allow it (vision-aware responses)",
+          "Acts on your PC — opens apps, closes tabs, controls volume, types, takes screenshots",
+          "Searches the web to answer you (when web search is enabled)",
+          "Multi-language: English, Spanish, French",
+          "Achievements, affection system, mood, narrative gestures",
         ],
         hPrivacy: "Privacy",
-        privacy: "Ashley runs <strong>locally</strong> on your machine. Your history, facts and diary are saved in your user folder — <strong>never sent to external servers</strong>.<br><br>The <strong>only external service</strong> Ashley calls is the xAI (Grok) API to generate responses. That requires your own API key.",
-        hKey: "Your xAI API key",
-        keyLabel: "Paste your key (starts with <code>xai-</code>):",
-        keyHint: 'Don\'t have one? Get it at <a id="get-key-link">console.x.ai</a> — it will be encrypted on your device with DPAPI (never leaves your PC).',
-        termsLabel: "I understand what Ashley can do and I authorize the use of my API key to generate responses.",
+        privacy: "Ashley runs <strong>locally</strong> on your machine. Your chat history, facts, diary and preferences live in your user folder — <strong>never sent to our servers</strong> (we don't have any).<br><br><strong>Choose your AI provider</strong>: <strong>xAI (Grok)</strong> or <strong>OpenRouter</strong> (cloud, fast — pay per use with your own key) or <strong>Ollama</strong> (100% local, free, no key needed). You can switch between them anytime in Settings.<br><br>If you use a cloud provider, your messages go directly to them under their privacy policy — Ashley never proxies through us.",
+        hKey: "Your AI provider key",
+        keyLabel: "Paste a key for <code>xAI</code> (Grok) or <code>OpenRouter</code>, or skip for Ollama:",
+        keyHint: 'Don\'t have a key? Get a Grok one at <a id="get-key-link">console.x.ai</a> or an OpenRouter one at <a id="get-or-key-link">openrouter.ai</a>. Either way, the key is encrypted on your device with Windows DPAPI and never leaves your PC. <strong>Or check the box below</strong> to start with Ollama (free, fully local, no key needed) and configure later in Settings.',
+        skipLabel: "I'll use Ollama (free, local) — skip API key for now",
+        termsLabel: "I understand what Ashley can do and I authorize her to use my chosen AI provider to generate responses.",
         cancel: "Cancel",
         submit: "Accept and start",
       },
@@ -229,19 +390,22 @@
         subtitle: "Configuración de primera ejecución",
         hPerms: "Lo que Ashley puede hacer",
         perms: [
-          "Leer títulos de ventanas y pestañas abiertas del navegador",
-          "Abrir y cerrar aplicaciones, pestañas del navegador y ventanas",
-          "Controlar teclado y ratón cuando le pides acciones concretas",
-          "Tomar capturas de pantalla si se lo solicitas",
-          "Controlar volumen del sistema",
-          "Buscar información en internet para responderte"
+          "Conversación real con memoria a largo plazo de ti (hechos, diario, preferencias)",
+          "Voz — escucha vía Whisper offline, habla vía ElevenLabs / Kokoro / VoiceVox / Voz Windows",
+          "Wake word — di \"Ashley\" y se activa sin tocar nada",
+          "Ve tu pantalla cuando lo autorizas (respuestas conscientes del contexto)",
+          "Actúa en tu PC — abre apps, cierra pestañas, controla volumen, escribe, captura pantalla",
+          "Busca en internet para responderte (cuando activas búsqueda web)",
+          "Multilenguaje: español, inglés, francés",
+          "Logros, sistema de afecto, mood, narrativa con gestos",
         ],
         hPrivacy: "Privacidad",
-        privacy: "Ashley se ejecuta <strong>localmente</strong> en tu equipo. Tu historial, facts y diario se guardan en tu carpeta de usuario — <strong>nunca se envían a servidores externos</strong>.<br><br>El <strong>único servicio externo</strong> al que Ashley llama es la API de xAI (Grok) para generar respuestas. Eso requiere tu propia clave de API.",
-        hKey: "Tu clave de API de xAI",
-        keyLabel: "Pega tu clave (empieza por <code>xai-</code>):",
-        keyHint: '¿No tienes una? Consíguela en <a id="get-key-link">console.x.ai</a> — se guardará cifrada en tu equipo con DPAPI (no viaja a ningún sitio).',
-        termsLabel: "Entiendo lo que Ashley puede hacer y autorizo el uso de mi clave de API para generar respuestas.",
+        privacy: "Ashley se ejecuta <strong>localmente</strong> en tu equipo. Tu historial, hechos, diario y preferencias se guardan en tu carpeta de usuario — <strong>nunca se envían a nuestros servidores</strong> (no tenemos).<br><br><strong>Eliges tu proveedor de IA</strong>: <strong>xAI (Grok)</strong> u <strong>OpenRouter</strong> (cloud, rápidos — pagas por uso con tu propia clave) u <strong>Ollama</strong> (100% local, gratis, sin clave). Puedes cambiar entre ellos cuando quieras desde Ajustes.<br><br>Si usas un proveedor cloud, tus mensajes van directamente a ellos bajo su política de privacidad — Ashley nunca hace de intermediario.",
+        hKey: "Clave de tu proveedor de IA",
+        keyLabel: "Pega una clave de <code>xAI</code> (Grok) u <code>OpenRouter</code>, o sáltatelo si vas a usar Ollama:",
+        keyHint: '¿No tienes clave? Consigue una de Grok en <a id="get-key-link">console.x.ai</a> o una de OpenRouter en <a id="get-or-key-link">openrouter.ai</a>. En ambos casos, la clave se cifra en tu equipo con Windows DPAPI y no viaja a ningún sitio. <strong>O marca la casilla de abajo</strong> para empezar con Ollama (gratis, local total, sin clave) y configurarlo después en Ajustes.',
+        skipLabel: "Voy a usar Ollama (gratis, local) — saltarme la clave por ahora",
+        termsLabel: "Entiendo lo que Ashley puede hacer y autorizo que use el proveedor de IA que elija para generar respuestas.",
         cancel: "Cancelar",
         submit: "Aceptar y arrancar",
       },
@@ -250,19 +414,22 @@
         subtitle: "Configuration au premier lancement",
         hPerms: "Ce qu'Ashley peut faire",
         perms: [
-          "Lire les titres des fenêtres et onglets ouverts du navigateur",
-          "Ouvrir et fermer des applications, onglets et fenêtres",
-          "Contrôler le clavier et la souris quand tu demandes des actions précises",
-          "Prendre des captures d'écran si tu le demandes",
-          "Contrôler le volume système",
-          "Chercher des infos sur Internet pour te répondre"
+          "Conversation réelle avec mémoire long terme de toi (faits, journal, préférences)",
+          "Voix — écoute via Whisper hors-ligne, parle via ElevenLabs / Kokoro / VoiceVox / Voix Windows",
+          "Mot-clé d'activation — dis \"Ashley\" et elle s'active mains libres",
+          "Voit ton écran quand tu l'autorises (réponses contextuelles)",
+          "Agit sur ton PC — ouvre apps, ferme onglets, contrôle le volume, tape, capture écran",
+          "Cherche sur Internet pour te répondre (quand la recherche web est activée)",
+          "Multilingue : français, anglais, espagnol",
+          "Succès, système d'affection, humeur, narration avec gestes",
         ],
         hPrivacy: "Confidentialité",
-        privacy: "Ashley s'exécute <strong>localement</strong> sur ta machine. Ton historique, tes faits et ton journal sont sauvegardés dans ton dossier utilisateur — <strong>jamais envoyés à des serveurs externes</strong>.<br><br>Le <strong>seul service externe</strong> qu'Ashley appelle est l'API xAI (Grok) pour générer les réponses. Ça nécessite ta propre clé d'API.",
-        hKey: "Ta clé d'API xAI",
-        keyLabel: "Colle ta clé (commence par <code>xai-</code>) :",
-        keyHint: "Tu n'en as pas ? Récupère-la sur <a id=\"get-key-link\">console.x.ai</a> — elle sera chiffrée sur ton appareil avec DPAPI (elle ne quitte pas ton PC).",
-        termsLabel: "Je comprends ce qu'Ashley peut faire et j'autorise l'utilisation de ma clé d'API pour générer des réponses.",
+        privacy: "Ashley s'exécute <strong>localement</strong> sur ta machine. Ton historique, faits, journal et préférences vivent dans ton dossier utilisateur — <strong>jamais envoyés à nos serveurs</strong> (on n'en a pas).<br><br><strong>Choisis ton fournisseur d'IA</strong> : <strong>xAI (Grok)</strong> ou <strong>OpenRouter</strong> (cloud, rapides — paiement à l'usage avec ta propre clé) ou <strong>Ollama</strong> (100% local, gratuit, sans clé). Tu peux switcher quand tu veux dans les Réglages.<br><br>Si tu utilises un fournisseur cloud, tes messages vont directement chez eux sous leur politique de confidentialité — Ashley ne fait jamais d'intermédiaire.",
+        hKey: "Clé de ton fournisseur d'IA",
+        keyLabel: "Colle une clé pour <code>xAI</code> (Grok) ou <code>OpenRouter</code>, ou saute pour Ollama :",
+        keyHint: "Pas de clé ? Récupère-en une de Grok sur <a id=\"get-key-link\">console.x.ai</a> ou d'OpenRouter sur <a id=\"get-or-key-link\">openrouter.ai</a>. Dans tous les cas, la clé est chiffrée sur ton appareil avec Windows DPAPI et ne quitte pas ton PC. <strong>Ou coche la case ci-dessous</strong> pour démarrer avec Ollama (gratuit, 100% local, sans clé) et le configurer ensuite dans les Réglages.",
+        skipLabel: "Je vais utiliser Ollama (gratuit, local) — sauter la clé pour l'instant",
+        termsLabel: "Je comprends ce qu'Ashley peut faire et j'autorise l'utilisation du fournisseur d'IA que je choisis pour générer les réponses.",
         cancel: "Annuler",
         submit: "Accepter et démarrer",
       },
@@ -283,6 +450,7 @@
       document.getElementById('privacy-text').innerHTML = S.privacy;
       document.getElementById('key-label').innerHTML = S.keyLabel;
       document.getElementById('key-hint').innerHTML = S.keyHint;
+      document.getElementById('skip-label').textContent = S.skipLabel;
       document.getElementById('terms-label').textContent = S.termsLabel;
       document.getElementById('cancel').textContent = S.cancel;
       document.getElementById('submit').textContent = S.submit;
@@ -296,12 +464,19 @@
         ul.appendChild(li);
       }
 
-      // Rewire link
+      // Rewire links — xAI key + OpenRouter key
       const link = document.getElementById('get-key-link');
       if (link) {
         link.addEventListener('click', (e) => {
           e.preventDefault();
           window.open('https://console.x.ai');
+        });
+      }
+      const orLink = document.getElementById('get-or-key-link');
+      if (orLink) {
+        orLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          window.open('https://openrouter.ai');
         });
       }
 
@@ -319,22 +494,43 @@
 
     const keyInput = document.getElementById('api-key');
     const acceptBox = document.getElementById('accept-terms');
+    const skipBox = document.getElementById('skip-key');
     const submitBtn = document.getElementById('submit');
     const cancelBtn = document.getElementById('cancel');
 
     function validate() {
+      // v0.16.14 — el user puede:
+      //   A) pegar una clave (xAI o OpenRouter) + aceptar términos, O
+      //   B) marcar "skip key" (irá a Ollama) + aceptar términos.
+      // Aceptamos ambas claves: xAI (xai-...) y OpenRouter (sk-or-...).
+      // El validador solo comprueba que la clave parece razonable, no
+      // valida formato exacto del provider.
       const key = keyInput.value.trim();
-      const looksOk = key.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(key);
-      submitBtn.disabled = !(looksOk && acceptBox.checked);
+      const skip = skipBox.checked;
+      const keyLooksOk = key.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(key);
+      const canSubmit = (skip || keyLooksOk) && acceptBox.checked;
+      submitBtn.disabled = !canSubmit;
+
+      // UX: si marca skip, el input se deshabilita visualmente
+      keyInput.disabled = skip;
+      keyInput.style.opacity = skip ? '0.4' : '1';
     }
 
     keyInput.addEventListener('input', validate);
     acceptBox.addEventListener('change', validate);
+    skipBox.addEventListener('change', validate);
 
     submitBtn.addEventListener('click', () => {
+      const skip = skipBox.checked;
       const key = keyInput.value.trim();
-      if (!key) return;
-      window.ashleyAPI.submit({ apiKey: key, language: currentLang });
+      // Si skip está marcado, mandamos apiKey vacío. main.js lo trata
+      // como "user va a usar Ollama" — aún se completa el onboarding.
+      if (!skip && !key) return;
+      window.ashleyAPI.submit({
+        apiKey: skip ? '' : key,
+        language: currentLang,
+        skipKey: skip,
+      });
     });
 
     cancelBtn.addEventListener('click', () => {

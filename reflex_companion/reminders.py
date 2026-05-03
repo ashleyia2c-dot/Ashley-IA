@@ -210,13 +210,39 @@ def add_important(text: str, due_date: str | None = None) -> str:
 
 
 def mark_important_done(text_or_id: str) -> str:
-    """Marca un importante como hecho por id o texto parcial."""
+    """Marca un importante como hecho por id o texto parcial.
+
+    Returns:
+        - "Marcado como hecho: '<texto>'." si encontró un item PENDIENTE y lo marcó.
+        - "" (string vacío) si el match fue contra un item que YA estaba hecho.
+          Es el "señal de no-op" — el caller debe suprimir notificación.
+        - "No encontré ..." si no hubo ningún match (ni done ni pendiente).
+
+    El string vacío como señal de no-op evita el bug v0.17.2 donde Ashley
+    re-emitía [action:done_important:X] varias veces sobre el mismo item y
+    el user veía 3-4 notificaciones "Marcado como hecho" idénticas.
+
+    Si hay múltiples items que matchean el mismo texto y algunos están
+    done y otros no, marcamos el primer pendiente. Solo devolvemos noop
+    si TODOS los matches estaban ya done.
+    """
     items = load_important()
+    saw_done_match = False
     for item in items:
-        if item["id"] == text_or_id or text_or_id.lower() in item["text"].lower():
-            item["done"] = True
-            _save(IMPORTANT_FILE, items)
-            return f"Marcado como hecho: '{item['text']}'."
+        text_match = text_or_id.lower() in item["text"].lower()
+        id_match = item["id"] == text_or_id
+        if not (text_match or id_match):
+            continue
+        if item.get("done"):
+            saw_done_match = True
+            continue  # skip done, busca match pendiente
+        # Primer match pendiente: marca y devuelve
+        item["done"] = True
+        _save(IMPORTANT_FILE, items)
+        return f"Marcado como hecho: '{item['text']}'."
+    # No hubo match pendiente
+    if saw_done_match:
+        return ""  # noop signal — caller suprime notificación
     return f"No encontré '{text_or_id}' en la lista de importantes."
 
 

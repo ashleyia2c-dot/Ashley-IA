@@ -85,13 +85,18 @@ MAX_HISTORY_MESSAGES = 50
 MAX_FACTS = 300
 MESSAGES_PER_EXTRACTION = 40
 SESSION_TIMEOUT_MINUTES = 30
-STREAM_CHUNK_SIZE = 1  # v0.16.13 — 3 → 1 para stream maximamente fluido.
-                       # Yield al UI cada chunk del LLM, sin agrupación.
-                       # El cost es nº yields = nº chunks (~50-200 por
-                       # respuesta), trivial en CPU; el beneficio es que
-                       # cada token aparece en pantalla en ms, no en
-                       # ráfagas de 3. Siente más natural / "máquina de
-                       # escribir" en lugar de saltos.
+STREAM_CHUNK_SIZE = 2  # v0.16.14 — 4 → 2 (revisión final).
+                       # Probamos 4 (4× menos WebSocket pushes vs el 1
+                       # original) y aunque la app va fluida, los
+                       # tokens se ven en "pedacitos" — el user reportó
+                       # que se ve feo. CHUNK_SIZE=2 es el sweet spot:
+                       # - 2× menos pushes vs el original CHUNK_SIZE=1
+                       # - Visual cercano al "máquina de escribir"
+                       #   porque 2 tokens = ~6-8 chars = ratio similar
+                       #   a leer normal.
+                       # Cada yield sigue serializando el state delta
+                       # (~10KB) → con 2 tokens/yield y respuestas de
+                       # 200 tokens = 100 pushes/respuesta. Manejable.
 
 # ─────────────────────────────────────────────
 #  Colores

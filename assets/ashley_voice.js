@@ -28,6 +28,10 @@
     // Everything except webspeech is handled server-side via /api/tts;
     // webspeech is handled in-browser via SpeechSynthesis.
     voiceProvider: 'webspeech',
+    // v0.16.14: velocidad de la voz. 1.0 = normal. Para Web Speech va en
+    // utterance.rate; para backend providers se aplica server-side via
+    // voice.json (ya leído por /api/tts).
+    voiceSpeed: 1.0,
     backendPort: '',            // resolved from DOM marker; empty = error
 
     mediaStream: null,
@@ -488,7 +492,8 @@
         window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = this.lang === 'es' ? 'es-ES' : 'en-US';
-        u.rate = 1.0;
+        // v0.16.14 — usa voiceSpeed configurable en lugar de hardcoded 1.0.
+        u.rate = Math.max(0.5, Math.min(2.0, this.voiceSpeed || 1.0));
         u.pitch = 1.08;
         const v = this._pickWebVoice();
         if (v) u.voice = v;
@@ -537,8 +542,42 @@
         this.stopSpeaking();
         const audio = new Audio(obj);
         this.currentAudio = audio;
-        audio.play().catch((e) => warn('audio.play():', e));
+        // v0.16.14 — speed cliente-side via playbackRate. ElevenLabs
+        // multilingual_v2 NO soporta `speed` server-side, así que
+        // aplicamos el time-stretch del browser. Funciona universalmente
+        // con cualquier provider/modelo. Range 0.5-2.0; >1.5 empieza a
+        // sonar artificial pero <1.3 es transparente.
+        //
+        // CRÍTICO: solo asignamos playbackRate si difiere de 1.0. Asignar
+        // playbackRate ANTES de loadedmetadata puede tener side effects
+        // sutiles en algunas builds de Chromium. Si el user no movió el
+        // slider, comportamiento idéntico al pre-v0.16.14.
+        const speed = Math.max(0.5, Math.min(2.0, this.voiceSpeed || 1.0));
+        if (Math.abs(speed - 1.0) > 0.001) {
+          // Set in loadedmetadata para que el audio lo aplique correctamente
+          // sin race condition con la decodificación inicial.
+          audio.addEventListener('loadedmetadata', () => {
+            audio.playbackRate = speed;
+          }, { once: true });
+        }
+        // Diagnóstico v0.16.14 — ver qué pasa con play()
+        const playPromise = audio.play();
+        if (playPromise && playPromise.then) {
+          playPromise.then(
+            () => log('audio.play() RESOLVED — playbackRate=' + speed),
+            (e) => {
+              warn('audio.play() REJECTED:', (e && e.name) + ': ' + (e && e.message));
+              // Si fue NotAllowedError (autoplay policy), fallback a Web
+              // Speech para que el user al menos escuche algo.
+              if (e && e.name === 'NotAllowedError') {
+                warn('Autoplay bloqueado — fallback a Web Speech');
+                this._speakWebSpeech(text);
+              }
+            }
+          );
+        }
         audio.onended = () => {
+          log('audio onended');
           URL.revokeObjectURL(obj);
           if (this.currentAudio === audio) this.currentAudio = null;
         };
@@ -564,7 +603,14 @@
     },
 
     speak(text) {
-      if (!this.ttsEnabled) return;
+      // Diagnóstico v0.16.14 — log todo para identificar dónde se rompe
+      log('speak() called. ttsEnabled=' + this.ttsEnabled +
+          ', provider=' + this.voiceProvider +
+          ', text=' + (text || '').slice(0, 50) + '...');
+      if (!this.ttsEnabled) {
+        log('speak() ABORTED: ttsEnabled is false');
+        return;
+      }
       this._doSpeak(text);
     },
 
@@ -609,30 +655,72 @@
       if (!box) return;
       const msgs = box.querySelectorAll('.ashley-msg');
 
-      // Primer tick: baseline del historial existente, SIN leer nada.
-      // Evita que Ashley "lea" el último mensaje al abrir la app
-      // (gastaría tokens de ElevenLabs inútilmente).
+      // v0.16.14 — Bootstrap con TIMESTAMP ABSOLUTO. El bug original:
+      //   tick 1 (t=0):   msgs.length=0 (Reflex aún no hidrató historial)
+      //   tick 2 (t=500): msgs.length=0 (Reflex sigue cargando)
+      //   tick 3 (t=1500): msgs.length=N (historial cargado)
+      //   N > 0 → LEE EL ÚLTIMO MENSAJE DEL HISTORIAL
+      // Solución: esperar 3 segundos absolutos desde init() antes de
+      // tomar baseline. Reflex hidrata en <3s en cualquier máquina
+      // razonable.
+      const now = Date.now();
+      if (!this._bootstrapDeadline) {
+        this._bootstrapDeadline = now + 3000;
+      }
       if (!this._bootstrapped) {
-        this._prevMessageCount = msgs.length;
+        if (now < this._bootstrapDeadline) {
+          return;
+        }
+        // 3s+ desde init: tomar baseline del CONTENIDO del último ashley-msg
+        // (no del count). El count cambia poco fiablemente cuando
+        // MAX_HISTORY_MESSAGES trima mensajes viejos: si el trim borra 1
+        // ashley + 1 user, el count se queda igual aunque haya un nuevo
+        // mensaje de Ashley. Detectamos por contenido textual del último.
+        const latestEl = msgs.length ? msgs[msgs.length - 1] : null;
+        this._lastAshleyText = latestEl
+          ? (latestEl.textContent || '').trim()
+          : '';
         this._bootstrapped = true;
-        log('TTS observer bootstrapped with', msgs.length, 'existing messages (not reading)');
+        log('TTS observer bootstrapped after 3s with', msgs.length,
+            'existing messages, lastTextLen=' + this._lastAshleyText.length);
         return;
       }
 
-      if (!this.ttsEnabled) return;
-      if (this._isStreaming()) return;
-      if (msgs.length === 0 || msgs.length <= this._prevMessageCount) return;
+      // Detectar transición streaming on/off (cursor-blink desaparece).
+      const streamingNow = this._isStreaming();
+      if (this._wasStreaming && !streamingNow) {
+        log('TTS observer: stream just ENDED. ashleyMsgCount=' + msgs.length);
+      }
+      if (!this._wasStreaming && streamingNow) {
+        log('TTS observer: stream just STARTED. ashleyMsgCount=' + msgs.length);
+      }
+      this._wasStreaming = streamingNow;
 
-      // Hay un mensaje nuevo desde el último tick → lo leemos
-      this._prevMessageCount = msgs.length;
+      if (!this.ttsEnabled) return;
+      if (streamingNow) return;
+      if (msgs.length === 0) return;
+
+      // FIX v0.16.14 (Bug B): comparar por CONTENIDO del último mensaje,
+      // no por count. Cuando MAX_HISTORY_MESSAGES trima los mensajes
+      // viejos, el count puede quedar igual aunque haya respuesta nueva.
+      // El contenido del ÚLTIMO ashley-msg sí cambia siempre que hay una
+      // respuesta nueva (el nuevo mensaje pasa al final).
       const latest = msgs[msgs.length - 1];
       const text = (latest.textContent || '').trim();
-      if (text) this.speak(text);
+      if (!text) return;
+      if (text === this._lastAshleyText) return;
+
+      // Es un mensaje nuevo (texto diferente del último que vimos)
+      log('TTS: nuevo .ashley-msg detectado (textChanged), llamando speak()');
+      this._lastAshleyText = text;
+      this.speak(text);
     },
 
     _syncFromState() {
       const el = document.getElementById('ashley-voice-state');
       if (!el) return;
+      const prevTTS = this.ttsEnabled;
+      const prevProvider = this.voiceProvider;
       this.lang = el.getAttribute('data-lang') || 'en';
       this.ttsEnabled = (el.getAttribute('data-tts') || 'off') === 'on';
       this.elevenKey = el.getAttribute('data-el-key') || '';
@@ -640,9 +728,19 @@
       // v0.12: which backend voices Ashley? Defaults to webspeech if missing.
       const provider = (el.getAttribute('data-voice-provider') || '').toLowerCase();
       this.voiceProvider = provider || 'webspeech';
+      // v0.16.14 — voice_speed para Web Speech (utterance.rate). Para
+      // backend providers el speed va via el endpoint /api/tts.
+      const speedRaw = parseFloat(el.getAttribute('data-voice-speed') || '1');
+      this.voiceSpeed = isFinite(speedRaw) ? Math.max(0.5, Math.min(2.0, speedRaw)) : 1.0;
       this.backendPort = el.getAttribute('data-backend-port') || '';
       if (!this.backendPort) {
         warn('No backend port found in DOM marker — STT/TTS will fail');
+      }
+      // Diagnóstico v0.16.14: solo logueamos si cambia tts o provider
+      if (prevTTS !== this.ttsEnabled || prevProvider !== this.voiceProvider) {
+        log('_syncFromState: ttsEnabled=' + this.ttsEnabled +
+            ', provider=' + this.voiceProvider +
+            ', voiceSpeed=' + this.voiceSpeed);
       }
       if (!this.ttsEnabled) this.stopSpeaking();
     },
@@ -760,7 +858,11 @@
 
       // El observer se auto-boostrapea en el primer tick (ver _tickObserver):
       // toma baseline del historial SIN leer, y solo lee mensajes nuevos.
-      setInterval(() => this._tickObserver(), 500);
+      // v0.16.14 — 500ms→1000ms. textContent reads son layout-trigger;
+      // doblando el intervalo reducimos la competición con el scroll.
+      // 1000ms de delay para detectar mensaje nuevo es imperceptible
+      // (TTS empieza a hablar 1s tras render — sigue siendo "instantáneo").
+      setInterval(() => this._tickObserver(), 1000);
     },
   };
 

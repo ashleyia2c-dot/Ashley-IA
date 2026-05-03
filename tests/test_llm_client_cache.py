@@ -220,13 +220,24 @@ class TestCallersUseCache:
 class TestPerformanceConfig:
     """Constantes que afectan latencia percibida."""
 
-    def test_stream_chunk_size_is_one(self):
-        """STREAM_CHUNK_SIZE=1 → yield al UI cada token (mantequilla).
-        Si alguien lo sube, los tokens aparecen en ráfagas y se siente lag."""
+    def test_stream_chunk_size_is_reasonable(self):
+        """STREAM_CHUNK_SIZE controla cuántos tokens del LLM se acumulan
+        antes de hacer yield al UI. Cada yield serializa el state delta
+        ENTERO y lo manda por WebSocket.
+
+        v0.16.14 — subido de 1 a 4. Con CHUNK_SIZE=1 y 200 tokens por
+        respuesta: 200 pushes × 10KB de state = 2MB por respuesta + 200
+        React reconciliations. Causaba lag perceptible en PCs potentes.
+
+        Rango razonable: 2-8.
+        - <2: demasiados pushes/lag
+        - >8: el agrupamiento se nota como ráfagas
+        """
         from reflex_companion.config import STREAM_CHUNK_SIZE
-        assert STREAM_CHUNK_SIZE == 1, (
-            f"STREAM_CHUNK_SIZE={STREAM_CHUNK_SIZE}; debe ser 1 para "
-            f"yield cada token y que la respuesta se sienta fluida."
+        assert 2 <= STREAM_CHUNK_SIZE <= 8, (
+            f"STREAM_CHUNK_SIZE={STREAM_CHUNK_SIZE} fuera del rango [2-8]. "
+            f"Demasiado bajo: lag por WebSocket spam. Demasiado alto: "
+            f"ráfagas de tokens visibles."
         )
 
     def test_regen_after_new_msgs_is_at_least_15(self):

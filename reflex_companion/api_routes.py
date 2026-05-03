@@ -152,7 +152,15 @@ class _TTSError(Exception):
 
 
 def _tts_elevenlabs(text: str, cfg: dict) -> tuple[bytes, str]:
-    """Call ElevenLabs TTS API and return (audio_bytes, 'audio/mpeg')."""
+    """Call ElevenLabs TTS API and return (audio_bytes, 'audio/mpeg').
+
+    v0.16.14 — REVERTIDO al modelo eleven_multilingual_v2 que el user
+    venía usando y funcionaba bien. El experimento con eleven_turbo_v2_5
+    se hizo para soportar `speed` server-side, pero rompía la
+    reproducción para algunos voice_ids del user (audio se recibía pero
+    no sonaba). La velocidad ahora se aplica cliente-side via
+    audio.playbackRate (universal, funciona con cualquier modelo).
+    """
     from . import i18n as _i18n
     key = (cfg.get("elevenlabs_key") or "").strip()
     voice_id = (cfg.get("voice_id") or _i18n.DEFAULT_VOICE_ID).strip() or _i18n.DEFAULT_VOICE_ID
@@ -202,12 +210,15 @@ def _tts_kokoro(text: str, cfg: dict) -> tuple[bytes, str]:
     """
     base = (cfg.get("kokoro_url") or "http://localhost:8880").rstrip("/")
     voice = (cfg.get("kokoro_voice") or "af_bella").strip() or "af_bella"
+    # Speed (v0.16.14): Kokoro acepta range 0.25-4.0. Clamp pragmático.
+    speed = max(0.5, min(2.0, float(cfg.get("voice_speed", 1.0) or 1.0)))
     url = f"{base}/v1/audio/speech"
     payload = _json.dumps({
         "model": "kokoro",
         "voice": voice,
         "input": text,
         "response_format": "mp3",
+        "speed": speed,
     }).encode("utf-8")
     req = _urlreq.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json",
@@ -259,6 +270,17 @@ def _tts_voicevox(text: str, cfg: dict) -> tuple[bytes, str]:
         raise _TTSError(502, "unreachable",
             f"VoiceVox engine not reachable at {base}. Install from "
             f"voicevox.hiroshiba.jp and run the engine. ({e})")
+
+    # Inyectar speedScale en el audio_query (v0.16.14). VoiceVox acepta
+    # range 0.5-2.0. Clamp aquí para evitar 422.
+    try:
+        speed = max(0.5, min(2.0, float(cfg.get("voice_speed", 1.0) or 1.0)))
+        if abs(speed - 1.0) > 1e-3:
+            _q = _json.loads(audio_query.decode("utf-8"))
+            _q["speedScale"] = speed
+            audio_query = _json.dumps(_q).encode("utf-8")
+    except Exception:
+        pass
 
     # Step 2: synthesis — produces WAV
     synth_url = f"{base}/synthesis?speaker={_urlparse.quote(speaker)}"

@@ -1853,9 +1853,16 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "done_important":
+            # v0.17.3 — Si el item ya estaba marcado, mark_important_done
+            # devuelve "" (señal de no-op). Propagamos noop=True para que
+            # _execute_and_record_action suprima la notificación duplicada
+            # en el chat. Antes Ashley re-emitía el tag varias veces sobre
+            # el mismo item y el user veía 3-4 "Marcado como hecho" iguales
+            # seguidos.
             from .reminders import mark_important_done
             text = params[0] if params else ""
-            return {"success": True, "result": mark_important_done(text),
+            msg = mark_important_done(text)
+            return {"success": True, "result": msg, "noop": (msg == ""),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "save_taste":

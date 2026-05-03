@@ -74,6 +74,32 @@ def clean_display(text: str) -> str:
     text = re.sub(r'\[(?:mood|action|affection)[^\]]*$', '', text, flags=re.IGNORECASE)
     # Captura variantes extra: a veces el LLM añade espacios o mayúsculas
     text = re.sub(r'\[\s*affection\s*:\s*[^\]]*\]', '', text, flags=re.IGNORECASE)
+    # ── Bug C (v0.16.14) — tags BARE sin prefijo "action:" ──────────────
+    # Caso real reportado: Ashley emitió "[save_taste:proyectos:mejorando
+    # voz de Ashley]" SIN el prefijo "action:". El regex anterior solo
+    # pillaba "[action:save_taste:...]" así que el tag bare quedaba
+    # visible en el bubble. Listamos los action types conocidos y los
+    # eliminamos también en formato bare. Lista sincronizada con
+    # actions.py::execute_action.
+    _BARE_ACTION_TYPES = (
+        # Sistema
+        "screenshot", "open_app", "play_music", "search_web", "open_url",
+        "volume", "type_text", "type_in", "write_to_app", "focus_window",
+        "hotkey", "press_key", "close_window", "close_tab",
+        # Browser CDP
+        "click", "type_browser", "read_page", "scroll_page",
+        # Safe (no requieren toggle de acciones)
+        "remind", "add_important", "done_important", "save_taste",
+    )
+    _bare_action_re = (
+        r'\[\s*(?:' + '|'.join(_BARE_ACTION_TYPES) + r')\s*:[^\]]*\]'
+    )
+    text = re.sub(_bare_action_re, '', text, flags=re.IGNORECASE)
+    # Variante parcial al final (durante streaming): "[save_taste:proye"
+    _bare_action_partial = (
+        r'\[\s*(?:' + '|'.join(_BARE_ACTION_TYPES) + r')\s*:[^\]]*$'
+    )
+    text = re.sub(_bare_action_partial, '', text, flags=re.IGNORECASE)
     # Elimina "undefined" suelto (renderizado roto de Reflex) — cubre casos
     # con variaciones de capitalización y también cuando aparece pegado a
     # puntuación sin whitespace (ej. "frase.undefined").
@@ -116,6 +142,25 @@ def clean_display(text: str) -> str:
     # Backtick único suelto al final (residuo de cleanup previo).
     # Igual: solo si el carácter anterior no es otro backtick.
     text = re.sub(r'\n*[ \t]*(?<!`)`\s*$', '', text)
+    # ── Meta-narrativa sobre acciones (red de seguridad v0.16.14) ──
+    # A veces el LLM verbaliza su decisión interna sobre acciones —
+    # típicamente al final de la respuesta, en inglés aunque la conversación
+    # sea en otro idioma. El user reportó "No actions needed." apareciendo
+    # tras una respuesta en español. El prompt YA tiene instrucción
+    # explícita de no hacerlo, pero como red de seguridad lo filtramos
+    # post-stream también. Patrones cortos típicos en EN/ES/FR.
+    _META_ACTION_PATTERNS = [
+        r'\bno\s+actions?\s+(?:needed|required|necessary|to\s+take|to\s+execute)\.?\s*',
+        r'\bnothing\s+to\s+do\s+here\.?\s*',
+        r'\bno\s+action\s+is\s+(?:needed|required)\.?\s*',
+        r'\bno\s+(?:se\s+)?necesita(?:n)?\s+acci[oó]n(?:es)?\.?\s*',
+        r'\bno\s+(?:hay|requiere)\s+acci[oó]n(?:es)?\.?\s*',
+        r'\bsin\s+acci[oó]n(?:es)?\s+que\s+(?:ejecutar|tomar)\.?\s*',
+        r'\bpas\s+d[\'’]action\s+(?:n[eé]cessaire|requise)\.?\s*',
+        r'\baucune\s+action\s+(?:requise|n[eé]cessaire)\.?\s*',
+    ]
+    for _pat in _META_ACTION_PATTERNS:
+        text = re.sub(_pat, '', text, flags=re.IGNORECASE)
     # Elimina líneas vacías consecutivas que quedan tras limpiar tags
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()

@@ -426,73 +426,136 @@
 
   /* ══════════════════════════════════════════
      AUTO-SCROLL + SOUND TRIGGERS
+     ─────────────────────────────────────────
+     v0.16.14 — REESCRITO COMPLETO desde cero.
+     ─────────────────────────────────────────
+     Los intentos previos de fix incremental dejaban el scroll con
+     "saltitos" o "atascándose al subir". Causa: lógica acumulada de
+     múltiples revisiones (initial polling + STICK_MARGIN + observer +
+     userHasScrolled flag + programmatic flag + scrollHeight guard) se
+     contradecía entre sí.
+     ─────────────────────────────────────────
+     PROTOCOLO LIMPIO (1 source of truth):
+     ─────────────────────────────────────────
+     Estado: una sola variable `_following` (boolean).
+       • TRUE  = user quiere ver siempre el último mensaje
+       • FALSE = user está leyendo arriba, no le movemos
+     ─────────────────────────────────────────
+     Cómo se actualiza `_following`:
+       • Solo en eventos `scroll` originados por el USER
+       • Si tras el scroll el user está dentro de NEAR_BOTTOM_PX del
+         fondo, _following=true. Si no, false.
+     ─────────────────────────────────────────
+     Cómo distinguimos scroll del user vs programático:
+       • Cuando NOSOTROS hacemos scrollTop=X, ponemos `_suppressUntil=now+50ms`.
+       • Mientras now < _suppressUntil, ignoramos eventos `scroll` (son
+         consecuencia de NUESTRO set, no del user).
+       • 50ms cubre el delay típico entre set y evento en Chromium.
+     ─────────────────────────────────────────
+     Cuándo auto-scrollear:
+       • Solo cuando _following=true Y scrollHeight creció (= contenido
+         nuevo). Coalescido a 1 scroll por frame con rAF.
+     ─────────────────────────────────────────
+     Initial position:
+       • Una sola pasada de scroll-to-bottom al inicio (al detectar el
+         container) + retry cuando fonts.ready (cambia altos).
+       • SIN polling agresivo de 3s. Si el user empieza a scrollear, no
+         hay nadie peleándole.
   ══════════════════════════════════════════ */
   function initObservers() {
     var msgsBox = document.getElementById('chat_messages');
     if (!msgsBox) { setTimeout(initObservers, 300); return; }
 
-    // v0.16.5 fix scroll: en el layout nuevo el id `chat_messages` vive
-    // en el vstack INTERNO (sin overflow). El scroll real ocurre en el
-    // ancestro con clase `.ashley-chat-scroll` (overflow-y:auto). Antes
-    // hacíamos `chat_messages.scrollTop = scrollHeight` lo que era
-    // un no-op porque ese elemento no scrollea — por eso el chat al
-    // abrir aparecía arriba del todo.
-    //
-    // closest() camina hacia arriba y encuentra el primer ancestor con
-    // la clase. Si por alguna razón no existe (layout futuro), caemos
-    // al box original como fallback.
+    // El scroll real ocurre en el ancestro con clase `.ashley-chat-scroll`
+    // (overflow-y:auto). msgsBox es el vstack interno sin overflow.
     var box = msgsBox.closest('.ashley-chat-scroll') || msgsBox;
 
-    // Auto-scroll inteligente — solo pega al fondo si el user YA estaba
-    // cerca del fondo. Si el user scrolleó arriba (para releer algo),
-    // respetamos su posición y NO le pegamos abajo cuando Ashley actualiza
-    // su mensaje en stream. Cuando el user vuelve cerca del fondo
-    // (scroll manual o navegando), volvemos al modo "stick".
-    var stickToBottom = true;
-    var STICK_MARGIN_PX = 80;  // dentro de 80px del fondo = "stuck"
-
-    function recomputeStick() {
-      var distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
-      stickToBottom = distanceFromBottom < STICK_MARGIN_PX;
+    // Defensa: si el ancestor no tiene overflow real, scrollTop= no hace
+    // nada y _isAtBottom() siempre devuelve true. Avisamos por consola
+    // para diagnosticar layouts futuros donde el closest() falle.
+    if (!box || box.scrollHeight === box.clientHeight) {
+      console.warn('[ashley-fx] .ashley-chat-scroll no tiene overflow — auto-scroll será no-op');
     }
 
-    // Scroll listeners en el container scrollable (no en chat_messages).
-    box.addEventListener('scroll', recomputeStick, { passive: true });
-    box.addEventListener('wheel', function () {
-      setTimeout(recomputeStick, 0);
+    // ── Constantes ─────────────────────────────────────────────
+    // NEAR_BOTTOM_PX: margen para considerar "en el fondo".
+    //   60 = ~2 líneas de texto. Pequeño suficiente para que scroll-up
+    //   genuino desactive follow, grande suficiente para que touchpad
+    //   momentum no re-engage erróneamente.
+    var NEAR_BOTTOM_PX = 60;
+    // SUPPRESS_MS: ventana ignorando scroll events post-programático.
+    //   150 cubre el delay del evento `scroll` resultante de scrollTop=X
+    //   incluso bajo heavy React reconciliation (frame budget de 50-100ms
+    //   durante streaming). Coste: 150ms de ventana donde scroll del user
+    //   se ignora — aceptable vs. race conditions con frames lentos.
+    var SUPPRESS_MS = 150;
+
+    // ── Estado ─────────────────────────────────────────────────
+    var _following = true;                       // ¿queremos mantener al user en el fondo?
+    var _suppressUntil = 0;                      // timestamp hasta cuando ignoramos scroll events
+    var _lastScrollHeight = box.scrollHeight;    // para detectar crecimiento real (init con valor real, no 0)
+    var _scrollPending = false;                  // rAF debounce flag
+
+    function _isAtBottom() {
+      return box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM_PX;
+    }
+
+    function _scrollToBottom() {
+      _suppressUntil = Date.now() + SUPPRESS_MS;
+      box.scrollTop = box.scrollHeight;
+      _lastScrollHeight = box.scrollHeight;
+    }
+
+    // ── Listener de scroll (solo del USER actualiza _following) ─
+    box.addEventListener('scroll', function () {
+      if (Date.now() < _suppressUntil) return;  // scroll programático nuestro
+      _following = _isAtBottom();
     }, { passive: true });
 
-    // El observer mira mutations sobre msgsBox (donde se añaden los
-    // .msg-enter) pero la acción de scroll se aplica al container.
+    // ── Initial scroll ─────────────────────────────────────────
+    // Una sola pasada al inicio. _following=true por defecto, así que
+    // si el contenido sigue creciendo (font.ready, imágenes async, etc.)
+    // el observer auto-sigue al fondo.
+    // CRÍTICO: hacer ESTO ANTES de attach el observer para que la primera
+    // mutation no encuentre _lastScrollHeight stale.
+    _scrollToBottom();
+
+    // ── API pública del auto-scroll ────────────────────────────
+    // Expuesto para que otras partes del JS (optimistic UI, etc.)
+    // puedan re-anclarse al fondo sin desincronizar _following.
+    // Ej.: cuando el user pulsa Send, queremos garantizar que está
+    // siguiendo el stream de Ashley aunque hubiera scrolleado arriba
+    // antes de enviar — su intent al pulsar Send es "ver la respuesta".
+    window.__ashleyScroll = {
+      forceFollow: function () {
+        _following = true;
+        _scrollToBottom();
+      },
+      isFollowing: function () { return _following; },
+    };
+
+    // ── MutationObserver: dispara auto-scroll cuando crece el contenido ─
+    // Throttle con rAF + guard de scrollHeight: ignoramos mutations que
+    // no cambian el tamaño del contenido (Reflex puede mandar re-renders
+    // sin cambio real → sin esto causaría saltitos).
     var scrollObs = new MutationObserver(function () {
-      if (stickToBottom) {
-        box.scrollTop = box.scrollHeight;
-      }
+      if (!_following || _scrollPending) return;
+      _scrollPending = true;
+      requestAnimationFrame(function () {
+        _scrollPending = false;
+        if (!_following) return;
+        var h = box.scrollHeight;
+        if (h <= _lastScrollHeight) return;  // no creció = no hay nada nuevo
+        _scrollToBottom();
+      });
     });
     scrollObs.observe(msgsBox, { childList: true, subtree: true, characterData: true });
 
-    // v0.16.5 — Initial scroll polling más agresivo (40 intentos × 75ms
-    // = 3s) y aplicado al container correcto. React puede seguir
-    // renderizando mensajes durante el primer segundo, y los assets
-    // de imagen (avatar, mood-image) cambian el scrollHeight cuando
-    // cargan — necesitamos seguir empujando al fondo durante un rato.
-    var _initialScrollAttempts = 0;
-    function _initialScroll() {
-      box.scrollTop = box.scrollHeight;
-      _initialScrollAttempts++;
-      if (_initialScrollAttempts < 40) {
-        setTimeout(_initialScroll, 75);
-      }
-    }
-    _initialScroll();
-    stickToBottom = true;
-
-    // Re-trigger initial scroll cuando la fuente principal (Cormorant
-    // Garamond) termina de cargar — eso re-mide los altos de las
-    // burbujas y puede haber cambiado el scrollHeight.
+    // Cuando Cormorant Garamond termina de cargar, los altos de las
+    // burbujas pueden cambiar → re-anclamos al fondo (si _following).
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(function () {
-        box.scrollTop = box.scrollHeight;
+        if (_following) _scrollToBottom();
       }).catch(function () {});
     }
 
@@ -540,10 +603,13 @@
       // perdía los mensajes y los sonidos no disparaban.
       msgObs.observe(box, { childList: true, subtree: true });
 
-      // Thinking / streaming → lightweight 100 ms poll.
+      // Thinking / streaming → polling para detectar inicio.
       // v0.16.5 fix: el selector era `.avatar-thinking` que no existe
       // en la UI nueva (la clase real es `.portrait-thinking` en el
       // avatar de Ashley). Por eso playThinking() jamás disparaba.
+      // v0.16.14 — 100ms→250ms. 250ms de delay percibido para sonido
+      // thinking/writing es invisible al user. Reduce wakeups del main
+      // thread de 10/s a 4/s = 60% menos competición con scroll.
       setInterval(function () {
         var isThink  = !!document.querySelector('.portrait-thinking');
         var isStream = !!document.querySelector('.cursor-blink');
@@ -551,7 +617,7 @@
         if (isStream && !prevStream) playWriting();
         prevThink  = isThink;
         prevStream = isStream;
-      }, 100);
+      }, 250);
 
     }, 600);
   }
@@ -644,9 +710,19 @@
       try { playSend(); } catch (_e) {}
     }
 
-    // Scroll al fondo.
-    var scrollBox = box.closest('.ashley-chat-scroll') || box;
-    scrollBox.scrollTop = scrollBox.scrollHeight;
+    // v0.16.14 — Forzamos _following=true vía la API pública del
+    // auto-scroll. El user al pulsar Send tiene intent claro: "ver la
+    // respuesta de Ashley". Antes hacíamos scrollTop=scrollHeight
+    // directo, pero eso descoordinaba el flag _following del observer
+    // si el user había scrolleado arriba antes (ej. para releer algo)
+    // y se le quedaba "pegado" sin auto-seguir el stream.
+    if (window.__ashleyScroll && window.__ashleyScroll.forceFollow) {
+      window.__ashleyScroll.forceFollow();
+    } else {
+      // Fallback si por algún motivo el auto-scroll no se inicializó
+      var scrollBox = box.closest('.ashley-chat-scroll') || box;
+      scrollBox.scrollTop = scrollBox.scrollHeight;
+    }
   }
 
   // Borra todos los fakes activos. Llamada por el observer cuando
@@ -1175,7 +1251,7 @@
 
       _lastAffection = current;
       _lastTier = newTier;
-    }, 500);
+    }, 1500);  // v0.16.14 — 500ms→1500ms. Affection cambia raro, no necesita polling rápido.
   }
 
 
@@ -1195,7 +1271,7 @@
         _lastAchievementToast = current;
         playAchievement();
       }
-    }, 300);
+    }, 1000);  // v0.16.14 — 300ms→1000ms. Achievements son raros, sonar 700ms tarde es imperceptible.
   }
 
 
@@ -1301,11 +1377,41 @@
 
 
   /* ══════════════════════════════════════════
+     PRELOAD MOOD IMAGES
+     ─────────────────────────────────────────
+     v0.16.14 — Bug reportado por user: cuando la imagen 2D de Ashley
+     cambia de mood (default → thinking → writing → excited → ...), entre
+     la transición se ve el panel completamente NEGRO durante 100-300ms.
+     Causa: el browser tarda en cargar la imagen JPG la primera vez que
+     la pide, y mientras tanto el background-image queda vacío.
+     Fix: precargamos TODAS las imágenes de mood al arranque mediante
+     `new Image()`. Una vez instanciadas, el browser las cachea. Cambiar
+     `background-image: url(...)` a una imagen cacheada es instantáneo.
+  ══════════════════════════════════════════ */
+  function preloadMoodImages() {
+    var moods = [
+      'pfp', 'thinking', 'writing', 'searching',
+      'excited', 'embarrassed', 'tsundere', 'soft',
+      'surprised', 'proud',
+    ];
+    moods.forEach(function (m) {
+      var img = new Image();
+      img.src = '/ashley_' + m + '.jpg';
+      // Mantenemos referencias para que el GC no las descarte antes de
+      // que estén cacheadas. Las metemos en window para que persistan
+      // mientras la app esté abierta.
+      window.__ashleyPreloadedImages = window.__ashleyPreloadedImages || [];
+      window.__ashleyPreloadedImages.push(img);
+    });
+  }
+
+  /* ══════════════════════════════════════════
      BOOT
   ══════════════════════════════════════════ */
   function boot() {
     // v0.16 — starfield desactivado en el rediseño boutique noir.
     // initStarfield();
+    preloadMoodImages();       // v0.16.14 — cachear imágenes mood
     initTextarea();
     initObservers();
     initInteractiveSounds();  // v0.16.5 — hover/click sounds

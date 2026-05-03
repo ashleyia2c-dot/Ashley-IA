@@ -196,6 +196,91 @@ def test_mark_important_done_not_found():
     assert "no encontr" in result_msg.lower() or "nonexistent" in result_msg.lower()
 
 
+# ── Idempotencia (v0.17.3) ───────────────────────────────────────────────────
+# Bug observado en v0.17.2: Ashley re-emitía [action:done_important:X] varias
+# veces sobre el mismo item. mark_important_done devolvía "Marcado como hecho"
+# cada vez → el user veía 3-4 notificaciones duplicadas. Ahora el segundo+
+# call sobre un item ya done devuelve "" (señal de no-op) que el caller
+# usa para suprimir la notificación.
+
+
+def test_mark_important_done_returns_empty_on_already_done():
+    """Segundo call sobre item ya hecho devuelve string vacío (señal noop)."""
+    reminders.add_important("Task X")
+    entry = reminders.load_important()[0]
+
+    # Primer call: marca y devuelve mensaje
+    msg1 = reminders.mark_important_done(entry["id"])
+    assert msg1 != "", "Primer call debería devolver mensaje no-vacío"
+    assert "hecho" in msg1.lower()
+
+    # Segundo call sobre el mismo item: noop, devuelve ""
+    msg2 = reminders.mark_important_done(entry["id"])
+    assert msg2 == "", (
+        f"Segundo call sobre item ya done debe devolver '' (noop signal). "
+        f"Got: {msg2!r}"
+    )
+
+    # Estado no debería cambiar al segundo call (defensive check)
+    reloaded = reminders.load_important()
+    assert reloaded[0]["done"] is True
+
+
+def test_mark_important_done_partial_text_idempotent():
+    """Idempotencia también funciona con match parcial por texto."""
+    reminders.add_important("Buy groceries on Monday")
+
+    # Marcar primera vez
+    msg1 = reminders.mark_important_done("groceries")
+    assert "hecho" in msg1.lower()
+
+    # Re-emit: debe ser noop
+    msg2 = reminders.mark_important_done("groceries")
+    assert msg2 == ""
+
+    # Y otra forma de match (más texto): también noop
+    msg3 = reminders.mark_important_done("Buy groceries on Monday")
+    assert msg3 == ""
+
+
+def test_mark_important_done_picks_pending_over_done():
+    """Si hay items done Y pending matching, marca el pending (no devuelve noop).
+
+    Caso edge: usuario tiene "Buy milk" (done de la semana pasada) y
+    crea "Buy milk" otra vez (nuevo). Ashley emite done_important:milk.
+    Esperado: marca el segundo (pendiente), no el primero (done) ni
+    devuelve noop pensando que ya estaba hecho.
+    """
+    reminders.add_important("Buy milk")
+    first = reminders.load_important()[0]
+    reminders.mark_important_done(first["id"])  # mark first as done
+
+    reminders.add_important("Buy milk")  # second one, pending
+    items_after = reminders.load_important()
+    assert len(items_after) == 2
+    assert items_after[0]["done"] is True
+    assert items_after[1]["done"] is False
+
+    # Now Ashley re-emits done_important:milk → should mark the PENDING one
+    msg = reminders.mark_important_done("milk")
+    assert msg != "", "Debería marcar el pendiente, no devolver noop"
+    assert "hecho" in msg.lower()
+
+    # Verificar que se marcó el segundo (el pendiente), no el primero
+    final = reminders.load_important()
+    assert final[0]["done"] is True  # already was done
+    assert final[1]["done"] is True  # now also done
+
+
+def test_mark_important_done_not_found_still_returns_not_found():
+    """No-match (nada con ese texto) NO debe devolver noop — debe devolver
+    el mensaje 'No encontré' para que Ashley sepa que algo va mal."""
+    reminders.add_important("Real task")
+    msg = reminders.mark_important_done("totally_unrelated")
+    assert msg != "", "No-match no es noop, debería devolver mensaje 'no encontré'"
+    assert "no encontr" in msg.lower()
+
+
 def test_format_important_for_prompt_empty():
     """Empty list returns empty string."""
     assert reminders.format_important_for_prompt([]) == ""
