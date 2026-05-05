@@ -65,6 +65,8 @@ STATS_FILE = _data_path("stats_ashley.json")
 MENTAL_STATE_FILE = _data_path("mental_state_ashley.json")
 NEWS_FILE = _data_path("news_ashley.json")
 ACTION_LOG_FILE = _data_path("actions_log_ashley.json")
+IMPORTANT_DATES_FILE = _data_path("fechas_importantes_ashley.json")  # v0.18.0 — Fase 2
+GOALS_FILE = _data_path("objetivos_ashley.json")  # v0.18.0 — Fase 3
 
 # ─────────────────────────────────────────────
 #  Licencia (Lemon Squeezy)

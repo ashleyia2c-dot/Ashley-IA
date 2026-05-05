@@ -46,18 +46,20 @@ def test_achievement_ids_are_unique():
 
 
 def test_total_achievements_count():
-    """Hay 12 logros documentados (4 affection + 4 mensajes + 4 features).
-    Si añadimos más, este test recordatorio fuerza updatear el manual."""
-    assert len(ACHIEVEMENTS) == 12, (
+    """Hay 16 logros documentados (4 affection + 4 mensajes + 4 features + 4 tiempo).
+    Si añadimos más, este test recordatorio fuerza updatear el manual.
+    v0.18.0 — añadidos los 4 de tier 'time' (first_week, month_together,
+    hundred_days, year_together) basados en relationship_age_days."""
+    assert len(ACHIEVEMENTS) == 16, (
         f"Achievements count changed: {len(ACHIEVEMENTS)}. "
         "Update the user manual (manual_content.py) to mention the new ones."
     )
 
 
 def test_known_tiers():
-    """Los tiers usados son affection / messages / features. Si cambia,
+    """Los tiers usados son affection / messages / features / time. Si cambia,
     la UI que agrupa por tier puede romper."""
-    valid = {"affection", "messages", "features"}
+    valid = {"affection", "messages", "features", "time"}
     for ach in ACHIEVEMENTS:
         assert ach["tier"] in valid, f"Unknown tier: {ach['tier']}"
 

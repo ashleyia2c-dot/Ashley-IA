@@ -25,6 +25,8 @@ def build_system_prompt(
     recap_warning: str | None = None,
     mental_state_block: str | None = None,
     topic_directive: str | None = None,
+    important_dates: str | None = None,
+    goals: str | None = None,
 ) -> str:
     code_section = "You are a Python program built with Reflex and the Grok API."
 
@@ -93,6 +95,30 @@ just audible instead of theatrical.
     important_section = (
         f"\n=== IMPORTANT THINGS (boss's list) ===\n{important}\n"
         if important
+        else ""
+    )
+
+    # v0.18.0 Phase 2 — Birthdays and important annual recurring dates.
+    # Only appears when there are dates today or in the next 7 days —
+    # otherwise empty string, zero cache impact.
+    important_dates_section = (
+        "\n=== IMPORTANT DATES (birthdays / anniversaries) ===\n"
+        f"{important_dates}\n\n"
+        "If there's a date TODAY worth celebrating, mention it warmly and "
+        "naturally — like a friend who remembered, not a robotic reminder. "
+        "If there are upcoming ones in a few days, you can reference them "
+        "in conversation when it fits, but don't announce them like a "
+        "calendar app. These are NOT reminders — they are moments in the "
+        "boss's life (or people important to him) that you remember because "
+        "you care.\n"
+        if important_dates
+        else ""
+    )
+
+    # v0.18.0 Phase 3 — Long-term goals tracking.
+    goals_section = (
+        f"\n=== {goals}\n"
+        if goals
         else ""
     )
 
@@ -166,7 +192,8 @@ just audible instead of theatrical.
     )
     dynamic_bottom = (
         f"{state_section}{tastes_section}{reminders_section}"
-        f"{important_section}{mental_section}{time_section}"
+        f"{important_section}{important_dates_section}{goals_section}"
+        f"{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== CONNECTION PRINCIPLES — READ BEFORE EVERY OTHER RULE ===
@@ -540,6 +567,18 @@ Normal work requests ("open notepad", "what time is it") are [affection:0].
 [action:add_important:TEXT]
 [action:done_important:TEXT_OR_ID]
 [action:save_taste:CATEGORY:VALUE]
+[action:save_date:TYPE:DATE:LABEL]     — save important recurring date (birthday/anniversary/event)
+                                         TYPE: birthday | anniversary | event
+                                         DATE: YYYY-MM-DD if year known, MM-DD if only day/month
+                                         LABEL: brief description. Use "user" if it's the boss's own.
+                                         For others use their name (e.g. "mom", "Maria").
+[action:save_goal:CATEGORY:GOAL]       — save a long-term goal (learning X, launching Y, etc.)
+                                         CATEGORY: personal | professional | health | learning | other
+                                         GOAL: brief text describing the goal
+[action:check_in_goal:ID_OR_TEXT]      — register that you just asked the boss about progress on a goal
+                                         (silent, no extra bubble). Emit it after asking "how's X going?"
+                                         so you don't insist about it again the next turns.
+[action:complete_goal:ID_OR_TEXT]      — mark a goal as completed. Boss has confirmed finishing it.
 
 ── MUSIC ──
 When the boss asks to change songs: use play_music — the system finds your previous YouTube tab and switches the song right there (no new tab opened if the old one is found). If the previous tab no longer exists, it opens a new one.

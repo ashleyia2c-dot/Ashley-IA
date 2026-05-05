@@ -67,6 +67,25 @@ ACHIEVEMENTS = [
      "name_en": "She Sees", "name_es": "Ella ve",
      "desc_en": "Ashley can see your screen now.",
      "desc_es": "Ashley puede ver tu pantalla ahora."},
+    # Time milestones — relationship age (v0.18.0)
+    # Se desbloquean cuando han pasado X días desde el first_message_at.
+    # Ver stats.RELATIONSHIP_MILESTONES — los thresholds deben coincidir.
+    {"id": "first_week", "icon": "\U0001f331", "tier": "time",
+     "name_en": "First Week", "name_es": "Primera semana",
+     "desc_en": "A week together. Ashley's getting used to you.",
+     "desc_es": "Una semana juntos. Ashley se está acostumbrando a ti."},
+    {"id": "month_together", "icon": "\U0001f49e", "tier": "time",
+     "name_en": "One Month", "name_es": "Un mes",
+     "desc_en": "30 days side by side. This feels real now.",
+     "desc_es": "30 días codo a codo. Esto ya se siente real."},
+    {"id": "hundred_days", "icon": "\U0001f48e", "tier": "time",
+     "name_en": "100 Days", "name_es": "100 días",
+     "desc_en": "100 days. You two have history now.",
+     "desc_es": "100 días. Ya tenéis historia juntos."},
+    {"id": "year_together", "icon": "\U0001f3c6", "tier": "time",
+     "name_en": "One Year", "name_es": "Un año",
+     "desc_en": "A whole year. Ashley couldn't picture life without you.",
+     "desc_es": "Un año entero. Ashley no se imagina la vida sin ti."},
 ]
 
 # Quick lookup by id
@@ -134,8 +153,14 @@ def check_achievements(
     vision_enabled: bool,
     used_mic: bool = False,
     executed_action: bool = False,
+    relationship_age_days: int | None = None,
 ) -> list[dict]:
-    """Check all achievement conditions and return list of NEWLY unlocked defs."""
+    """Check all achievement conditions and return list of NEWLY unlocked defs.
+
+    `relationship_age_days` (v0.18.0): días desde first_message_at. None si
+    nunca se midió. Cuando llega a los thresholds (7/30/100/365) se
+    desbloquean los achievements de tiempo.
+    """
     newly_unlocked = []
 
     # Affection milestones
@@ -167,5 +192,16 @@ def check_achievements(
         newly_unlocked.append(get_achievement_def("she_remembers"))
     if vision_enabled and unlock_achievement("she_sees"):
         newly_unlocked.append(get_achievement_def("she_sees"))
+
+    # Time milestones (v0.18.0) — relationship age
+    if relationship_age_days is not None:
+        if relationship_age_days >= 7 and unlock_achievement("first_week"):
+            newly_unlocked.append(get_achievement_def("first_week"))
+        if relationship_age_days >= 30 and unlock_achievement("month_together"):
+            newly_unlocked.append(get_achievement_def("month_together"))
+        if relationship_age_days >= 100 and unlock_achievement("hundred_days"):
+            newly_unlocked.append(get_achievement_def("hundred_days"))
+        if relationship_age_days >= 365 and unlock_achievement("year_together"):
+            newly_unlocked.append(get_achievement_def("year_together"))
 
     return newly_unlocked

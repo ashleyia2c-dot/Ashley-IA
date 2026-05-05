@@ -15,6 +15,8 @@ def build_system_prompt(
     recap_warning: str | None = None,
     mental_state_block: str | None = None,
     topic_directive: str | None = None,
+    important_dates: str | None = None,
+    goals: str | None = None,
 ) -> str:
     code_section = "Eres un programa en Python construido con Reflex y la API de Grok."
 
@@ -84,6 +86,30 @@ Ashley, solo que audible en vez de teatral.
     important_section = (
         f"\n=== COSAS IMPORTANTES (lista del jefe) ===\n{important}\n"
         if important
+        else ""
+    )
+
+    # v0.18.0 Fase 2 — Cumpleaños y fechas importantes (anuales recurrentes).
+    # Solo aparece si HAY fechas hoy o en próximos 7 días — sino string vacío,
+    # cero impacto en cache.
+    important_dates_section = (
+        "\n=== FECHAS IMPORTANTES (cumpleaños / aniversarios) ===\n"
+        f"{important_dates}\n\n"
+        "Si HOY hay una fecha celebrable, menciónala con calidez NATURAL — "
+        "sin forzar, como amiga que se acordó. Si hay próximas en pocos días, "
+        "puedes referenciarla en conversación si encaja, no como recordatorio "
+        "robótico. Estos NO son recordatorios — son momentos de la vida del "
+        "jefe (o gente importante para él) que tú recordaste porque te importan.\n"
+        if important_dates
+        else ""
+    )
+
+    # v0.18.0 Fase 3 — Goals / objetivos a largo plazo del jefe.
+    # Solo aparece si hay goals activos — sino string vacío, cero cache impact.
+    # Marca con ⏰ los goals "due for check-in" para que Ashley los priorice.
+    goals_section = (
+        f"\n=== {goals}\n"
+        if goals
         else ""
     )
 
@@ -157,7 +183,8 @@ Ashley, solo que audible en vez de teatral.
     )
     dynamic_bottom = (
         f"{state_section}{tastes_section}{reminders_section}"
-        f"{important_section}{mental_section}{time_section}"
+        f"{important_section}{important_dates_section}{goals_section}"
+        f"{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== PRINCIPIOS DE CONEXIÓN — LEER ANTES QUE CUALQUIER OTRA REGLA ===
@@ -525,6 +552,18 @@ Peticiones normales ("abre el bloc de notas", "qué hora es") son [affection:0].
 [action:add_important:TEXTO]
 [action:done_important:TEXTO_O_ID]
 [action:save_taste:CATEGORIA:VALOR]
+[action:save_date:TIPO:FECHA:LABEL]    — guarda fecha importante (cumpleaños/aniversario/evento)
+                                         TIPO: birthday | anniversary | event
+                                         FECHA: YYYY-MM-DD si conoces el año, MM-DD si solo día/mes
+                                         LABEL: descripción breve. Si es del propio jefe usa "user".
+                                         Para terceros usa el nombre (ej: "mamá", "María").
+[action:save_goal:CATEGORIA:OBJETIVO]  — guarda un objetivo de largo plazo del jefe (aprender X, lanzar Y, etc.)
+                                         CATEGORIA: personal | profesional | salud | aprendizaje | otros
+                                         OBJETIVO: texto del goal en pocas palabras
+[action:check_in_goal:ID_O_TEXTO]      — registra que acabas de preguntar al jefe por progreso del goal
+                                         (silencioso, no genera burbuja). Emítelo cuando le hayas preguntado
+                                         "¿cómo va lo de X?" para que no insistas en próximos turns.
+[action:complete_goal:ID_O_TEXTO]      — marca un goal como completado. El jefe ha confirmado terminarlo.
 
 ── MÚSICA ──
 Cuando el jefe pida cambiar de canción: usa play_music — el sistema busca tu pestaña de YouTube anterior y cambia la canción ahí mismo (no abre tab nueva si encuentra la anterior). Si la pestaña anterior ya no existe, abre una nueva.

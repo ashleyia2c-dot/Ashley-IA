@@ -20,7 +20,10 @@ from .reminders import parse_remind_params
 
 # Acciones "seguras" que se ejecutan SIEMPRE, sin necesidad del toggle Acciones.
 # Son operaciones de datos, no de control del sistema. No requieren confirmación.
-_SAFE_ACTIONS = {"save_taste", "remind", "add_important", "done_important"}
+_SAFE_ACTIONS = {
+    "save_taste", "remind", "add_important", "done_important", "save_date",
+    "save_goal", "check_in_goal", "complete_goal",
+}
 
 # Verbos del usuario que indican un pedido de acción (para fallback)
 _USER_ACTION_VERBS = (
@@ -202,6 +205,15 @@ def clean_display(text: str) -> str:
         re.IGNORECASE,
     )
     text = _CATCH_ALL_TRAILING.sub('', text)
+    # ── Empty bracket residues (v0.17.5) ──────────────────────────────
+    # El LLM a veces emite "[ ]" o "[]" o "[mood:]" al final pensando que
+    # representan "tag vacío / no action". Los regex de stripping previos
+    # solo cubren tags CON contenido — tags vacíos se cuelan literal.
+    # Bug observado en v0.17.4: tras el cambio de prompt (regla más
+    # abstracta sobre tags), Ashley empezó a alucinar "[ ]" como cierre.
+    text = re.sub(r'\[\s*\]', '', text)              # [] [ ] [    ]
+    text = re.sub(r'\[\s*\w+\s*:\s*\]', '', text)    # [mood:] [action:] [affection:] etc
+    text = re.sub(r'\[\s*\w+\s*:\s*\w+\s*:\s*\]', '', text)  # [action:type:] sin params
     # Elimina líneas vacías consecutivas que quedan tras limpiar tags
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
@@ -328,9 +340,25 @@ def extract_action(text: str) -> tuple[str, dict | None]:
             params = [rest] if rest else []
         else:
             params = [rest[:inner], rest[inner + 1:]]
-    else:
-        # Split estándar: volume:set:50, hotkey:ctrl:c, etc.
-        params = rest.split(":") if rest else []
+    elif a_type == "save_date":
+        # save_date:TYPE:DATE:LABEL — TYPE = birthday|anniversary|event
+        # DATE = YYYY-MM-DD o MM-DD (sin colons internos)
+        # LABEL = freeform (puede tener colons en teoría, le damos todo el resto)
+        # v0.18.0 Fase 2.
+        parts = rest.split(":", 2)  # max 3 partes: [type, date, rest_label]
+        params = parts
+    elif a_type == "save_goal":
+        # save_goal:CATEGORY:GOAL_TEXT — v0.18.0 Fase 3
+        # GOAL_TEXT puede contener colons (improbable pero defensivo).
+        inner = rest.find(":")
+        if inner == -1:
+            params = [rest] if rest else []
+        else:
+            params = [rest[:inner], rest[inner + 1:]]
+    elif a_type in ("check_in_goal", "complete_goal"):
+        # check_in_goal:ID_O_TEXTO  /  complete_goal:ID_O_TEXTO
+        # v0.18.0 Fase 3 — un único parámetro (puede contener colons).
+        params = [rest] if rest else []
 
     clean = text.replace(full_tag, "").strip()
     return clean, {"type": a_type, "params": params}

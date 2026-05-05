@@ -1865,6 +1865,68 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
             return {"success": True, "result": msg, "noop": (msg == ""),
                     "screenshot": None, "browser_opened": browser_opened}
 
+        elif action_type == "save_goal":
+            # v0.18.0 Fase 3 — Guardar objetivo a largo plazo del jefe.
+            # Format: save_goal:CATEGORY:GOAL_TEXT
+            from .goals import add_goal
+            cat = params[0] if params else "personal"
+            goal = params[1] if len(params) > 1 else ""
+            entry = add_goal(goal=goal, category=cat)
+            if entry is None:
+                return {"success": False,
+                        "result": "save_goal: goal text vacío.",
+                        "screenshot": None, "browser_opened": browser_opened}
+            return {"success": True,
+                    "result": f"Objetivo guardado: '{entry['goal']}' [{entry['category']}].",
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "check_in_goal":
+            # v0.18.0 Fase 3 — Ashley registra que preguntó por progreso.
+            # Idempotente: si ya hubo check-in en últimas 6h, devuelve "" (noop).
+            from .goals import mark_check_in
+            text = params[0] if params else ""
+            msg = mark_check_in(text)
+            return {"success": True, "result": msg, "noop": (msg == ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "complete_goal":
+            # v0.18.0 Fase 3 — Marca un goal como completado.
+            # Idempotente: si ya estaba completado, devuelve "" (noop).
+            from .goals import complete_goal as _complete_goal
+            text = params[0] if params else ""
+            msg = _complete_goal(text)
+            return {"success": True, "result": msg, "noop": (msg == ""),
+                    "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "save_date":
+            # v0.18.0 — guardar cumpleaños / aniversarios / eventos
+            # Format: save_date:TYPE:DATE:LABEL
+            #   TYPE  = birthday | anniversary | event (normalizado)
+            #   DATE  = YYYY-MM-DD o MM-DD
+            #   LABEL = texto libre describiendo qué/de quién
+            # who se infiere del label (si dice "user/jefe/yo" → who=user)
+            from .important_dates import add_date
+            type_  = params[0] if len(params) > 0 else ""
+            date_  = params[1] if len(params) > 1 else ""
+            label_ = params[2] if len(params) > 2 else ""
+            # Inferir who: si label menciona explícitamente "user", "jefe",
+            # "boss", "yo", "moi", "patron" → who=user. Sino, who=label
+            # (ej. "mamá", "papa", "María"). Conservador para evitar
+            # confusión: por defecto user.
+            label_lower = label_.lower().strip()
+            user_markers = {"user", "jefe", "boss", "yo", "moi", "patron", "el jefe", "le patron"}
+            who_ = "user" if label_lower in user_markers else label_lower or "user"
+            entry = add_date(type_=type_, date_str=date_, label=label_, who=who_)
+            if entry is None:
+                # Inválido (date mal formateada, label vacío, etc.)
+                return {"success": False,
+                        "result": f"save_date: invalid params (type={type_!r}, date={date_!r}, label={label_!r})",
+                        "screenshot": None, "browser_opened": browser_opened}
+            # Mensaje user-facing breve
+            return {"success": True,
+                    "result": f"Fecha guardada: {entry['label']} ({entry['type']}, {entry['date']}).",
+                    "screenshot": None, "browser_opened": browser_opened}
+
         elif action_type == "save_taste":
             # v0.13.17: si falta el valor, devolver success=False (antes
             # devolvía success=True con un mensaje "Error: falta el valor"
@@ -1881,7 +1943,17 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "focus_window":
-            return {"success": True, "result": focus_window(params[0] if params else ""),
+            # v0.17.5 — Si Ashley emite [action:focus_window:Ashley] está
+            # intentando hacer focus de su PROPIA ventana, que ya es la activa.
+            # Es no-op visual pero antes generaba burbuja "Ventana 'Ashley'
+            # activada" innecesaria en el chat. Marcamos noop=True para que
+            # _execute_and_record_action salte el append (mismo pattern que
+            # done_important sobre item ya hecho).
+            title_param = (params[0] if params else "").strip()
+            if title_param.lower() == "ashley":
+                return {"success": True, "result": "", "noop": True,
+                        "screenshot": None, "browser_opened": browser_opened}
+            return {"success": True, "result": focus_window(title_param),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "hotkey":
@@ -2373,6 +2445,21 @@ def describe_action(action_type: str, params: list[str], lang: str = "en") -> st
         cat  = params[0] if params else ("other" if lang == "en" else "otros")
         val  = params[1] if len(params) > 1 else ""
         return T["save_taste"].format(cat=cat, val=val)
+    elif action_type == "save_date":
+        # v0.18.0 — descripción para confirmation dialog
+        type_  = params[0] if params else "event"
+        date_  = params[1] if len(params) > 1 else ""
+        label_ = params[2] if len(params) > 2 else ""
+        return T["save_date"].format(type=type_, date=date_, label=label_)
+    elif action_type == "save_goal":
+        # v0.18.0 Fase 3
+        cat = params[0] if params else "personal"
+        goal = params[1] if len(params) > 1 else ""
+        return T["save_goal"].format(cat=cat, goal=goal)
+    elif action_type == "check_in_goal":
+        return T["check_in_goal"].format(p=params[0] if params else "")
+    elif action_type == "complete_goal":
+        return T["complete_goal"].format(p=params[0] if params else "")
     # ── CDP-only actions (v0.13.25) ─────────────────────────────────
     elif action_type == "click":
         what = params[-1] if params else ""

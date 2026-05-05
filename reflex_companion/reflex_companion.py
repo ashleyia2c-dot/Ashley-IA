@@ -1630,8 +1630,16 @@ class State(rx.State):
     def _check_achievements(self, executed_action: bool = False):
         """Run achievement checks and show toast for the first newly unlocked one."""
         from .achievements import check_achievements, load_achievements
+        from .stats import load_stats, get_relationship_age_days
 
         user_msg_count = len([m for m in self.messages if m.get("role") == "user"])
+        # v0.18.0 — relationship age para hitos temporales (7/30/100/365 días)
+        _rel_age = None
+        try:
+            _rel_age = get_relationship_age_days(load_stats())
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("relationship age check failed: %s", _e)
         newly = check_achievements(
             affection=self.affection,
             message_count=user_msg_count,
@@ -1641,6 +1649,7 @@ class State(rx.State):
             vision_enabled=self.auto_actions,
             used_mic=False,
             executed_action=executed_action,
+            relationship_age_days=_rel_age,
         )
         if newly:
             a = newly[0]  # show first unlocked (if multiple at once)
@@ -2205,6 +2214,31 @@ class State(rx.State):
             import logging
             logging.getLogger("ashley").warning("loading tastes: %s", _e)
 
+        # v0.18.0 Fase 2 — Cumpleaños / fechas importantes (anuales recurrentes).
+        # Solo se inyecta si HAY fechas hoy o en próximos 7 días — sino
+        # string vacío y la sección no aparece (cero impacto en cache).
+        important_dates: str | None = None
+        try:
+            from .important_dates import format_dates_for_prompt
+            dates_str = format_dates_for_prompt(lang=self.language)
+            if dates_str:
+                important_dates = dates_str
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("loading important dates: %s", _e)
+
+        # v0.18.0 Fase 3 — Goals (objetivos a largo plazo).
+        # Solo se inyecta si HAY goals activos — sino string vacío.
+        goals: str | None = None
+        try:
+            from .goals import format_goals_for_prompt
+            goals_str = format_goals_for_prompt(lang=self.language)
+            if goals_str:
+                goals = goals_str
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("loading goals: %s", _e)
+
         # Directiva de compartir-tema: si el user acaba de compartir algo
         # sustancial (≥30 chars), se inyecta un bloque de alta prioridad
         # forzando a Ashley a tomar postura propia con razón. Mecanismo
@@ -2239,6 +2273,10 @@ class State(rx.State):
             # Si hay alguno, prompts.py añade un bloque pidiendo a Ashley
             # que considere (no fuerce) preguntar al user si los limpia.
             "stale_important": stale_important,
+            # v0.18.0 Fase 2: cumpleaños y fechas importantes.
+            "important_dates": important_dates,
+            # v0.18.0 Fase 3: goals / objetivos a largo plazo.
+            "goals": goals,
         }
 
     def _detect_recap_warning(self) -> str | None:
@@ -2398,6 +2436,33 @@ class State(rx.State):
             last_user_ts = None
 
         lines = [T["datetime_line"].format(fecha=fecha_str, hora=hora_str, momento=momento_dia)]
+
+        # ── Relationship age (v0.18.0) ────────────────────────────
+        # "Llevas X días con el jefe" + celebración si HOY es hito.
+        # Usa first_message_at (ya existía en stats.py para anti-tamper) —
+        # ahora lo exponemos a Ashley para conciencia de cuánto llevan juntos.
+        # En milestone exacto (7/30/100/365) se añade línea celebratoria,
+        # disponible UN SOLO DÍA.
+        try:
+            from .stats import (
+                load_stats,
+                get_relationship_age_days,
+                get_relationship_milestone_today,
+            )
+            _stats_cached = load_stats()
+            _age = get_relationship_age_days(_stats_cached)
+            if _age == 0:
+                lines.append(T["rel_first_day"])
+            elif _age is not None and _age > 0:
+                lines.append(T["rel_days_together"].format(days=_age))
+            _milestone = get_relationship_milestone_today(_stats_cached)
+            if _milestone:
+                _key = f"rel_milestone_{_milestone}"
+                if _key in T:
+                    lines.append(T[_key])
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("relationship age line failed: %s", _e)
 
         if last_user_ts:
             try:

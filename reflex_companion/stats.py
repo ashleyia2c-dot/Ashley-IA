@@ -289,6 +289,90 @@ def is_refund_eligible(stats: Optional[dict] = None, threshold: int = 40) -> boo
     return stats.get("total_user_messages", 0) < threshold
 
 
+# ─────────────────────────────────────────────
+#  Relationship age (v0.18.0 — Tier 1)
+# ─────────────────────────────────────────────
+#
+# Reutilizamos `first_message_at` (ya existía para validación anti-tamper)
+# como fecha de "se conocieron". A partir de ese timestamp calculamos:
+#
+#   - relationship_age_days(): cuántos días llevan juntos
+#   - relationship_milestone_today(): si HOY cae justo en un hito
+#     (1ª semana, 1 mes, 100 días, 1 año), devuelve el id del hito
+#
+# Esto NO escribe nada nuevo en stats.json — solo lee lo que ya hay.
+# Así no rompe la firma HMAC ni el mirror del registro.
+
+# Hitos celebrables. Mantener id sincronizado con achievements.py.
+# El ORDEN importa: el código que detecta milestone_today devuelve el más
+# alto cuyo umbral coincida exacto con today_age_days.
+RELATIONSHIP_MILESTONES = [
+    (7,   "first_week"),       # 1 semana — primera celebración suave
+    (30,  "month_together"),   # 1 mes — primer mes juntos
+    (100, "hundred_days"),     # 100 días — hito de longevidad
+    (365, "year_together"),    # 1 año — aniversario completo
+]
+
+
+def _parse_first_message_dt(stats: Optional[dict]):
+    """Parse first_message_at to datetime. Returns None if not set."""
+    if stats is None:
+        return None
+    raw = stats.get("first_message_at")
+    if not raw:
+        return None
+    try:
+        from datetime import datetime as _dt
+        dt = _dt.fromisoformat(raw)
+        return dt
+    except Exception as _e:
+        _log.warning("could not parse first_message_at=%r: %s", raw, _e)
+        return None
+
+
+def get_relationship_age_days(stats: Optional[dict] = None) -> Optional[int]:
+    """Días transcurridos desde el primer mensaje del user.
+
+    Devuelve:
+      - int >= 0 si hay first_message_at válido
+      - None si nunca habló (first_message_at vacío)
+
+    Calcula en LOCAL date del user (no UTC) — "días juntos" es un concepto
+    de calendario, no exacto 24h. Si se conocieron ayer a las 23:50 local
+    y son las 00:10 hoy local, ya cuentan como 1 día.
+    """
+    if stats is None:
+        stats = load_stats()
+    first_dt = _parse_first_message_dt(stats)
+    if first_dt is None:
+        return None
+    from datetime import datetime as _dt
+    # Convertir ambas a date local del user
+    first_local = first_dt.astimezone()
+    today_local = _dt.now().astimezone()
+    delta_days = (today_local.date() - first_local.date()).days
+    # Clamp por si reloj viajó al pasado (raro pero defensivo)
+    return max(0, delta_days)
+
+
+def get_relationship_milestone_today(stats: Optional[dict] = None) -> Optional[str]:
+    """Si HOY cae exactamente en un hito (7/30/100/365 días), devuelve su id.
+
+    Devuelve None en cualquier otro día. El id devuelto matchea el id de
+    los achievements de tipo "time" (achievements.py).
+
+    Solo el día EXACTO del hito devuelve algo — no rangos. Esto evita que
+    Ashley diga "celebremos los 30 días" durante toda la semana del día 30.
+    """
+    age = get_relationship_age_days(stats)
+    if age is None:
+        return None
+    for threshold, mid in RELATIONSHIP_MILESTONES:
+        if age == threshold:
+            return mid
+    return None
+
+
 def is_tampered_vs_history(
     total_messages: int,
     user_history_count: int,

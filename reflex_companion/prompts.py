@@ -35,6 +35,8 @@ def build_system_prompt(
     topic_directive: str | None = None,
     cdp_enabled: bool = False,
     stale_important: str | None = None,
+    important_dates: str | None = None,
+    goals: str | None = None,
 ) -> str:
     base = _impl(lang).build_system_prompt(
         facts=facts,
@@ -50,6 +52,8 @@ def build_system_prompt(
         recap_warning=recap_warning,
         mental_state_block=mental_state_block,
         topic_directive=topic_directive,
+        important_dates=important_dates,
+        goals=goals,
     )
     # v0.13.25: si el user activó el modo browser moderno, Ashley
     # gana acciones avanzadas de browser via CDP. La sección se

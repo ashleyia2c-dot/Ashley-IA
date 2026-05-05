@@ -2,11 +2,17 @@
 
 > **Nota para Claude**: este archivo describe el "qué" técnico de cada módulo. Para "si me piden X, ¿dónde modifico?" ver [`PROJECT_MAP.md`](./PROJECT_MAP.md).
 
-Versión actual: **v0.17.4** (prompts sin ejemplos específicos de meta-frases prohibidas — Ashley los copiaba verbatim. Filtro post-stream ampliado con catch-all genérico para meta-comentarios alucinados tipo "No actions.", "Conversación fluida." que se le escapan al LLM al final de las respuestas).
+Versión actual: **v0.18.0 (Tier 1 — Vínculo más rico)** — 3 sistemas nuevos para profundizar la relación user↔Ashley:
+  • **Días juntos + achievements temporales**: usa `first_message_at` ya existente para exponer "Llevas X días con el jefe" + celebraciones automáticas a los 7/30/100/365 días. Achievements: first_week, month_together, hundred_days, year_together.
+  • **Cumpleaños y fechas importantes**: nuevo módulo `important_dates.py` con recurrencia anual (MM-DD). Action `[action:save_date:TYPE:DATE:LABEL]`. Inyección al prompt de fechas hoy + próximos 7 días.
+  • **Goals tracking**: nuevo módulo `goals.py` para objetivos a largo plazo. Actions `[action:save_goal/check_in_goal/complete_goal]`. Marcador ⏰ para goals "due for check-in" (>10 días sin que Ashley pregunte).
+
+Tests: 941 (+116 vs v0.17.4). Cache prefix preservado al ≥95% en los 3 idiomas (verified). Coste extra por mensaje: ~10-50 tokens.
 
 Hitos recientes:
-- v0.17.3 — servidor HTTP embebido reemplaza sirv → fast-path en producción → arranque cae de ~15s a ~4-6s. Port detection optimizado. `done_important` idempotente.
-- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, scroll mantequilla, mood images precargadas, settings instant-open, Ashley más sentimental.
+- v0.17.4 — prompts sin ejemplos meta + filtro post-stream ampliado con catch-all.
+- v0.17.3 — servidor HTTP embebido + fast-path producción → arranque ~15s → ~4-6s. `done_important` idempotente.
+- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, Ashley más sentimental.
 
 ## Commands
 

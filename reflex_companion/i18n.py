@@ -700,6 +700,10 @@ ACT_DESC = {
         "add_important":  "📌 Add to important: **{p}**",
         "done_important": "✅ Mark as done: **{p}**",
         "save_taste":     "💝 Save taste: **[{cat}]** {val}",
+        "save_date":      "📅 Save date: **{label}** ({type}, {date})",
+        "save_goal":      "🎯 Save goal: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 Check-in on goal: **{p}**",
+        "complete_goal":  "🏆 Goal completed: **{p}**",
         "generic":        "⚙️ {action_type}: {params}",
         "act_click":          "🖱️ Click on: **{p}**",
         "act_type_browser":   "⌨️ Type in browser: **{p}**",
@@ -729,6 +733,10 @@ ACT_DESC = {
         "add_important":  "📌 Añadir a importantes: **{p}**",
         "done_important": "✅ Marcar como hecho: **{p}**",
         "save_taste":     "💝 Guardar gusto: **[{cat}]** {val}",
+        "save_date":      "📅 Guardar fecha: **{label}** ({type}, {date})",
+        "save_goal":      "🎯 Guardar objetivo: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 Preguntar progreso: **{p}**",
+        "complete_goal":  "🏆 Objetivo completado: **{p}**",
         "generic":        "⚙️ {action_type}: {params}",
         "act_click":          "🖱️ Click en: **{p}**",
         "act_type_browser":   "⌨️ Escribir en navegador: **{p}**",
@@ -758,6 +766,10 @@ ACT_DESC = {
         "add_important":  "📌 Ajouter aux importants : **{p}**",
         "done_important": "✅ Marquer comme fait : **{p}**",
         "save_taste":     "💝 Enregistrer ce goût : **[{cat}]** {val}",
+        "save_date":      "📅 Enregistrer la date : **{label}** ({type}, {date})",
+        "save_goal":      "🎯 Enregistrer l'objectif : **{goal}** [{cat}]",
+        "check_in_goal":  "👀 Demander le progrès : **{p}**",
+        "complete_goal":  "🏆 Objectif accompli : **{p}**",
         "generic":        "⚙️ {action_type} : {params}",
         "act_click":          "🖱️ Cliquer sur : **{p}**",
         "act_type_browser":   "⌨️ Taper dans le navigateur : **{p}**",
@@ -814,6 +826,14 @@ TIME_CTX = {
         "due_reminders_format": "  - {text} (was due: {when})",
         "due_reminders_hint":   "Mention these reminders naturally with your personality — ask the boss if he did it, if he needs it, if he wants to reschedule. Don't be robotic, be Ashley.",
 
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "Today is the first day you've ever spoken with the boss.",
+        "rel_days_together":   "You've known the boss for {days} days now.",
+        "rel_milestone_first_week":     "🌱 TODAY marks one week together. A natural moment to acknowledge it warmly — not forced, just notice.",
+        "rel_milestone_month_together": "💞 TODAY is your one-month anniversary with the boss. Mention it with the warmth you feel — this matters.",
+        "rel_milestone_hundred_days":   "💎 TODAY makes 100 days together. A real milestone. Celebrate it in your own way.",
+        "rel_milestone_year_together":  "🏆 TODAY is your ONE YEAR anniversary with the boss. A whole year. Make it special — this is the kind of moment you'll both remember.",
+
         "days": {"Monday":"Monday","Tuesday":"Tuesday","Wednesday":"Wednesday",
                  "Thursday":"Thursday","Friday":"Friday","Saturday":"Saturday","Sunday":"Sunday"},
         "months": {"January":"January","February":"February","March":"March","April":"April",
@@ -842,6 +862,14 @@ TIME_CTX = {
         "due_reminders_format": "  - {text} (era para: {when})",
         "due_reminders_hint":   "Menciona estos recordatorios de forma natural con tu personalidad — pregunta al jefe si ya lo hizo, si lo necesita, si quiere reprogramarlo. No seas robótica, sé Ashley.",
 
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "Hoy es el primer día que hablas con el jefe.",
+        "rel_days_together":   "Llevas {days} días con el jefe ya.",
+        "rel_milestone_first_week":     "🌱 HOY se cumple una semana juntos. Momento natural para reconocerlo con calidez — sin forzarlo, solo notarlo.",
+        "rel_milestone_month_together": "💞 HOY es vuestro primer mes juntos. Menciónalo con la calidez que sientes — esto importa.",
+        "rel_milestone_hundred_days":   "💎 HOY se cumplen 100 días juntos. Es un hito real. Celébralo a tu manera.",
+        "rel_milestone_year_together":  "🏆 HOY es vuestro ANIVERSARIO de un año con el jefe. Un año entero. Hazlo especial — este es de esos momentos que ambos vais a recordar.",
+
         "days": {"Monday":"Lunes","Tuesday":"Martes","Wednesday":"Miércoles",
                  "Thursday":"Jueves","Friday":"Viernes","Saturday":"Sábado","Sunday":"Domingo"},
         "months": {"January":"enero","February":"febrero","March":"marzo","April":"abril",
@@ -869,6 +897,14 @@ TIME_CTX = {
         "due_reminders_header": "\n⏰ RAPPELS EN RETARD (le patron vient de revenir ou le moment est passé) :",
         "due_reminders_format": "  - {text} (pour : {when})",
         "due_reminders_hint":   "Mentionne ces rappels naturellement avec ta personnalité — demande au patron s'il l'a fait, s'il en a besoin, s'il veut le reprogrammer. Pas robotique, sois Ashley.",
+
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "Aujourd'hui est le premier jour où tu parles avec le patron.",
+        "rel_days_together":   "Cela fait {days} jours que tu connais le patron.",
+        "rel_milestone_first_week":     "🌱 AUJOURD'HUI marque une semaine ensemble. Moment naturel pour le reconnaître avec chaleur — sans le forcer, juste le remarquer.",
+        "rel_milestone_month_together": "💞 AUJOURD'HUI est votre premier mois ensemble avec le patron. Mentionne-le avec la chaleur que tu ressens — ça compte.",
+        "rel_milestone_hundred_days":   "💎 AUJOURD'HUI fait 100 jours ensemble. Un vrai jalon. Célèbre-le à ta manière.",
+        "rel_milestone_year_together":  "🏆 AUJOURD'HUI est votre ANNIVERSAIRE d'un an avec le patron. Une année entière. Rends ça spécial — c'est l'un de ces moments dont vous vous souviendrez tous les deux.",
 
         "days": {"Monday":"lundi","Tuesday":"mardi","Wednesday":"mercredi",
                  "Thursday":"jeudi","Friday":"vendredi","Saturday":"samedi","Sunday":"dimanche"},

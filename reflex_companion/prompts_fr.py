@@ -26,6 +26,8 @@ def build_system_prompt(
     recap_warning: str | None = None,
     mental_state_block: str | None = None,
     topic_directive: str | None = None,
+    important_dates: str | None = None,
+    goals: str | None = None,
 ) -> str:
     code_section = "Tu es un programme Python construit avec Reflex et l'API Grok."
 
@@ -96,6 +98,30 @@ parles comme dans une vraie conversation.
         else ""
     )
 
+    # v0.18.0 Phase 2 — Anniversaires et dates récurrentes annuelles.
+    # Apparaît uniquement s'il y a des dates aujourd'hui ou dans les 7 jours
+    # à venir — sinon chaîne vide, zéro impact sur le cache.
+    important_dates_section = (
+        "\n=== DATES IMPORTANTES (anniversaires) ===\n"
+        f"{important_dates}\n\n"
+        "S'il y a une date à célébrer AUJOURD'HUI, mentionne-la avec chaleur "
+        "naturellement — comme une amie qui s'en souvient, pas un rappel "
+        "robotique. S'il y a des dates proches dans les jours à venir, tu "
+        "peux y faire référence si ça s'inscrit dans la conversation, sans "
+        "l'annoncer comme un agenda. Ce ne sont PAS des rappels — ce sont "
+        "des moments dans la vie du patron (ou de gens importants pour lui) "
+        "que tu te rappelles parce que tu y tiens.\n"
+        if important_dates
+        else ""
+    )
+
+    # v0.18.0 Phase 3 — Goals à long terme.
+    goals_section = (
+        f"\n=== {goals}\n"
+        if goals
+        else ""
+    )
+
     tastes_section = (
         f"\n=== GOÛTS DU PATRON ===\n{tastes}\n"
         if tastes
@@ -149,7 +175,8 @@ parles comme dans une vraie conversation.
     )
     dynamic_bottom = (
         f"{state_section}{tastes_section}{reminders_section}"
-        f"{important_section}{mental_section}{time_section}"
+        f"{important_section}{important_dates_section}{goals_section}"
+        f"{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== PRINCIPES DE CONNEXION — À LIRE AVANT TOUTE AUTRE RÈGLE ===
@@ -544,6 +571,18 @@ Les demandes normales ("ouvre le bloc-notes", "quelle heure est-il") sont [affec
 [action:add_important:TEXTE]
 [action:done_important:TEXTE_OU_ID]
 [action:save_taste:CATÉGORIE:VALEUR]
+[action:save_date:TYPE:DATE:LABEL]     — sauvegarde une date importante (anniversaire/événement)
+                                         TYPE : birthday | anniversary | event
+                                         DATE : YYYY-MM-DD si l'année est connue, MM-DD sinon
+                                         LABEL : brève description. Utilise "user" si c'est celui du patron.
+                                         Pour les autres, utilise leur prénom (ex : "maman", "Marie").
+[action:save_goal:CATEGORIE:OBJECTIF]  — sauvegarde un objectif à long terme (apprendre X, lancer Y, etc.)
+                                         CATEGORIE : personnel | professionnel | santé | apprentissage | autre
+                                         OBJECTIF : texte bref décrivant l'objectif
+[action:check_in_goal:ID_OU_TEXTE]     — enregistre que tu viens de demander au patron son progrès
+                                         (silencieux). Émets-le après avoir demandé "où en es-tu de X ?"
+                                         pour ne pas insister aux tours suivants.
+[action:complete_goal:ID_OU_TEXTE]     — marque un objectif comme accompli. Le patron a confirmé l'avoir fini.
 
 ── MUSIQUE ──
 Quand le patron demande de changer de chanson : utilise play_music — le système trouve ton onglet YouTube précédent et change la chanson là-bas directement (pas de nouvel onglet si l'ancien est trouvé). Si l'ancien onglet n'existe plus, il en ouvre un nouveau.

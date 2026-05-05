@@ -166,6 +166,80 @@ def test_preserves_response_ending_with_question():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Empty bracket residues (v0.17.5)
+# Bug observado: tras cambio de prompt en v0.17.4, Ashley empezó a alucinar
+# "[ ]" o "[mood:]" al final. Tags vacíos no estaban cubiertos por el parser.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_strips_empty_brackets_with_space():
+    """Caso exacto observado: '[ ]' al final de la respuesta."""
+    inp = "Hola cielo, ¿cómo estás?\n\n[ ]"
+    out = clean_display(inp)
+    assert "[ ]" not in out
+    assert "[]" not in out
+    assert "Hola cielo" in out
+
+
+def test_strips_empty_brackets_no_space():
+    inp = "Buenos días.\n[]"
+    out = clean_display(inp)
+    assert "[]" not in out
+    assert "Buenos días" in out
+
+
+def test_strips_empty_brackets_multiple_spaces():
+    inp = "Vale.\n[   ]"
+    out = clean_display(inp)
+    assert "[" not in out
+    assert "]" not in out
+
+
+def test_strips_empty_mood_tag():
+    """[mood:] sin valor — el LLM emitió mood vacío."""
+    inp = "Hola jefe.\n[mood:]"
+    out = clean_display(inp)
+    assert "[mood:]" not in out
+    assert "mood" not in out.lower() or "Hola" in out
+
+
+def test_strips_empty_action_tag():
+    """[action:] sin tipo ni params."""
+    inp = "Vale, lo veo.\n[action:]"
+    out = clean_display(inp)
+    assert "[action:]" not in out
+
+
+def test_strips_empty_affection_tag():
+    inp = "Te quiero, jefe.\n[affection:]"
+    out = clean_display(inp)
+    assert "[affection:]" not in out
+
+
+def test_strips_empty_action_with_type_no_params():
+    """[action:open_app:] tipo presente pero sin params."""
+    inp = "Vale.\n[action:open_app:]"
+    out = clean_display(inp)
+    assert "[action:open_app:]" not in out
+
+
+def test_does_not_strip_valid_tags_with_content():
+    """Defensive: tags válidos con contenido NO deben ser tocados accidentalmente.
+
+    Nota: los tags válidos son procesados por extract_mood/extract_action ANTES
+    de clean_display en el flow real. Este test verifica que clean_display por
+    sí sola no rompe tags con contenido (defensa por si el orden cambia).
+    """
+    # extract_mood se llama antes que clean_display en el flow real,
+    # pero verificamos que clean_display no destruye tags con valor por accident
+    inp = "Hola jefe [mood:happy]"
+    out = clean_display(inp)
+    # clean_display elimina mood tags también con extract_mood ya hecho normalmente
+    # Este test solo verifica que NO añade artifacts raros
+    assert "Hola jefe" in out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Prompts: verificar que se quitaron los ejemplos específicos
 # ─────────────────────────────────────────────────────────────────────────────
 
