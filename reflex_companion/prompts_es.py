@@ -17,6 +17,8 @@ def build_system_prompt(
     topic_directive: str | None = None,
     important_dates: str | None = None,
     goals: str | None = None,
+    vulnerability_directive: str | None = None,
+    device_section: str | None = None,
 ) -> str:
     code_section = "Eres un programa en Python construido con Reflex y la API de Grok."
 
@@ -113,6 +115,12 @@ Ashley, solo que audible en vez de teatral.
         else ""
     )
 
+    # v0.18.1 Tier 2 Fase A — Vulnerabilidades raras de Ashley.
+    # El directive viene ya formateado desde mental_state.format_vulnerability_directive()
+    # (incluye encabezado === y reglas duras). Solo aparece este turn si el
+    # trigger detection lo decidió. Cero impacto en cache prefix los demás turns.
+    vulnerability_section = vulnerability_directive if vulnerability_directive else ""
+
     # Regla de apelativos — se inyecta SOLO cuando el afecto es alto (≥60).
     # A ese nivel ya no le llama por su nombre de pila; usa apodos
     # tsundere-cariñosos variados. A afecto menor, la regla no aparece
@@ -178,13 +186,19 @@ Ashley, solo que audible en vez de teatral.
     #
     # Resultado esperado: cache hit ~70-80%, coste de input ~50-70% menor.
     # El LLM lee todo el prompt igual; el orden solo afecta el caching.
+    # v0.18.2 — device_section informa a Ashley si está siendo invocada
+    # desde el móvil del jefe (sin acciones de PC) o desktop. Vacío en
+    # desktop = cero impacto en cache. En móvil añade la lista de
+    # acciones disponibles vs no disponibles.
+    device_section_str = device_section if device_section else ""
+
     stable_top = (
         f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
     )
     dynamic_bottom = (
-        f"{state_section}{tastes_section}{reminders_section}"
+        f"{device_section_str}{state_section}{tastes_section}{reminders_section}"
         f"{important_section}{important_dates_section}{goals_section}"
-        f"{mental_section}{time_section}"
+        f"{vulnerability_section}{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== PRINCIPIOS DE CONEXIÓN — LEER ANTES QUE CUALQUIER OTRA REGLA ===

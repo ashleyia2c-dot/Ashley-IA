@@ -27,6 +27,8 @@ def build_system_prompt(
     topic_directive: str | None = None,
     important_dates: str | None = None,
     goals: str | None = None,
+    vulnerability_directive: str | None = None,
+    device_section: str | None = None,
 ) -> str:
     code_section = "You are a Python program built with Reflex and the Grok API."
 
@@ -122,6 +124,9 @@ just audible instead of theatrical.
         else ""
     )
 
+    # v0.18.1 Tier 2 Phase A — Rare vulnerability moments.
+    vulnerability_section = vulnerability_directive if vulnerability_directive else ""
+
     tastes_section = (
         f"\n=== THE BOSS'S TASTES ===\n{tastes}\n"
         if tastes
@@ -187,13 +192,19 @@ just audible instead of theatrical.
     #
     # Expected result: cache hit ~70-80%, input cost ~50-70% lower.
     # The LLM reads everything regardless; order only affects caching.
+    # v0.18.2 — device_section informs Ashley whether she's being invoked
+    # from the boss's mobile (no PC actions) or desktop. Empty for desktop
+    # = zero cache impact. On mobile it lists available vs unavailable
+    # actions.
+    device_section_str = device_section if device_section else ""
+
     stable_top = (
         f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
     )
     dynamic_bottom = (
-        f"{state_section}{tastes_section}{reminders_section}"
+        f"{device_section_str}{state_section}{tastes_section}{reminders_section}"
         f"{important_section}{important_dates_section}{goals_section}"
-        f"{mental_section}{time_section}"
+        f"{vulnerability_section}{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== CONNECTION PRINCIPLES — READ BEFORE EVERY OTHER RULE ===

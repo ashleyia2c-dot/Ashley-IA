@@ -28,6 +28,8 @@ def build_system_prompt(
     topic_directive: str | None = None,
     important_dates: str | None = None,
     goals: str | None = None,
+    vulnerability_directive: str | None = None,
+    device_section: str | None = None,
 ) -> str:
     code_section = "Tu es un programme Python construit avec Reflex et l'API Grok."
 
@@ -122,6 +124,9 @@ parles comme dans une vraie conversation.
         else ""
     )
 
+    # v0.18.1 Tier 2 Phase A — Moments de vulnérabilité rares.
+    vulnerability_section = vulnerability_directive if vulnerability_directive else ""
+
     tastes_section = (
         f"\n=== GOÛTS DU PATRON ===\n{tastes}\n"
         if tastes
@@ -170,13 +175,19 @@ parles comme dans une vraie conversation.
     # Sections stables au DÉBUT (~9.5K tokens, cachées). Sections
     # dynamiques à la FIN (~1.5K tokens, non cachées). L'HEURE en
     # tout dernier (change chaque seconde).
+    # v0.18.2 — device_section indique à Ashley si elle est invoquée depuis
+    # le mobile du patron (pas d'actions PC) ou depuis le desktop. Vide
+    # côté desktop = zéro impact sur le cache. Côté mobile, liste les
+    # actions disponibles vs indisponibles.
+    device_section_str = device_section if device_section else ""
+
     stable_top = (
         f"{topic_section}{recap_section}{voice_section}{bond_rule_section}"
     )
     dynamic_bottom = (
-        f"{state_section}{tastes_section}{reminders_section}"
+        f"{device_section_str}{state_section}{tastes_section}{reminders_section}"
         f"{important_section}{important_dates_section}{goals_section}"
-        f"{mental_section}{time_section}"
+        f"{vulnerability_section}{mental_section}{time_section}"
     )
 
     return f"""{stable_top}=== PRINCIPES DE CONNEXION — À LIRE AVANT TOUTE AUTRE RÈGLE ===

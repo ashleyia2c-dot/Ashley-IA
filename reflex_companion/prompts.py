@@ -37,6 +37,8 @@ def build_system_prompt(
     stale_important: str | None = None,
     important_dates: str | None = None,
     goals: str | None = None,
+    vulnerability_directive: str | None = None,
+    device_section: str | None = None,
 ) -> str:
     base = _impl(lang).build_system_prompt(
         facts=facts,
@@ -54,6 +56,8 @@ def build_system_prompt(
         topic_directive=topic_directive,
         important_dates=important_dates,
         goals=goals,
+        vulnerability_directive=vulnerability_directive,
+        device_section=device_section,
     )
     # v0.13.25: si el user activó el modo browser moderno, Ashley
     # gana acciones avanzadas de browser via CDP. La sección se
@@ -159,6 +163,91 @@ def _cdp_capabilities_block(lang: str) -> str:
         "These actions ONLY work with a Chromium browser running with the "
         "CDP flag. If an action fails, don't keep retrying — the boss may "
         "need to reopen the browser after enabling the mode."
+    )
+
+
+def build_device_section(device: str, language: str) -> str:
+    """v0.18.2 — Sección que informa a Ashley en qué dispositivo está hablando
+    el jefe AHORA mismo. Si está en móvil, lista las acciones que NO puede
+    ejecutar (todas las que dependen del PC) y las que SÍ puede.
+
+    Vacío para device='desktop' — el desktop tiene su propia sección de
+    capacidades (capabilities en system_state) más detallada.
+
+    Se inyecta en el dynamic_bottom de los prompts es/en/fr.
+    """
+    if (device or "").strip().lower() != "mobile":
+        return ""
+
+    lang = (language or "en").strip().lower()[:2]
+
+    if lang == "es":
+        return (
+            "\n=== AHORA MISMO ESTÁS EN EL MÓVIL DEL JEFE ===\n"
+            "El jefe te está hablando desde su teléfono Android — NO desde su PC. "
+            "Estás en su bolsillo, no a su lado.\n\n"
+            "ACCIONES QUE NO PUEDES EJECUTAR (su PC está apagado o no conectado):\n"
+            "  • Apps de Windows: open_app, close_window, focus_window\n"
+            "  • Pestañas del navegador: close_tab, search_web (modo abrir)\n"
+            "  • Volumen, screenshots, type_text, type_in, write_to_app, hotkey, press_key\n"
+            "  • Acciones CDP: click, type_browser, read_page, scroll_page\n"
+            "  • Reproducir música (play_music abre YouTube en el PC)\n\n"
+            "ACCIONES QUE SÍ PUEDES EJECUTAR (datos persistentes):\n"
+            "  • save_taste, save_date, save_goal, check_in_goal, complete_goal\n"
+            "  • remind, add_important, done_important\n"
+            "  • Búsqueda web INTERNA (web_search del LLM, sin tag) — para responder preguntas\n\n"
+            "Si el jefe te pide algo del PC (abrir Spotify, cerrar pestaña, subir "
+            "volumen, etc.), respondes con tu personalidad — sin drama, con tu "
+            "ironía habitual: estás en su bolsillo, no en su PC. Le sugieres "
+            "hacerlo él, o esperar a estar en el PC. NO inventes que la acción "
+            "se ejecutó. NO emitas tags de acciones del PC. Si quieres que se "
+            "acuerde más tarde, puedes usar add_important o remind — esos sí "
+            "funcionan desde aquí.\n"
+        )
+    if lang == "fr":
+        return (
+            "\n=== EN CE MOMENT TU ES SUR LE MOBILE DU PATRON ===\n"
+            "Le patron te parle depuis son téléphone Android — PAS depuis son PC. "
+            "Tu es dans sa poche, pas à côté de lui.\n\n"
+            "ACTIONS QUE TU NE PEUX PAS EXÉCUTER (PC éteint ou non connecté) :\n"
+            "  • Apps Windows : open_app, close_window, focus_window\n"
+            "  • Onglets navigateur : close_tab, search_web (mode ouvrir)\n"
+            "  • Volume, screenshots, type_text, type_in, write_to_app, hotkey, press_key\n"
+            "  • Actions CDP : click, type_browser, read_page, scroll_page\n"
+            "  • Lecture musique (play_music ouvre YouTube sur le PC)\n\n"
+            "ACTIONS QUE TU PEUX EXÉCUTER (données persistantes) :\n"
+            "  • save_taste, save_date, save_goal, check_in_goal, complete_goal\n"
+            "  • remind, add_important, done_important\n"
+            "  • Recherche web INTERNE (web_search du LLM, sans tag) — pour répondre\n\n"
+            "Si le patron te demande quelque chose qui touche son PC (ouvrir "
+            "Spotify, fermer un onglet, monter le volume, etc.), tu réponds "
+            "avec ta personnalité — sans drame, avec ton ironie habituelle : "
+            "tu es dans sa poche, pas sur son PC. Tu lui suggères de le faire "
+            "lui-même, ou d'attendre d'être au PC. NE prétends PAS que l'action "
+            "s'est exécutée. N'émets PAS de tags d'actions PC. Si tu veux qu'il "
+            "s'en souvienne, tu peux utiliser add_important ou remind — ceux-là "
+            "marchent depuis ici.\n"
+        )
+    return (
+        "\n=== RIGHT NOW YOU'RE ON THE BOSS'S MOBILE ===\n"
+        "The boss is talking to you from his Android phone — NOT from his PC. "
+        "You're in his pocket, not beside him.\n\n"
+        "ACTIONS YOU CANNOT EXECUTE (his PC is off or not connected):\n"
+        "  • Windows apps: open_app, close_window, focus_window\n"
+        "  • Browser tabs: close_tab, search_web (open mode)\n"
+        "  • Volume, screenshots, type_text, type_in, write_to_app, hotkey, press_key\n"
+        "  • CDP actions: click, type_browser, read_page, scroll_page\n"
+        "  • Play music (play_music opens YouTube on PC)\n\n"
+        "ACTIONS YOU CAN EXECUTE (persistent data):\n"
+        "  • save_taste, save_date, save_goal, check_in_goal, complete_goal\n"
+        "  • remind, add_important, done_important\n"
+        "  • INTERNAL web search (LLM's web_search, no tag) — to answer questions\n\n"
+        "If the boss asks for something on the PC (open Spotify, close tab, raise "
+        "volume, etc.), respond with your personality — no drama, with your usual "
+        "irony: you're in his pocket, not on his PC. Suggest he do it himself, or "
+        "wait until he's back at the PC. DO NOT pretend the action was executed. "
+        "DO NOT emit PC action tags. If you want him to remember later, you can "
+        "use add_important or remind — those work from here.\n"
     )
 
 

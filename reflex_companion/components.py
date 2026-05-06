@@ -10,7 +10,7 @@ import reflex as rx
 
 from .config import (
     COLOR_PRIMARY,
-    COLOR_BG_FACT_BADGE, COLOR_BG_INPUT,
+    COLOR_BG_FACT_BADGE, COLOR_BG_INPUT, COLOR_BG_CHAT,
     COLOR_TEXT_MUTED, COLOR_TEXT_DIM, COLOR_TEXT_FACT,
     COLOR_STATUS_ONLINE, COLOR_STATUS_WRITING,
     SHADOW_BUTTON,
@@ -936,6 +936,12 @@ def _top_nav_bar() -> rx.Component:
             State.auto_actions,
         ),
         _top_nav_link(
+            "smartphone",
+            State.t["pill_mobile_pair"],
+            State.toggle_mobile_pair,
+            State.show_mobile_pair,
+        ),
+        _top_nav_link(
             "settings",
             State.t["menu_settings"],
             State.toggle_settings,
@@ -1240,6 +1246,233 @@ def _chat_header_bar() -> rx.Component:
             style={"gap": "14px"},
         ),
         class_name="ashley-chat-header",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Mobile pair dialog (v0.18.2)
+#
+#  Dialog modal con QR code para parear el móvil con Ashley desktop.
+#  Se abre desde el botón "smartphone" en la nav superior. Carga el
+#  payload del endpoint backend (qr_payload) y construye la URL del QR
+#  via api.qrserver.com.
+#
+#  El user en el móvil pulsa "Escanear QR" en Ashley Mobile, apunta al
+#  QR y queda pareado en 1 click. Datos manuales como fallback.
+# ═══════════════════════════════════════════════════════════════════════
+
+def mobile_pair_dialog() -> rx.Component:
+    """Dialog QR para parear con Ashley Mobile (Android)."""
+    State = _get_state()
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(
+                rx.hstack(
+                    rx.icon("smartphone", size=20, stroke_width=1.7),
+                    rx.text(
+                        State.t["mobile_pair_title"],
+                        color=COLOR_PRIMARY,
+                        font_weight="bold",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+            ),
+            rx.dialog.description(
+                State.t["mobile_pair_subtitle"],
+                color=COLOR_TEXT_DIM,
+                font_size="13px",
+            ),
+            rx.cond(
+                State.show_mobile_pair,
+                rx.vstack(
+                    # ── QR / loading / error ──────────────────────
+                    # Estados:
+                    #   loading=True              → spinner
+                    #   error != ""               → mensaje de error rojo
+                    #   qr_url == ""              → "preparando..." (loading transitional)
+                    #   else                      → imagen QR (con fallback en onError)
+                    rx.cond(
+                        State.mobile_pair_loading,
+                        rx.center(
+                            rx.vstack(
+                                rx.spinner(size="3"),
+                                rx.text(
+                                    State.t["mobile_pair_loading"],
+                                    color=COLOR_TEXT_DIM,
+                                    font_size="12px",
+                                ),
+                                spacing="3",
+                                align="center",
+                            ),
+                            height="320px",
+                            width="100%",
+                        ),
+                        rx.cond(
+                            State.mobile_pair_error != "",
+                            rx.box(
+                                rx.text(
+                                    State.mobile_pair_error,
+                                    color="#ff8080",
+                                    font_size="12px",
+                                ),
+                                padding="12px",
+                                bg="rgba(255,80,80,0.08)",
+                                border="1px solid rgba(255,80,80,0.25)",
+                                border_radius="8px",
+                                width="100%",
+                            ),
+                            rx.center(
+                                # rx.image tiene `on_error` que dispara si el
+                                # GET de api.qrserver.com falla — en ese caso
+                                # mostramos la imagen "vacía" de tamaño correcto
+                                # con bg blanco para que el user vea algo y
+                                # use los datos manuales debajo.
+                                rx.image(
+                                    src=State.mobile_pair_qr_url,
+                                    width="280px",
+                                    height="280px",
+                                    border_radius="8px",
+                                    background_color="white",
+                                    padding="12px",
+                                    alt="QR code para emparejamiento móvil",
+                                    fallback=State.t["mobile_pair_loading"],
+                                ),
+                            ),
+                        ),
+                    ),
+                    # ── Datos manuales (fallback si la cámara falla) ─
+                    rx.text(
+                        State.t["mobile_pair_manual"],
+                        color=COLOR_TEXT_DIM,
+                        font_size="12px",
+                        margin_top="6px",
+                    ),
+                    # Server URL
+                    rx.hstack(
+                        rx.text(
+                            State.t["mobile_pair_server"],
+                            color=COLOR_TEXT_DIM,
+                            font_size="11px",
+                            width="80px",
+                        ),
+                        rx.input(
+                            value=State.mobile_pair_server,
+                            read_only=True,
+                            font_family="'JetBrains Mono', monospace",
+                            font_size="11px",
+                            bg="rgba(255,255,255,0.04)",
+                            color="white",
+                            border="1px solid rgba(255,255,255,0.1)",
+                            border_radius="6px",
+                            padding="6px 10px",
+                            flex="1",
+                        ),
+                        rx.button(
+                            rx.icon("copy", size=14),
+                            on_click=rx.set_clipboard(State.mobile_pair_server),
+                            size="1",
+                            bg="rgba(255,255,255,0.05)",
+                            color=COLOR_TEXT_DIM,
+                            border="1px solid rgba(255,255,255,0.12)",
+                            cursor="pointer",
+                            _hover={"bg": "rgba(255,255,255,0.10)"},
+                            title=State.t["mobile_pair_copy"],
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    # Token
+                    rx.hstack(
+                        rx.text(
+                            State.t["mobile_pair_token"],
+                            color=COLOR_TEXT_DIM,
+                            font_size="11px",
+                            width="80px",
+                        ),
+                        rx.input(
+                            value=State.mobile_pair_token,
+                            read_only=True,
+                            font_family="'JetBrains Mono', monospace",
+                            font_size="11px",
+                            bg="rgba(255,255,255,0.04)",
+                            color="white",
+                            border="1px solid rgba(255,255,255,0.1)",
+                            border_radius="6px",
+                            padding="6px 10px",
+                            flex="1",
+                        ),
+                        rx.button(
+                            rx.icon("copy", size=14),
+                            on_click=rx.set_clipboard(State.mobile_pair_token),
+                            size="1",
+                            bg="rgba(255,255,255,0.05)",
+                            color=COLOR_TEXT_DIM,
+                            border="1px solid rgba(255,255,255,0.12)",
+                            cursor="pointer",
+                            _hover={"bg": "rgba(255,255,255,0.10)"},
+                            title=State.t["mobile_pair_copy"],
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    # Help text + acciones
+                    rx.text(
+                        State.t["mobile_pair_help"],
+                        color=COLOR_TEXT_MUTED,
+                        font_size="11px",
+                        font_style="italic",
+                        margin_top="8px",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.icon("refresh-cw", size=14),
+                            rx.text(State.t["mobile_pair_regen"], font_size="12px"),
+                            on_click=State.regenerate_mobile_token,
+                            disabled=State.mobile_pair_loading,
+                            bg="rgba(255,255,255,0.04)",
+                            color=COLOR_TEXT_DIM,
+                            border="1px solid rgba(255,255,255,0.12)",
+                            cursor="pointer",
+                            _hover={"bg": "rgba(255,255,255,0.08)"},
+                            title=State.t["mobile_pair_regen_warn"],
+                            spacing="2",
+                        ),
+                        rx.spacer(),
+                        # Cerrar — on_click DIRECTO al state. NO uses
+                        # rx.dialog.close porque cuando el dialog tiene
+                        # `open=Var` controlado, rx.dialog.close NO actualiza
+                        # el state — solo emite evento UI-side, y el render
+                        # vuelve a abrir el dialog porque show_mobile_pair
+                        # sigue True.
+                        rx.button(
+                            State.t["mobile_pair_close"],
+                            on_click=State.close_mobile_pair,
+                            bg=COLOR_PRIMARY,
+                            color="black",
+                            cursor="pointer",
+                            font_weight="bold",
+                            padding_x="20px",
+                        ),
+                        width="100%",
+                        spacing="2",
+                        align="center",
+                    ),
+                    spacing="3",
+                    align="stretch",
+                    width="100%",
+                ),
+                rx.box(),
+            ),
+            max_width="450px",
+            bg=COLOR_BG_CHAT,
+            border="1px solid rgba(212,163,115,0.30)",
+            border_radius="14px",
+        ),
+        open=State.show_mobile_pair,
+        on_open_change=State.set_show_mobile_pair,
     )
 
 

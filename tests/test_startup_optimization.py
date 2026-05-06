@@ -49,19 +49,35 @@ class TestEmbeddedFrontendServer:
             content,
         ), "El servidor embebido debe usar http.createServer (no Express, no sirv)"
 
-    def test_binds_localhost_only(self):
-        """Seguridad: NUNCA bind a 0.0.0.0 — solo localhost."""
+    def test_lan_default_with_paranoid_optout(self):
+        """v0.18.2 final — Embedded server bind a 0.0.0.0 por DEFAULT (igual
+        que Reflex). Solo se desactiva si user pone lan_disabled=true explícito.
+
+        Razones: Reflex backend ya bindea a 0.0.0.0 (la superficie de
+        exposición LAN ya estaba ahí). Auth por pairing token protege
+        endpoints sensibles."""
         content = _read_main_js()
-        # Buscamos el listen del servidor embebido
+        assert "127.0.0.1" in content and "0.0.0.0" in content, (
+            "Embedded server debe contemplar ambos hosts."
+        )
+        # Decisión basada en _readMobileLanDisabled
         match = re.search(
-            r"_startEmbeddedFrontendServer[\s\S]+?\.listen\(([^,]+),\s*['\"]([^'\"]+)['\"]",
+            r"_readMobileLanDisabled[\s\S]+?\.listen\(",
             content,
         )
-        assert match, "No encontré server.listen(port, host) en _startEmbeddedFrontendServer"
-        host = match.group(2)
-        assert host == "127.0.0.1", (
-            f"El servidor embebido bind a {host!r} — DEBE ser 127.0.0.1. "
-            f"Bind a 0.0.0.0 expone el frontend a la red local."
+        assert match, (
+            "El bind debe pasar por _readMobileLanDisabled para decidir."
+        )
+        # Y verificar que lan_disabled === true es el único trigger para
+        # cambiar a 127.0.0.1 (modo paranoid)
+        flag_func = re.search(
+            r"function _readMobileLanDisabled[\s\S]+?(?=\nfunction )",
+            content,
+        )
+        assert flag_func
+        assert "lan_disabled === true" in flag_func.group(0), (
+            "_readMobileLanDisabled debe verificar `lan_disabled === true` "
+            "explícitamente — evita activación accidental del modo paranoid."
         )
 
     def test_path_traversal_blocked(self):

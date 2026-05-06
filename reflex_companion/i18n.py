@@ -139,6 +139,21 @@ UI = {
         "menu_initiative":   "Speak now",
         "menu_settings":     "Full Settings...",
 
+        # Mobile pair (v0.18.2) — botón "Conectar móvil" en la nav superior
+        "pill_mobile_pair":      "Mobile",
+        "mobile_pair_title":     "Connect your mobile",
+        "mobile_pair_subtitle":  "Open Ashley Mobile on your phone and scan this QR.",
+        "mobile_pair_loading":   "Loading...",
+        "mobile_pair_manual":    "Or enter manually:",
+        "mobile_pair_server":    "Server",
+        "mobile_pair_token":     "Token",
+        "mobile_pair_copy":      "Copy",
+        "mobile_pair_copied":    "Copied",
+        "mobile_pair_regen":     "Regenerate token",
+        "mobile_pair_regen_warn": "Regenerating invalidates any paired phones. They'll have to scan again.",
+        "mobile_pair_close":     "Close",
+        "mobile_pair_help":      "No mobile yet? Download Ashley Mobile (.apk) from your purchase email.",
+
         # News feed (v0.13.3) — Ashley pone aquí sus descubrimientos
         "pill_news":         "News",
         "news_tooltip_on":   "See what Ashley found for you",
@@ -354,6 +369,21 @@ UI = {
         "menu_initiative":   "Habla tú",
         "menu_settings":     "Más ajustes...",
 
+        # Mobile pair (v0.18.2)
+        "pill_mobile_pair":      "Móvil",
+        "mobile_pair_title":     "Conectar tu móvil",
+        "mobile_pair_subtitle":  "Abre Ashley Mobile en tu teléfono y escanea este QR.",
+        "mobile_pair_loading":   "Cargando...",
+        "mobile_pair_manual":    "O introduce manualmente:",
+        "mobile_pair_server":    "Servidor",
+        "mobile_pair_token":     "Token",
+        "mobile_pair_copy":      "Copiar",
+        "mobile_pair_copied":    "Copiado",
+        "mobile_pair_regen":     "Regenerar token",
+        "mobile_pair_regen_warn": "Regenerar invalida los móviles ya pareados. Tendrán que escanear de nuevo.",
+        "mobile_pair_close":     "Cerrar",
+        "mobile_pair_help":      "¿Aún sin móvil? Descarga Ashley Mobile (.apk) del correo de tu compra.",
+
         # News feed
         "pill_news":         "Noticias",
         "news_tooltip_on":   "Ver lo que Ashley encontró para ti",
@@ -562,6 +592,21 @@ UI = {
         "menu_pin":          "Au-dessus",
         "menu_initiative":   "Parle",
         "menu_settings":     "Plus de réglages...",
+
+        # Mobile pair (v0.18.2)
+        "pill_mobile_pair":      "Mobile",
+        "mobile_pair_title":     "Connecter ton mobile",
+        "mobile_pair_subtitle":  "Ouvre Ashley Mobile sur ton téléphone et scanne ce QR.",
+        "mobile_pair_loading":   "Chargement...",
+        "mobile_pair_manual":    "Ou saisis manuellement :",
+        "mobile_pair_server":    "Serveur",
+        "mobile_pair_token":     "Jeton",
+        "mobile_pair_copy":      "Copier",
+        "mobile_pair_copied":    "Copié",
+        "mobile_pair_regen":     "Régénérer le jeton",
+        "mobile_pair_regen_warn": "Régénérer invalide les mobiles déjà appairés. Ils devront re-scanner.",
+        "mobile_pair_close":     "Fermer",
+        "mobile_pair_help":      "Pas encore de mobile ? Télécharge Ashley Mobile (.apk) depuis l'email d'achat.",
 
         # News feed
         "pill_news":         "Actus",

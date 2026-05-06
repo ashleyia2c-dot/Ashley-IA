@@ -749,11 +749,48 @@ function makeLineLogger(prefix, isErr) {
   };
 }
 
+// ─── Limpiar bytecode cacheado stale (solo dev) ────────────────────────────
+// Si el bytecode .pyc es más antiguo que el .py correspondiente, Python
+// debería detectar y recompilar automático. PERO hay edge cases (procesos
+// previos con módulos pre-cargados, mtime resolution en Windows, etc.) que
+// pueden hacer que Python use bytecode viejo aunque el .py haya cambiado.
+//
+// Bug real reportado v0.18.2: cambios al State.py no se reflejaban en
+// runtime — se ejecutaba código viejo del .pyc cacheado.
+//
+// Fix: en DEV mode, borrar __pycache__ antes de cada arranque. Penalty
+// ~100ms al startup. En PROD (instalado), el .pyc nunca está stale porque
+// el .py no se modifica → no hace falta borrar.
+function _clearStalePycache() {
+  if (!DEV_MODE) return;
+  try {
+    const pycacheDirs = [
+      path.join(PROJECT_ROOT, 'reflex_companion', '__pycache__'),
+      path.join(PROJECT_ROOT, 'reflex_companion', 'reflex_companion', '__pycache__'),
+    ];
+    let cleaned = 0;
+    for (const d of pycacheDirs) {
+      if (fs.existsSync(d)) {
+        fs.rmSync(d, { recursive: true, force: true });
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      log(`Cleaned ${cleaned} __pycache__ dir(s) for fresh module load (dev only)`);
+    }
+  } catch (e) {
+    log(`pycache cleanup warning: ${e && e.message}`);
+  }
+}
+
 // ─── Arrancar Reflex con env vars de seguridad ────────────────────────────
 function startReflex(apiKey) {
   if (!fs.existsSync(VENV_REFLEX)) {
     throw new Error(`No encuentro reflex.exe en ${VENV_REFLEX}`);
   }
+
+  // En dev, garantizar que Python no carga bytecode stale.
+  _clearStalePycache();
 
   reflexApiKey = apiKey;
   log(`Arrancando Reflex (intento ${reflexRestartCount + 1}) desde ${PROJECT_ROOT}`);
@@ -826,25 +863,22 @@ function _isFrontendBuildFresh(indexHtmlPath) {
 
   // Directorios a vigilar — si cualquier archivo más nuevo que el
   // build, consideramos stale.
+  // v0.18.2 — añadido .html y .json para detectar cambios en
+  // assets/mobile/{index.html, manifest.json, sw.js}.
   const watchDirs = [
     { dir: path.join(PROJECT_ROOT, 'reflex_companion'), exts: ['.py'] },
-    { dir: path.join(PROJECT_ROOT, 'assets'),           exts: ['.js', '.css'] },
+    { dir: path.join(PROJECT_ROOT, 'assets'),           exts: ['.js', '.css', '.html', '.json'] },
   ];
 
   for (const { dir, exts } of watchDirs) {
     if (!fs.existsSync(dir)) continue;
     try {
-      const files = fs.readdirSync(dir);
-      for (const f of files) {
-        if (!exts.some(ext => f.endsWith(ext))) continue;
-        const fullPath = path.join(dir, f);
-        try {
-          const stat = fs.statSync(fullPath);
-          if (stat.isFile() && stat.mtimeMs > buildMtime) {
-            log(`stale build: ${path.basename(dir)}/${f} newer than frontend build`);
-            return false;
-          }
-        } catch {}
+      // v0.18.2 — recursivo (antes solo top-level). Necesario para que
+      // assets/mobile/ y otras subcarpetas inviden el build cuando cambian.
+      const stale = _findStaleFile(dir, exts, buildMtime);
+      if (stale) {
+        log(`stale build: ${stale} newer than frontend build`);
+        return false;
       }
     } catch (e) {
       log(`freshness scan failed for ${dir}: ${e.message}`);
@@ -852,6 +886,35 @@ function _isFrontendBuildFresh(indexHtmlPath) {
     }
   }
   return true;
+}
+
+// v0.18.2 — Recorre `dir` recursivo buscando un archivo con extensión en
+// `exts` que sea más nuevo que `buildMtime`. Devuelve el path relativo
+// del primer match (para logging), o null si todo está al día.
+function _findStaleFile(dir, exts, buildMtime, depth = 0) {
+  if (depth > 8) return null;  // safety: evita loops por symlinks
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const found = _findStaleFile(fullPath, exts, buildMtime, depth + 1);
+      if (found) return found;
+    } else if (entry.isFile()) {
+      if (!exts.some(ext => entry.name.endsWith(ext))) continue;
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.mtimeMs > buildMtime) {
+          return fullPath;
+        }
+      } catch {}
+    }
+  }
+  return null;
 }
 
 // Fast-path: backend Python (--backend-only) + frontend servido por
@@ -874,6 +937,7 @@ function _startSplitProcesses(apiKey) {
       XAI_API_KEY: apiKey,
       ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
       ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
+      ASHLEY_FRONTEND_PORT: String(REFLEX_FRONTEND_PORT),
       // v0.16.14 — fuerza UTF-8 en stdin/stdout/stderr de Python. Sin esto,
       // si Ashley responde con caracteres no-ASCII (→, emojis, café, etc.) y
       // ALGÚN print/log los toca, Python en Windows cmd cp1252 lanza
@@ -883,6 +947,14 @@ function _startSplitProcesses(apiKey) {
       // PYTHONIOENCODING=utf-8 cubre TODOS los prints/logs sin necesidad de
       // sanitizar cada string a mano.
       PYTHONIOENCODING: 'utf-8',
+      // v0.18.2 — en DEV mode evitamos escribir bytecode .pyc. Sin esto,
+      // Python escribe __pycache__/*.pyc al primer import, y aunque
+      // normalmente detecta .py más nuevos para recompilar, hay edge
+      // cases (mtime resolution Windows, módulos pre-cargados) donde el
+      // .pyc viejo se sigue usando. En PROD el .py no se modifica → el
+      // bytecode es siempre válido y queremos cachearlo para arranques
+      // más rápidos.
+      ...(DEV_MODE ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
     },
     shell: false,
     windowsHide: true,
@@ -985,6 +1057,14 @@ function _startEmbeddedFrontendServer(buildDir, port) {
       res.end('Bad Request');
       return;
     }
+
+    // v0.18.2 — Proxy /api/* al backend Starlette para que el móvil use
+    // UNA sola URL (frontend port) y no tenga que conocer ambos puertos.
+    if (urlPath.startsWith('/api/')) {
+      _proxyToBackend(req, res);
+      return;
+    }
+
     // / → index.html
     if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
 
@@ -1003,11 +1083,78 @@ function _startEmbeddedFrontendServer(buildDir, port) {
     log(`Embedded frontend client error: ${err.message}`);
     try { socket.destroy(); } catch {}
   });
-  server.listen(port, '127.0.0.1', () => {
-    log(`Embedded frontend server listening on 127.0.0.1:${port} (serving ${buildDir})`);
+  // v0.18.2 — bind a 0.0.0.0 por DEFAULT igual que Reflex.
+  // Razones:
+  //   • Reflex frontend (slow-path) ya bind a 0.0.0.0 por defecto, así que la
+  //     superficie de exposición LAN ya estaba ahí — no la aumentamos.
+  //   • La app móvil necesita LAN access para conectar.
+  //   • Auth por token protege /api/mobile/* (sensible). Otros /api/* asumen
+  //     same-origin del desktop frontend (consistente con behavior previo).
+  // Opt-OUT: si el user pone `lan_disabled: true` en mobile_pairing.json,
+  // bindeamos solo localhost (modo paranoid).
+  const lanDisabled = _readMobileLanDisabled();
+  const bindHost = lanDisabled ? '127.0.0.1' : '0.0.0.0';
+  server.listen(port, bindHost, () => {
+    log(`Embedded frontend server listening on ${bindHost}:${port} (serving ${buildDir})`);
+    if (!lanDisabled) {
+      log(`Mobile access ready — LAN devices can connect via http://<your-ip>:${port}/mobile/`);
+    }
   });
 
   return server;
+}
+
+// v0.18.2 — Lee si el user pidió DESACTIVAR LAN access (modo paranoid opt-out).
+// Por DEFAULT LAN está activo. Solo se desactiva si lan_disabled=true.
+function _readMobileLanDisabled() {
+  try {
+    const flagPath = path.join(ASHLEY_DATA_DIR, 'mobile_pairing.json');
+    if (!fs.existsSync(flagPath)) return false;
+    const raw = fs.readFileSync(flagPath, 'utf-8');
+    const data = JSON.parse(raw);
+    return Boolean(data && data.lan_disabled === true);
+  } catch {
+    return false;
+  }
+}
+
+// v0.18.2 — Proxy de /api/* al backend Starlette.
+// Permite que el móvil llame a /api/mobile/chat usando la URL del frontend
+// (port 17300 etc.) y nosotros redirigimos al backend (port 17800).
+// El móvil no tiene que conocer ambos puertos.
+function _proxyToBackend(clientReq, clientRes) {
+  if (!REFLEX_BACKEND_PORT) {
+    clientRes.statusCode = 503;
+    clientRes.end('Backend not ready');
+    return;
+  }
+  const proxyOpts = {
+    hostname: '127.0.0.1',
+    port:     REFLEX_BACKEND_PORT,
+    path:     clientReq.url,
+    method:   clientReq.method,
+    headers:  Object.assign({}, clientReq.headers, {
+      // Forzar host para evitar SNI/Host header confusion
+      host: `127.0.0.1:${REFLEX_BACKEND_PORT}`,
+    }),
+  };
+  const proxyReq = http.request(proxyOpts, (proxyRes) => {
+    clientRes.statusCode = proxyRes.statusCode || 502;
+    // Copiar headers (incluido CORS que pone Starlette)
+    for (const [k, v] of Object.entries(proxyRes.headers)) {
+      try { clientRes.setHeader(k, v); } catch { /* invalid header name */ }
+    }
+    proxyRes.pipe(clientRes);
+  });
+  proxyReq.on('error', (err) => {
+    log(`API proxy error: ${err.message}`);
+    if (!clientRes.headersSent) {
+      clientRes.statusCode = 502;
+      clientRes.end('Proxy error');
+    }
+  });
+  // Pipe el body (POST/PUT)
+  clientReq.pipe(proxyReq);
 }
 
 // Slow-path original: un solo proceso reflex que compila + sirve todo.
@@ -1025,8 +1172,12 @@ function _startSingleReflexProcess(apiKey) {
       XAI_API_KEY: apiKey,
       ASHLEY_DATA_DIR: ASHLEY_DATA_DIR,
       ASHLEY_BACKEND_PORT: String(REFLEX_BACKEND_PORT),
+      ASHLEY_FRONTEND_PORT: String(REFLEX_FRONTEND_PORT),
       // v0.16.14 — ver comentario en _startSplitProcesses (mismo motivo).
       PYTHONIOENCODING: 'utf-8',
+      // v0.18.2 — DEV mode: no escribir bytecode .pyc para evitar que
+      // cambios al .py no se reflejen por usar cache stale.
+      ...(DEV_MODE ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
     },
     shell: false,
     windowsHide: true,

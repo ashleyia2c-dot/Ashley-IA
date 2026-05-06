@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ashley — Conectar móvil</title>
+  <link rel="icon" href="/ashley_pfp.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-app:        #0a0408;
+      --bg-elevated:   #150810;
+      --bg-card:       #1f0d15;
+      --text-primary:  #e8dcc4;
+      --text-muted:    #b9a692;
+      --text-dim:      #7d6e60;
+      --accent:        #d4a373;
+      --accent-strong: #e8b88a;
+      --danger:        #c97373;
+      --success:       #8ac98a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; min-height: 100vh;
+      background:
+        radial-gradient(ellipse at top left, rgba(212,163,115,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at bottom right, rgba(140,60,70,0.12) 0%, transparent 55%),
+        var(--bg-app);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 42px;
+      font-weight: 600;
+      margin: 0 0 6px;
+      text-shadow: 0 0 20px rgba(212,163,115,0.30);
+    }
+    header p {
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid rgba(212,163,115,0.18);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+    .qr-card {
+      text-align: center;
+    }
+    .qr-wrap {
+      display: inline-block;
+      padding: 16px;
+      background: white;
+      border-radius: 12px;
+      margin: 8px 0 16px;
+    }
+    .qr-wrap img {
+      display: block;
+      width: 280px; height: 280px;
+      max-width: 100%;
+    }
+    .qr-loading {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 280px; height: 280px;
+      color: var(--text-dim);
+    }
+    .qr-error {
+      color: var(--danger);
+      padding: 24px;
+    }
+    .step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--bg-app);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .step-text {
+      padding-top: 4px;
+      color: var(--text-primary);
+      line-height: 1.5;
+    }
+    .step-text small {
+      display: block;
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: 2px;
+    }
+    .manual-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(212,163,115,0.15);
+    }
+    .manual-section h3 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 20px;
+      font-weight: 500;
+      margin: 0 0 12px;
+      color: var(--text-primary);
+    }
+    .field-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .field-row label {
+      flex-shrink: 0;
+      width: 90px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .field-row code {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid rgba(212,163,115,0.18);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--accent-strong);
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .copy-btn {
+      flex-shrink: 0;
+      background: rgba(212,163,115,0.15);
+      border: 1px solid rgba(212,163,115,0.30);
+      color: var(--accent);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: rgba(212,163,115,0.25); }
+    .copy-btn.copied { background: var(--success); color: var(--bg-app); border-color: var(--success); }
+
+    .actions { margin-top: 24px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      flex: 1;
+      min-width: 140px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+    }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid rgba(212,163,115,0.25);
+    }
+    .btn-secondary:hover { background: rgba(212,163,115,0.08); color: var(--accent); }
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+    .btn-danger:hover { background: rgba(201,115,115,0.10); }
+
+    .info-box {
+      background: rgba(212,163,115,0.08);
+      border: 1px solid rgba(212,163,115,0.20);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-top: 16px;
+    }
+    .info-box strong { color: var(--text-primary); }
+
+    @media (max-width: 480px) {
+      .container { padding: 20px 14px; }
+      h1 { font-size: 34px; }
+      .card { padding: 20px 16px; }
+      .qr-wrap img { width: 240px; height: 240px; }
+      .field-row { flex-direction: column; align-items: stretch; }
+      .field-row label { width: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Conectar móvil</h1>
+      <p>Empareja la app móvil de Ashley con esta instalación.</p>
+    </header>
+
+    <div class="card qr-card">
+      <h2 style="font-family: 'Cormorant Garamond', serif; font-weight: 500; margin: 0 0 16px;">Escanea desde tu móvil</h2>
+      <div id="qr-container">
+        <div class="qr-loading">Generando código...</div>
+      </div>
+      <p style="color: var(--text-muted); margin: 12px 0 0; font-size: 13px;">
+        Abre la app móvil de Ashley en tu teléfono y escanea este código.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2 style="font-family: 'Cormorant Garamond', serif; font-weight: 500; margin: 0 0 16px;">Pasos</h2>
+      <div class="step">
+        <span class="step-num">1</span>
+        <div class="step-text">
+          Instala la app Ashley en tu Android.
+          <small>Desde Play Store o como PWA — abre <code>http://&lt;tu-ip&gt;:&lt;puerto&gt;/mobile/</code> en Chrome del móvil → menú → "Añadir a pantalla de inicio".</small>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <div class="step-text">
+          Abre la app y pulsa <strong>"Escanear QR"</strong>.
+          <small>Concede permiso de cámara cuando lo pida.</small>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <div class="step-text">
+          Apunta la cámara al QR de arriba.
+          <small>Conexión automática — listo para usar.</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="manual-section" style="border-top: none; margin-top: 0; padding-top: 0;">
+        <h3>O introduce manualmente</h3>
+        <div class="field-row">
+          <label>Servidor</label>
+          <code id="server-url">cargando...</code>
+          <button class="copy-btn" data-copy="server-url">Copiar</button>
+        </div>
+        <div class="field-row">
+          <label>Código</label>
+          <code id="token-text">cargando...</code>
+          <button class="copy-btn" data-copy="token-text">Copiar</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-secondary" id="refresh-qr">Refrescar</button>
+        <button class="btn btn-danger" id="regen-token">Regenerar código (desconecta móviles)</button>
+      </div>
+
+      <div class="info-box">
+        <strong>Seguridad:</strong> el código actúa como contraseña — no lo
+        compartas. Si crees que se filtró, regenera el código y todos los
+        móviles pareados se desconectarán hasta volver a escanear el nuevo QR.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const qrContainer = document.getElementById('qr-container');
+      const serverUrlEl = document.getElementById('server-url');
+      const tokenTextEl = document.getElementById('token-text');
+      const refreshBtn  = document.getElementById('refresh-qr');
+      const regenBtn    = document.getElementById('regen-token');
+
+      async function fetchPayload() {
+        const res = await fetch('/api/mobile/qr_payload');
+        if (!res.ok) throw new Error('payload fetch failed');
+        return await res.json();
+      }
+
+      function buildQrPayloadString(server, token) {
+        // Formato: JSON con server + token. La app móvil lo parsea.
+        return JSON.stringify({ s: server, t: token });
+      }
+
+      function renderQr(payload) {
+        const data = encodeURIComponent(buildQrPayloadString(payload.server, payload.token));
+        // Use api.qrserver.com for QR generation. Free, fast, public domain.
+        // Alternatives: include qrcodejs lib inline (~5KB) for offline generation.
+        const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=560x560&margin=2&data=${data}`;
+        qrContainer.innerHTML = `
+          <div class="qr-wrap"><img src="${qrSrc}" alt="QR pairing code" loading="eager"></div>
+        `;
+        serverUrlEl.textContent = payload.server;
+        tokenTextEl.textContent = payload.token;
+      }
+
+      async function loadAndRender() {
+        try {
+          const payload = await fetchPayload();
+          if (payload.lan_ip === '127.0.0.1') {
+            qrContainer.innerHTML = `
+              <div class="qr-error">
+                ⚠️ No se detectó IP de red local. Asegúrate de estar
+                conectado al WiFi.
+              </div>
+            `;
+            return;
+          }
+          renderQr(payload);
+        } catch (e) {
+          qrContainer.innerHTML = `
+            <div class="qr-error">Error generando QR: ${e.message}</div>
+          `;
+        }
+      }
+
+      // Copy buttons
+      document.querySelectorAll('.copy-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const targetId = btn.dataset.copy;
+          const text = document.getElementById(targetId).textContent;
+          try {
+            await navigator.clipboard.writeText(text);
+            const orig = btn.textContent;
+            btn.textContent = '¡Copiado!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              btn.textContent = orig;
+              btn.classList.remove('copied');
+            }, 1500);
+          } catch (e) {
+            alert('No pude copiar. Selecciona manualmente.');
+          }
+        });
+      });
+
+      // Refresh
+      refreshBtn.addEventListener('click', () => {
+        qrContainer.innerHTML = '<div class="qr-loading">Generando código...</div>';
+        loadAndRender();
+      });
+
+      // Regen token
+      regenBtn.addEventListener('click', async () => {
+        if (!confirm('¿Regenerar el código? Todos los móviles pareados perderán acceso y deberán escanear el nuevo QR.')) return;
+        try {
+          await fetch('/api/mobile/regen_token', { method: 'POST' });
+          qrContainer.innerHTML = '<div class="qr-loading">Generando nuevo código...</div>';
+          await loadAndRender();
+        } catch (e) {
+          alert('Error regenerando token: ' + e.message);
+        }
+      });
+
+      // Initial load
+      loadAndRender();
+    })();
+  </script>
+</body>
+</html>

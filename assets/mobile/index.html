@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1a0a10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <title>Ashley</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/mobile/manifest.json">
+  <link rel="icon" type="image/png" href="/ashley_pfp.jpg">
+  <link rel="apple-touch-icon" href="/ashley_pfp.jpg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/mobile/app.css">
+</head>
+<body>
+
+  <!-- Setup screen (shown if not paired) -->
+  <div id="setup-screen" class="screen setup-screen" hidden>
+    <div class="setup-content">
+      <div class="setup-logo">
+        <h1>Ashley</h1>
+        <p class="setup-subtitle">Companion</p>
+      </div>
+      <div class="setup-card">
+        <h2>Conectar con tu PC</h2>
+        <p class="setup-help">
+          En tu PC, abre <strong>Ashley → Conectar móvil</strong> para
+          ver el código QR. Después escanéalo aquí.
+        </p>
+        <button id="scan-qr-btn" class="primary-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 8px;"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><line x1="14" y1="14" x2="14" y2="14.01"/><line x1="17" y1="14" x2="17" y2="14.01"/><line x1="14" y1="17" x2="14" y2="17.01"/><line x1="17" y1="17" x2="17" y2="17.01"/></svg>
+          Escanear QR
+        </button>
+        <div id="setup-status" class="setup-status"></div>
+        <details class="setup-manual-toggle">
+          <summary>O introducir manualmente</summary>
+          <label>
+            <span>Servidor</span>
+            <input type="url" id="setup-server-url" placeholder="http://192.168.1.X:17300" autocapitalize="off" autocorrect="off">
+            <small class="setup-hint">La URL que muestra <code>Conectar móvil</code> en tu PC.</small>
+          </label>
+          <label>
+            <span>Código de emparejamiento</span>
+            <input type="text" id="setup-token" placeholder="código que muestra tu PC" autocapitalize="off" autocorrect="off">
+          </label>
+          <button id="setup-connect-btn" class="primary-btn-secondary">Conectar manualmente</button>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR scanner overlay -->
+  <div id="scanner-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop"></div>
+    <div class="scanner-content">
+      <header class="overlay-header">
+        <h2>Escanear QR</h2>
+        <button id="scanner-close" class="icon-btn" aria-label="Cerrar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div class="scanner-viewport">
+        <video id="scanner-video" autoplay playsinline muted></video>
+        <div class="scanner-frame"></div>
+        <canvas id="scanner-canvas" hidden></canvas>
+      </div>
+      <p id="scanner-status" class="scanner-status">Apunta la cámara al código QR</p>
+    </div>
+  </div>
+
+  <!-- Main app (chat + memories) -->
+  <div id="app-screen" class="screen app-screen" hidden>
+    <header class="app-header">
+      <img src="/ashley_pfp.jpg" alt="Ashley" class="header-avatar">
+      <div class="header-info">
+        <h1>Ashley</h1>
+        <span class="header-status" id="conn-status">conectada</span>
+      </div>
+      <div class="header-actions">
+        <button id="memories-btn" class="icon-btn" title="Memorias" aria-label="Memorias">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+        </button>
+        <button id="settings-btn" class="icon-btn" title="Ajustes" aria-label="Ajustes">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <footer class="composer">
+      <textarea id="msg-input" placeholder="Escribe un mensaje..." rows="1" autocapitalize="sentences"></textarea>
+      <button id="send-btn" class="send-btn" aria-label="Enviar">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+      </button>
+    </footer>
+  </div>
+
+  <!-- Memories panel (overlay) -->
+  <div id="memories-panel" class="overlay" hidden>
+    <div class="overlay-backdrop"></div>
+    <div class="overlay-content">
+      <header class="overlay-header">
+        <h2>Memorias del jefe</h2>
+        <button id="memories-close" class="icon-btn" aria-label="Cerrar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div id="memories-list" class="memories-list"></div>
+    </div>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settings-panel" class="overlay" hidden>
+    <div class="overlay-backdrop"></div>
+    <div class="overlay-content">
+      <header class="overlay-header">
+        <h2>Ajustes</h2>
+        <button id="settings-close" class="icon-btn" aria-label="Cerrar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div class="settings-content">
+        <h3 class="settings-section-title">Conexión con tu PC</h3>
+        <label>
+          <span>Servidor</span>
+          <input type="url" id="settings-server-url" autocapitalize="off" autocorrect="off">
+        </label>
+        <label>
+          <span>Código emparejamiento</span>
+          <input type="text" id="settings-token" autocapitalize="off" autocorrect="off">
+        </label>
+        <div class="settings-actions">
+          <button id="settings-save-btn" class="primary-btn">Guardar y reconectar</button>
+          <button id="settings-disconnect-btn" class="danger-btn">Desconectar</button>
+        </div>
+
+        <!-- Modo offline (BYOK) — v0.18.2 -->
+        <h3 class="settings-section-title">Modo offline</h3>
+        <p class="settings-hint">
+          Cuando tu PC está apagado, Ashley puede chatear sola conectándose
+          directo al modelo de IA con tu API key. Sin esto, el móvil necesita
+          tu PC encendido para responder.
+        </p>
+        <label>
+          <span>Proveedor</span>
+          <select id="settings-offline-provider">
+            <option value="">— Desactivado —</option>
+            <option value="xai">xAI (Grok)</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+        </label>
+        <label id="settings-offline-key-label">
+          <span>API key</span>
+          <input type="password" id="settings-offline-key"
+                 autocapitalize="off" autocorrect="off"
+                 placeholder="xai-... o sk-or-...">
+        </label>
+        <label id="settings-offline-model-label">
+          <span>Modelo (opcional)</span>
+          <input type="text" id="settings-offline-model"
+                 autocapitalize="off" autocorrect="off"
+                 placeholder="grok-4-1-fast-non-reasoning">
+        </label>
+        <div class="settings-actions">
+          <button id="settings-offline-test-btn" class="secondary-btn">
+            Probar conexión
+          </button>
+          <button id="settings-offline-save-btn" class="primary-btn">
+            Guardar
+          </button>
+        </div>
+        <p id="settings-offline-status" class="settings-status" hidden></p>
+
+        <p class="settings-info">
+          Ashley v0.18.2 — Mobile companion<br>
+          Con conexión al PC: Ashley con todas sus features (voz, actions, vision).<br>
+          Sin PC + modo offline configurado: chat continuo desde cualquier sitio.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/mobile/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/mobile/sw.js', { scope: '/mobile/' })
+          .catch(err => console.warn('SW registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>

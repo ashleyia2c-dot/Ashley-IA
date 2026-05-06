@@ -309,6 +309,11 @@ class State(rx.State):
     # (se fue a dormir, está fuera del PC). Se resetea en cuanto el
     # user escriba. No persiste en disco — solo sesión en memoria.
     _consecutive_unanswered_proactive: int = 0
+    # v0.18.1 — Followup automático cada ~15 min (independiente del absence msg).
+    # Counter separado para no interferir con el sistema de >6h de ausencia.
+    # Reset en send_message cuando el user responde.
+    _consecutive_unanswered_followups: int = 0
+    _last_followup_at: str = ""  # ISO timestamp; vacío = nunca
 
     # ── News feed (v0.13.3) ───────────────────
     # Descubrimientos de Ashley (discovery) ya no interrumpen el chat —
@@ -318,6 +323,20 @@ class State(rx.State):
     news_items: list[dict[str, str]] = []
     news_unread: int = 0
     show_news: bool = False  # toggle entre vista chat y vista noticias
+
+    # ── Mobile pair dialog (v0.18.2) ──────────
+    # Cuando el user pulsa el botón "Conectar móvil" en la nav superior, se
+    # abre un modal con un QR para que escanee desde Ashley Mobile en su
+    # Android. El payload contiene server URL + pairing token. La página
+    # connect.html sigue existiendo como fallback (browser directo), pero
+    # este dialog es el camino recomendado para usuarios finales.
+    show_mobile_pair: bool = False
+    mobile_pair_server: str = ""        # http://<lan_ip>:<port>
+    mobile_pair_token: str = ""         # pairing token actual
+    mobile_pair_lan_ip: str = ""        # IP detectada del PC
+    mobile_pair_qr_url: str = ""        # URL del QR (api.qrserver.com)
+    mobile_pair_loading: bool = False
+    mobile_pair_error: str = ""
 
     # ── License gate ──────────────────────────
     # Default: calculado en base al disco vía _license_needed_default(), para
@@ -591,6 +610,128 @@ class State(rx.State):
         clear_all()
         self.news_items = []
         self.news_unread = 0
+
+    # ── Mobile pair dialog (v0.18.2) ─────────────────────────────
+    #
+    # IMPORTANTE: NO usar urllib.request.urlopen contra 127.0.0.1:backend_port
+    # desde un handler de State — el backend Starlette vive en el MISMO proceso
+    # que Reflex, así que un HTTP loopback síncrono dentro de un handler
+    # bloquea el event loop y deadlockea (el backend no puede responder
+    # porque está esperando a que termine este handler).
+    # Por eso llamamos directamente a las funciones helper de api_routes
+    # — son síncronas, locales, y no hay riesgo de deadlock.
+
+    async def toggle_mobile_pair(self):
+        """Abre/cierra el dialog QR. Al abrir, marca loading=True + yield
+        para que la UI muestre el spinner ANTES de cargar el payload, y
+        luego carga (rápido — todo local, sin HTTP)."""
+        self.show_mobile_pair = not self.show_mobile_pair
+        if self.show_mobile_pair:
+            # Reset visible state inmediatamente
+            self.mobile_pair_loading = True
+            self.mobile_pair_error = ""
+            self.mobile_pair_qr_url = ""
+            self.mobile_pair_server = ""
+            self.mobile_pair_token = ""
+            yield  # flush UI → user ve el spinner aunque carga sea rápida
+            self._refresh_mobile_pair_data_local()
+            yield
+
+    async def set_show_mobile_pair(self, value: bool):
+        """Setter explícito para rx.dialog.root(on_open_change=...).
+        Cuando el user cierra con ESC/backdrop, Reflex llama esto con False.
+        Cuando se abre externamente (raro), también pulla el payload."""
+        was_open = self.show_mobile_pair
+        self.show_mobile_pair = bool(value)
+        if self.show_mobile_pair and not was_open:
+            self.mobile_pair_loading = True
+            self.mobile_pair_error = ""
+            self.mobile_pair_qr_url = ""
+            yield
+            self._refresh_mobile_pair_data_local()
+            yield
+
+    def close_mobile_pair(self):
+        """Cierre explícito — usado por el botón Cerrar del dialog.
+        rx.dialog.close NO actualiza el state cuando open=Var es controlado;
+        necesitamos un on_click directo que escriba show_mobile_pair=False."""
+        self.show_mobile_pair = False
+
+    def _refresh_mobile_pair_data_local(self) -> None:
+        """Genera el QR payload SIN HTTP loopback. Llama directamente a
+        las funciones de api_routes (que son síncronas y locales). En
+        millonésimas de segundo, sin riesgo de deadlock."""
+        import json as _json
+        from urllib.parse import quote
+        try:
+            from .api_routes import (
+                _read_pairing_token,
+                _detect_lan_ip,
+                _detect_frontend_port,
+            )
+            token = _read_pairing_token() or ""
+            lan_ip = _detect_lan_ip() or "127.0.0.1"
+            port = _detect_frontend_port()
+            server = f"http://{lan_ip}:{port}"
+
+            self.mobile_pair_server = server
+            self.mobile_pair_token = token
+            self.mobile_pair_lan_ip = lan_ip
+
+            if token and lan_ip:
+                qr_payload = _json.dumps(
+                    {"s": server, "t": token},
+                    separators=(",", ":"),
+                )
+                encoded = quote(qr_payload, safe="")
+                # api.qrserver.com — servicio público, sin auth, CORS OK.
+                # Si en el futuro queremos zero-deps, embebemos qrcode.js
+                # (~14KB) en assets/ y generamos client-side. Por ahora basta.
+                self.mobile_pair_qr_url = (
+                    f"https://api.qrserver.com/v1/create-qr-code/"
+                    f"?size=300x300&margin=12&data={encoded}"
+                )
+            else:
+                # Edge case: sin token o sin IP detectable
+                self.mobile_pair_qr_url = ""
+                if not token:
+                    self.mobile_pair_error = "No se pudo generar el token de emparejamiento."
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley.mobile_pair").warning(
+                "load mobile pair data failed: %s", _e
+            )
+            self.mobile_pair_error = str(_e)
+        finally:
+            self.mobile_pair_loading = False
+
+    async def regenerate_mobile_token(self):
+        """Regenera el token directamente (sin HTTP loopback). Invalida
+        móviles ya pareados — tendrán que escanear el QR nuevo."""
+        import os
+        import secrets
+        import json as _json
+
+        self.mobile_pair_loading = True
+        self.mobile_pair_qr_url = ""  # ocultar QR viejo durante regen
+        yield  # flush UI → user ve el spinner
+        try:
+            from .api_routes import _data_dir
+            data_dir = _data_dir()
+            os.makedirs(data_dir, exist_ok=True)
+            path = os.path.join(data_dir, "mobile_pairing.json")
+            new_token = secrets.token_urlsafe(24)
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump({"token": new_token}, f)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley.mobile_pair").warning(
+                "regen_token failed: %s", _e
+            )
+            self.mobile_pair_error = str(_e)
+        # Refresh para mostrar el nuevo token + nuevo QR (también local)
+        self._refresh_mobile_pair_data_local()
+        yield
 
     def toggle_tts(self):
         """Activa o desactiva que Ashley hable en voz alta."""
@@ -2239,6 +2380,56 @@ class State(rx.State):
             import logging
             logging.getLogger("ashley").warning("loading goals: %s", _e)
 
+        # v0.18.1 Tier 2 Fase A — Vulnerabilidades raras de Ashley.
+        # Decide si este turn permite un momento de vulnerabilidad calibrado
+        # por affection + contexto + cooldown 7 días. Si fire, marca usado
+        # inmediatamente (no espera a que Ashley lo use de verdad — la cooldown
+        # da otra oportunidad después).
+        vulnerability_directive: str | None = None
+        try:
+            from .mental_state import (
+                load_state as _load_mental_state,
+                save_state as _save_mental_state,
+                compute_vulnerability_trigger,
+                mark_vulnerability_used,
+                format_vulnerability_directive,
+            )
+            from .topic_share import is_emotional_moment
+            _mstate = _load_mental_state()
+            # Calcular minutos desde último mensaje del user (excluyendo el actual)
+            _user_msgs = [m for m in self.messages if m.get("role") == "user" and m.get("timestamp")]
+            _minutes_since = None
+            if len(_user_msgs) >= 2:
+                try:
+                    _last_dt = datetime.fromisoformat(_user_msgs[-2]["timestamp"])
+                    if _last_dt.tzinfo is None:
+                        _last_dt = _last_dt.replace(tzinfo=timezone.utc)
+                    _gap_secs = (datetime.now(timezone.utc) - _last_dt).total_seconds()
+                    _minutes_since = _gap_secs / 60
+                except Exception:
+                    pass
+            _hour_local = datetime.now().hour
+            _emotional = is_emotional_moment(user_message) if user_message else False
+            _trigger, _vtype = compute_vulnerability_trigger(
+                state=_mstate,
+                affection=self.affection,
+                minutes_since_last_message=_minutes_since,
+                hour_local=_hour_local,
+                user_was_emotional=_emotional,
+            )
+            if _trigger and _vtype:
+                vulnerability_directive = format_vulnerability_directive(
+                    _vtype, self.language,
+                )
+                # Marcamos usado YA — incluso si Ashley no lo usa, la cooldown
+                # da otra oportunidad en 7 días. Evita que dispare cada turn
+                # consecutivo cuando las condiciones se mantienen.
+                mark_vulnerability_used(_mstate)
+                _save_mental_state(_mstate)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("vulnerability trigger failed: %s", _e)
+
         # Directiva de compartir-tema: si el user acaba de compartir algo
         # sustancial (≥30 chars), se inyecta un bloque de alta prioridad
         # forzando a Ashley a tomar postura propia con razón. Mecanismo
@@ -2277,6 +2468,8 @@ class State(rx.State):
             "important_dates": important_dates,
             # v0.18.0 Fase 3: goals / objetivos a largo plazo.
             "goals": goals,
+            # v0.18.1 Tier 2 Fase A: vulnerabilidades raras de Ashley.
+            "vulnerability_directive": vulnerability_directive,
         }
 
     def _detect_recap_warning(self) -> str | None:
@@ -3291,6 +3484,9 @@ class State(rx.State):
         self._auto_iter_count = 0
         self._absence_message_sent = False
         self._consecutive_unanswered_proactive = 0
+        # v0.18.1 — reset followup counter para que la próxima ausencia pueda
+        # disparar nuevos followups (hasta MAX_UNANSWERED otra vez).
+        self._consecutive_unanswered_followups = 0
         # Disk I/O: HMAC sign + JSON + Windows registry mirror.
         # Si falla NO afecta al envío (ya yieldeamos al user).
         self._increment_message_counter()
@@ -4006,6 +4202,183 @@ class State(rx.State):
             self.save_history()
 
     # ─────────────────────────────────────────
+    #  Followup proactivo cada ~15 min (v0.18.1)
+    # ─────────────────────────────────────────
+    #
+    # Distinto del absence message (>6h, dispara una sola vez por episodio).
+    # Aquí: si el user lleva 15-360 min sin responder, Ashley puede lanzar
+    # un followup CORTO siguiendo el hilo. Hasta 2 followups consecutivos
+    # sin respuesta — luego para hasta que el user vuelva.
+    #
+    # Cadencia real con bg_task tick=10min: followups aproximadamente cada
+    # 15-20 min reales. Suficiente para sentir "Ashley está pendiente" sin
+    # spammear.
+
+    _FOLLOWUP_GAP_MINUTES = 15
+    _FOLLOWUP_MAX_UNANSWERED = 2
+    _FOLLOWUP_ABSENCE_HANDOFF_MINUTES = 360  # 6h, sobre esto absence msg toma over
+
+    async def _maybe_fire_followup_message(self):
+        """Si el user lleva ≥15 min sin escribir y ≤6h, lanza un followup
+        proactivo siguiendo la conversación. Anti-spam: 2 max sin respuesta.
+
+        Se llama desde discovery_bg_task cada tick (10 min). Los gates
+        garantizan que no fire más rápido de cada ~15 min.
+        """
+        import asyncio
+        from datetime import datetime, timezone
+
+        # Snapshot atómico
+        async with self:
+            # Anti-spam: ya intentamos N veces sin respuesta
+            if self._consecutive_unanswered_followups >= self._FOLLOWUP_MAX_UNANSWERED:
+                return
+            # Ashley ocupada
+            if self.is_thinking or self.current_response != "":
+                return
+            # Cooldown desde último followup
+            if self._last_followup_at:
+                try:
+                    last_fu = datetime.fromisoformat(self._last_followup_at)
+                    if last_fu.tzinfo is None:
+                        last_fu = last_fu.replace(tzinfo=timezone.utc)
+                    minutes_since = (datetime.now(timezone.utc) - last_fu).total_seconds() / 60
+                    if minutes_since < self._FOLLOWUP_GAP_MINUTES:
+                        return
+                except Exception:
+                    pass
+            _msgs = list(self.messages)
+            _facts = list(self.facts)
+            _diary = list(self.diary)
+            _lang = self.language
+            _vmode = self.voice_mode
+
+        # Necesitamos al menos un mensaje del user previo (si no, no es seguir
+        # conversación, sería iniciar de cero — lo gestiona startup engagement)
+        last_user_ts = None
+        for m in reversed(_msgs):
+            if m.get("role") == "user":
+                last_user_ts = m.get("timestamp")
+                break
+        if not last_user_ts:
+            return
+
+        try:
+            last_user = datetime.fromisoformat(last_user_ts.replace("Z", "+00:00"))
+            if last_user.tzinfo is None:
+                last_user = last_user.replace(tzinfo=timezone.utc)
+        except Exception:
+            return
+
+        minutes_since_user = (datetime.now(timezone.utc) - last_user).total_seconds() / 60
+        # Gate principal: ≥15 min ausente
+        if minutes_since_user < self._FOLLOWUP_GAP_MINUTES:
+            return
+        # Hand-off al absence message si pasamos de 6h (no duplicamos)
+        if minutes_since_user >= self._FOLLOWUP_ABSENCE_HANDOFF_MINUTES:
+            return
+
+        # No molestar si user se despidió
+        from .topic_share import is_closing_conversation, extract_banned_topics
+        if is_closing_conversation(_msgs, lookback=2):
+            return
+
+        banned = extract_banned_topics(_msgs, lookback=6)
+
+        # Construir el trigger según idioma
+        if _lang == "es":
+            hint = (
+                "El jefe lleva unos minutos sin responderte. Si encaja, podés "
+                "mandar un follow-up CORTO siguiendo el hilo de lo que estabais "
+                "hablando — preguntar algo concreto, expandir un detalle, o "
+                "simplemente checkear si sigue ahí. UNA frase suave. NO cambies "
+                "de tema, NO empieces algo nuevo. Si la conversación había "
+                "llegado a una conclusión natural y no tiene sentido continuar, "
+                "responde solo '[mood:default]' sin texto — el silencio es ok."
+            )
+        elif _lang == "fr":
+            hint = (
+                "Le patron est silencieux depuis quelques minutes. Si ça colle, "
+                "envoie un follow-up COURT en suivant le fil de ce dont vous "
+                "parliez — poser une question concrète, étendre un détail, ou "
+                "juste vérifier qu'il est là. UNE phrase douce. NE change pas "
+                "de sujet, NE commence rien de nouveau. Si la conversation "
+                "était arrivée à une conclusion naturelle et que ça n'a pas "
+                "de sens de continuer, réponds juste '[mood:default]' sans "
+                "texte — le silence est ok."
+            )
+        else:
+            hint = (
+                "The boss has been silent for a few minutes. If it fits, send "
+                "a SHORT follow-up continuing the thread of what you were "
+                "talking about — ask something specific, expand a detail, or "
+                "just check if he's still there. ONE soft sentence. Do NOT "
+                "switch topics, do NOT start something new. If the conversation "
+                "had reached a natural conclusion and continuing makes no sense, "
+                "respond just '[mood:default]' with no text — silence is ok."
+            )
+
+        # Inyectar banned topics si corresponde
+        if banned:
+            banned_list = ", ".join(f"'{t}'" for t in banned[:5])
+            if _lang == "es":
+                hint += (f"\n\nTEMAS PROHIBIDOS (el jefe pidió evitar): "
+                         f"{banned_list}. NO los menciones bajo ningún concepto.")
+            elif _lang == "fr":
+                hint += (f"\n\nSUJETS INTERDITS (le patron a demandé d'éviter) : "
+                         f"{banned_list}. NE les mentionne sous aucun prétexte.")
+            else:
+                hint += (f"\n\nBANNED TOPICS (boss asked to avoid): "
+                         f"{banned_list}. DO NOT mention them under any circumstances.")
+
+        # Generar mensaje (off-main-thread, mismo patrón que absence message)
+        from .grok_client import stream_response as _sr
+        from .prompts import build_system_prompt as _bsp
+
+        sys_prompt = _bsp(_facts, _diary, voice_mode=_vmode, lang=_lang)
+        _recent = _msgs[-14:] if _msgs else []
+
+        def _run():
+            return "".join(t for t in _sr(_recent, sys_prompt, use_web_search=False, trigger=hint))
+
+        loop = asyncio.get_running_loop()
+        try:
+            raw = await loop.run_in_executor(None, _run)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning("followup grok call: %s", _e)
+            return
+
+        # Parser estándar
+        clean, mood = _extract_mood_fn(raw)
+        clean, aff = _extract_affection_fn(clean)
+        clean, _ = _extract_action_fn(clean)
+        clean = _clean_display_fn(clean)
+
+        # Si Ashley eligió silencio, NO mandamos pero SÍ contamos como
+        # "intento" para no spammear (cooldown se aplica igual)
+        if len(clean) < 5:
+            ts = datetime.now(timezone.utc).isoformat()
+            async with self:
+                self._last_followup_at = ts
+                self._consecutive_unanswered_followups += 1
+            return
+
+        ts = now_iso()
+        async with self:
+            if aff:
+                self.affection = max(0, min(100, self.affection + max(-3, min(3, aff))))
+                self._save_affection()
+            self.mood = mood
+            self.messages = self.messages + [{
+                "role": "assistant", "content": clean,
+                "timestamp": ts, "id": f"followup-{ts}", "image": "",
+            }]
+            self._last_followup_at = datetime.now(timezone.utc).isoformat()
+            self._consecutive_unanswered_followups += 1
+            self.save_history()
+
+    # ─────────────────────────────────────────
     #  Startup engagement (v0.13.1)
     # ─────────────────────────────────────────
     #
@@ -4481,6 +4854,14 @@ class State(rx.State):
                 import logging
                 logging.getLogger("ashley").warning("absence bg: %s", _e)
 
+            # v0.18.1 — Followup proactivo cada ~15 min (entre 0 y 6h de gap).
+            # Independiente del absence msg que solo dispara una vez tras >6h.
+            try:
+                await self._maybe_fire_followup_message()
+            except Exception as _e:
+                import logging
+                logging.getLogger("ashley").warning("followup bg: %s", _e)
+
             # ── Screen Awareness proactiva (Level 3) ──────────────
             # Cada 10 min: si Actions está ON y no estamos busy, tomar
             # screenshot y preguntarle a Grok si hay algo interesante que
@@ -4938,6 +5319,7 @@ from .components import (  # noqa: E402
     _news_panel,
     license_gate,
     manual_dialog,
+    mobile_pair_dialog,
     # v0.16 — layout 2-cols boutique noir
     _ambient_lights, left_portrait_panel, _chat_header_bar,
     _light_rays_svg,
@@ -5218,6 +5600,12 @@ def index():
 
         # ── Manual de usuario ──────────────────────────────────
         manual_dialog(),
+
+        # ── Mobile pair dialog (v0.18.2) ──────────────────────
+        # Dialog QR para parear con Ashley Mobile (Android). Se abre
+        # con el botón "smartphone" en la nav superior. Muestra QR +
+        # datos manuales como fallback + botón regenerar token.
+        mobile_pair_dialog(),
 
         # ── Diálogo de recuerdos (v0.14.5 boutique noir) ──────
         rx.dialog.root(

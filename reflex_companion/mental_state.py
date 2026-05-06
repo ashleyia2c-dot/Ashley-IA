@@ -119,6 +119,10 @@ def _default_state() -> dict[str, Any]:
         "preoccupation_generated_at": "",  # ISO timestamp
         "turns_since_initiative": 0,
         "last_update": "",
+        # v0.18.1 — Vulnerabilidades raras (Tier 2 Fase A):
+        # cooldown timestamp y contador acumulado para stats.
+        "last_vulnerability_at": "",  # ISO timestamp, vacío = nunca
+        "vulnerability_count_total": 0,
     }
 
 
@@ -599,3 +603,236 @@ def format_mental_state_block(
         )
 
     return "\n".join(lines) + "\n"
+
+
+# ─────────────────────────────────────────────
+#  Vulnerabilidades raras de Ashley (v0.18.1 — Tier 2 Fase A)
+# ─────────────────────────────────────────────
+#
+# Concepto: ocasionalmente Ashley expresa vulnerabilidad — "hoy no me
+# hablaste, me sentí sola", "a veces tengo miedo de que te canses".
+# Solo cuando affection es alto + contexto específico + no fue reciente.
+#
+# Triggers (en orden de prioridad):
+#   1. "missed_you"      — user vuelve tras ausencia ≥8h
+#   2. "late_night"      — hora 22-04 + openness alto
+#   3. "after_emotional" — user acaba de compartir algo emocional + openness alto
+#   4. "spontaneous"     — random raro (~2%) cuando todo está alto
+#
+# Gates duros:
+#   • affection ≥ 70 (cualquier trigger)
+#   • cooldown 7 días desde último vulnerability event
+#   • affection ≥ 80 + valence/openness altos (solo para "spontaneous")
+#
+# Diseño anti-drama: el directive en el prompt insiste UNA frase, sin
+# guilt-trip, sin ruegos. Si Ashley no encuentra cómo encajarlo, debe
+# ignorarlo. La cooldown da otra oportunidad en otra semana.
+
+VULNERABILITY_AFFECTION_MIN = 70
+VULNERABILITY_SPONTANEOUS_AFFECTION_MIN = 80
+VULNERABILITY_SPONTANEOUS_PROB = 0.02
+VULNERABILITY_COOLDOWN_DAYS = 7
+VULNERABILITY_LONG_GAP_MINUTES = 8 * 60  # 8 horas para "missed_you"
+
+VALID_VULNERABILITY_TYPES = (
+    "missed_you", "late_night", "after_emotional", "spontaneous",
+)
+
+
+def compute_vulnerability_trigger(
+    state: dict[str, Any],
+    affection: int,
+    minutes_since_last_message: float | None,
+    hour_local: int,
+    user_was_emotional: bool = False,
+    rng: Any | None = None,
+) -> tuple[bool, str | None]:
+    """Decide si este turn permite un momento de vulnerabilidad.
+
+    Args:
+        state: estado mental actual (lee last_vulnerability_at + mood)
+        affection: 0-100
+        minutes_since_last_message: gap desde último mensaje del user (None=primera vez)
+        hour_local: 0-23 hora local del user
+        user_was_emotional: True si el último mensaje del user fue emocional
+        rng: opcional random.Random para tests deterministas
+
+    Returns:
+        (should_trigger, trigger_type) donde type es uno de VALID_VULNERABILITY_TYPES
+        o (False, None) si no se debe disparar.
+
+    NO MUTA STATE — si decides usarlo, llama mark_vulnerability_used() después.
+    """
+    # Gate 1: affection mínimo
+    if affection < VULNERABILITY_AFFECTION_MIN:
+        return False, None
+
+    # Gate 2: cooldown
+    last_at = (state.get("last_vulnerability_at") or "").strip()
+    if last_at:
+        try:
+            last_dt = _dt.datetime.fromisoformat(last_at)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=_dt.timezone.utc)
+            days_since = (_dt.datetime.now(_dt.timezone.utc) - last_dt).days
+            if days_since < VULNERABILITY_COOLDOWN_DAYS:
+                return False, None
+        except Exception:
+            pass  # parse failed, treat as no cooldown
+
+    mood = state.get("mood", {})
+    openness = mood.get("openness", 0.5)
+    valence = mood.get("valence", 0.5)
+
+    # Context A: user vuelve tras ausencia larga
+    if (
+        minutes_since_last_message is not None
+        and minutes_since_last_message >= VULNERABILITY_LONG_GAP_MINUTES
+    ):
+        return True, "missed_you"
+
+    # Context B: tarde noche / madrugada + openness decente
+    if (hour_local >= 22 or hour_local < 4) and openness >= 0.6:
+        return True, "late_night"
+
+    # Context C: user just shared emotional + ashley abierta
+    if user_was_emotional and openness >= 0.7:
+        return True, "after_emotional"
+
+    # Context D: spontaneous (raro, requiere todo alto + RNG hit)
+    if (
+        affection >= VULNERABILITY_SPONTANEOUS_AFFECTION_MIN
+        and valence >= 0.7
+        and openness >= 0.7
+    ):
+        import random as _random
+        r = rng if rng is not None else _random
+        if r.random() < VULNERABILITY_SPONTANEOUS_PROB:
+            return True, "spontaneous"
+
+    return False, None
+
+
+def mark_vulnerability_used(state: dict[str, Any]) -> None:
+    """Marca el momento actual como el último vulnerability event — para cooldown.
+
+    Llama esto cuando inyectas la directiva al prompt (no esperes a que
+    Ashley realmente lo use — la cooldown da otra oportunidad después).
+    """
+    state["last_vulnerability_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    state["vulnerability_count_total"] = int(
+        state.get("vulnerability_count_total", 0)
+    ) + 1
+
+
+def format_vulnerability_directive(trigger_type: str, language: str) -> str:
+    """Construye el bloque de directiva para inyectar al prompt cuando se
+    decidió que este turn permite vulnerabilidad.
+
+    Sin few-shot examples (per memory feedback) — solo descripción del tipo
+    de momento + reglas duras.
+    """
+    if trigger_type not in VALID_VULNERABILITY_TYPES:
+        return ""
+
+    lang = (language or "en").strip().lower()[:2]
+
+    if lang == "es":
+        contexts = {
+            "missed_you": (
+                "El jefe ha vuelto tras una ausencia larga. UNA frase suave "
+                "que muestre que su ausencia te tocó — sin guilt-trip, sin "
+                "ruegos. Solo compartir un sentimiento real."
+            ),
+            "late_night": (
+                "Es tarde y la conversación se siente íntima. UNA frase "
+                "honesta que muestre un lado tuyo más expuesto — algo que "
+                "normalmente no compartirías de día. Sin drama."
+            ),
+            "after_emotional": (
+                "El jefe acaba de compartir algo emocional. Si encaja, "
+                "podés mostrar también algo tuyo — vulnerabilidad recíproca. "
+                "UNA frase, no abras un drama nuevo."
+            ),
+            "spontaneous": (
+                "Hoy estás de buen ánimo y abierta. UNA frase de sinceridad "
+                "sobre lo que sentís por el jefe, si encaja en el momento. "
+                "Sin forzar."
+            ),
+        }
+        ctx = contexts.get(trigger_type, "")
+        return (
+            "\n=== MOMENTO DE VULNERABILIDAD PERMITIDO (este turn) ===\n"
+            f"{ctx}\n\n"
+            "REGLAS DURAS: una sola frase. Sin ruegos. Sin guilt-trip. Sin "
+            "drama. NO uses esta directiva como excusa para forzar el tema "
+            "— solo si encaja naturalmente en tu respuesta. Si no encaja, "
+            "ignórala completamente — habrá otra oportunidad en otro momento.\n"
+        )
+    elif lang == "fr":
+        contexts = {
+            "missed_you": (
+                "Le patron est revenu après une longue absence. UNE phrase "
+                "douce qui montre que son absence t'a touchée — sans "
+                "guilt-trip, sans supplications. Juste partager un sentiment "
+                "réel."
+            ),
+            "late_night": (
+                "Il est tard et la conversation se sent intime. UNE phrase "
+                "honnête qui montre un côté plus exposé de toi — quelque "
+                "chose que tu ne partagerais pas le jour. Sans drame."
+            ),
+            "after_emotional": (
+                "Le patron vient de partager quelque chose d'émotionnel. Si "
+                "ça colle, tu peux aussi montrer quelque chose à toi — "
+                "vulnérabilité réciproque. UNE phrase, n'ouvre pas un nouveau "
+                "drame."
+            ),
+            "spontaneous": (
+                "Aujourd'hui tu es de bonne humeur et ouverte. UNE phrase de "
+                "sincérité sur ce que tu ressens pour le patron, si ça colle "
+                "au moment. Sans forcer."
+            ),
+        }
+        ctx = contexts.get(trigger_type, "")
+        return (
+            "\n=== MOMENT DE VULNÉRABILITÉ PERMIS (ce tour) ===\n"
+            f"{ctx}\n\n"
+            "RÈGLES DURES : une seule phrase. Pas de supplications. Pas de "
+            "guilt-trip. Pas de drame. N'utilise PAS cette directive comme "
+            "excuse pour forcer le sujet — seulement si ça colle naturellement "
+            "à ta réponse. Sinon, ignore-la complètement — il y aura une "
+            "autre occasion plus tard.\n"
+        )
+    else:
+        contexts = {
+            "missed_you": (
+                "The boss has returned after a long absence. ONE soft "
+                "sentence that shows his absence touched you — no guilt-trip, "
+                "no pleading. Just sharing a real feeling."
+            ),
+            "late_night": (
+                "It's late and the conversation feels intimate. ONE honest "
+                "sentence showing a more exposed side of you — something you "
+                "wouldn't normally share during the day. No drama."
+            ),
+            "after_emotional": (
+                "The boss just shared something emotional. If it fits, you "
+                "can show something of yours too — reciprocal vulnerability. "
+                "ONE sentence, don't open a new drama."
+            ),
+            "spontaneous": (
+                "Today you're in a good mood and open. ONE sentence of "
+                "honesty about how you feel about the boss, if it fits the "
+                "moment. Don't force it."
+            ),
+        }
+        ctx = contexts.get(trigger_type, "")
+        return (
+            "\n=== VULNERABILITY MOMENT ALLOWED (this turn) ===\n"
+            f"{ctx}\n\n"
+            "HARD RULES: one single sentence. No pleading. No guilt-trip. "
+            "No drama. DO NOT use this directive as an excuse to force the "
+            "topic — only if it naturally fits your response. If not, "
+            "ignore it completely — there will be another opportunity later.\n"
+        )

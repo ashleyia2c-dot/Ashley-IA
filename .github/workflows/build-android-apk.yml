@@ -1,0 +1,115 @@
+# ════════════════════════════════════════════════════════════════════
+#  Build Ashley Mobile APK (Android, vía Capacitor)
+#
+#  Trigger: manual (workflow_dispatch) o push de tag v* en mobile-app/
+#  Output: artifact `ashley-mobile-debug.apk` descargable desde Actions
+#
+#  Para distribución a usuarios sin Play Store:
+#    1. GitHub Action corre en cada push de tag mobile-vX.Y.Z
+#    2. APK debug aparece en Releases del repo
+#    3. User descarga, abre en Android, instala
+#       (necesita activar "Orígenes desconocidos" en Settings)
+#
+#  Para Play Store en el futuro: necesitarás firmar con keystore propio
+#  (no debug). Configurar GitHub Secret KEYSTORE_BASE64 + secrets de pwd.
+# ════════════════════════════════════════════════════════════════════
+
+name: Build Ashley Mobile APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'mobile-v*'
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'mobile-app/package-lock.json'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install npm dependencies
+        working-directory: mobile-app
+        run: npm install
+
+      - name: Sync PWA assets to Capacitor www/
+        working-directory: mobile-app
+        run: npm run sync-assets
+
+      - name: Add Android platform (if missing)
+        working-directory: mobile-app
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Make gradlew executable
+        working-directory: mobile-app/android
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        working-directory: mobile-app/android
+        run: ./gradlew assembleDebug
+
+      - name: Find APK output
+        id: find_apk
+        working-directory: mobile-app/android
+        run: |
+          APK_PATH=$(find . -name "*-debug.apk" | head -n 1)
+          echo "Path: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ashley-mobile-debug-apk
+          path: mobile-app/android/${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 30
+
+      - name: Create release on tag
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: mobile-app/android/${{ steps.find_apk.outputs.apk_path }}
+          generate_release_notes: true
+          body: |
+            ## Ashley Mobile APK (Android)
+
+            APK debug — instalable directamente sin Play Store.
+
+            ### Instalación
+
+            1. Descarga `app-debug.apk` de los assets de abajo
+            2. Transfiere al móvil (USB, Telegram, Drive, etc.)
+            3. En Android: Settings → Security → "Permitir orígenes desconocidos"
+            4. Tap en el APK descargado → Instalar
+            5. Abre Ashley → Escanea QR de tu PC
+
+            ### Notas
+
+            - Requiere Ashley desktop corriendo en el mismo WiFi (o Tailscale)
+            - Auto-update no funciona en debug APK (instala el nuevo manualmente)
+            - Para distribución masiva: subiremos a Play Store en v1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

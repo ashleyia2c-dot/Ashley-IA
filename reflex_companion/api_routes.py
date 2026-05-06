@@ -477,9 +477,675 @@ async def _shutdown_endpoint(request):
     return _with_cors(_StarletteJSON({"ok": True, "shutdown": "pending"}))
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  Mobile API (v0.18.2 — companion app móvil para Play Store)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Estos endpoints permiten que una app móvil (PWA / TWA) se conecte al
+# Ashley desktop del user y vea/interactúe con su chat + memorias.
+#
+# Arquitectura: PC = source of truth, móvil = cliente remoto.
+# Mismo Ashley, accesible desde dos sitios.
+#
+# Auth: por simple shared token. Generamos un pairing code en el PC,
+# el user lo introduce en el móvil. Cada llamada lleva el header
+# `X-Ashley-Token: <token>`. Sin token correcto → 401.
+#
+# Sync: el móvil hace polling cada 2-3s al endpoint /chat para detectar
+# nuevos mensajes. NO real-time WebSocket por simplicidad — basta para
+# UX de "abro app, veo conversación".
+#
+# CORS: permitimos cualquier origin para que el TWA/PWA funcione desde
+# subdominios distintos al PC (ej. tunnel.cloudflare.com → PC LAN).
+
+
+def _data_dir():
+    """Devuelve el directorio donde viven los JSONs de Ashley."""
+    import os
+    env_dir = os.getenv("ASHLEY_DATA_DIR")
+    if env_dir:
+        return env_dir
+    # Fallback: project root
+    return ".."
+
+
+def _read_json_safe(filename: str, default):
+    """Lee un JSON del data dir. Devuelve default si falta o es inválido."""
+    import os
+    path = os.path.join(_data_dir(), filename)
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return default
+
+
+def _read_pairing_token() -> str:
+    """Lee el pairing token. Si no existe, lo genera y persiste."""
+    import os
+    import secrets
+    path = os.path.join(_data_dir(), "mobile_pairing.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+                tok = (data.get("token") or "").strip()
+                if tok:
+                    return tok
+        except Exception:
+            pass
+    # Generar nuevo (32 caracteres URL-safe)
+    new_token = secrets.token_urlsafe(24)
+    try:
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump({"token": new_token}, f)
+    except Exception:
+        pass
+    return new_token
+
+
+def _check_mobile_auth(request) -> bool:
+    """True si el request lleva el token correcto en X-Ashley-Token."""
+    expected = _read_pairing_token()
+    given = request.headers.get("x-ashley-token", "").strip()
+    return bool(expected) and given == expected
+
+
+def _unauthorized():
+    return _with_cors(_StarletteJSON({"error": "invalid_token"}, status_code=401))
+
+
+async def _mobile_status_endpoint(request):
+    """GET /api/mobile/status — info básica + verificación de auth.
+
+    Sin token: devuelve {ok: True, paired: False} para que el móvil sepa
+    que el endpoint existe pero no está pareado.
+    Con token correcto: devuelve {ok: True, paired: True, version: "..."}.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    paired = _check_mobile_auth(request)
+    payload = {"ok": True, "paired": paired}
+    if paired:
+        try:
+            from .config import GROK_MODEL
+            payload["model"] = GROK_MODEL
+        except Exception:
+            pass
+        payload["version"] = "0.18.2"
+    return _with_cors(_StarletteJSON(payload))
+
+
+async def _mobile_pairing_token_endpoint(request):
+    """GET /api/mobile/pairing_token — devuelve el token actual.
+
+    SOLO accesible desde localhost — el desktop UI lo muestra al user
+    (con QR code o texto) para que lo introduzca en su móvil. Móvil
+    NO debería llamar este endpoint nunca.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    # Solo localhost — defensa básica
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "localhost", "::1"):
+        return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
+    return _with_cors(_StarletteJSON({"token": _read_pairing_token()}))
+
+
+def _detect_lan_ip() -> str:
+    """Detecta la IP local del PC en la LAN. Devuelve '127.0.0.1' si falla."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return "127.0.0.1"
+
+
+def _detect_frontend_port() -> int:
+    """Detecta el puerto del frontend (donde sirve el embedded server).
+
+    En runtime via Electron: el puerto se asigna dinámicamente y se pasa
+    via env ASHLEY_FRONTEND_PORT. Sino usamos el default 17300.
+    """
+    import os
+    try:
+        return int(os.getenv("ASHLEY_FRONTEND_PORT") or "17300")
+    except Exception:
+        return 17300
+
+
+async def _mobile_qr_payload_endpoint(request):
+    """GET /api/mobile/qr_payload — devuelve datos para generar QR de pairing.
+
+    SOLO accesible desde localhost. Devuelve JSON con server URL + token
+    + IP detectada. La página /mobile/connect.html lo usa para generar el
+    QR que el user escanea desde su móvil.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "localhost", "::1"):
+        return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
+
+    lan_ip = _detect_lan_ip()
+    port = _detect_frontend_port()
+    token = _read_pairing_token()
+    server_url = f"http://{lan_ip}:{port}"
+
+    return _with_cors(_StarletteJSON({
+        "server": server_url,
+        "token": token,
+        "lan_ip": lan_ip,
+        "port": port,
+    }))
+
+
+async def _mobile_regen_token_endpoint(request):
+    """POST /api/mobile/regen_token — regenera el token (invalida móviles existentes).
+
+    SOLO accesible desde localhost. Útil si el user piensa que el token
+    se filtró o quiere desconectar todos los móviles pareados.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "localhost", "::1"):
+        return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
+
+    import os
+    import secrets as _secrets
+    path = os.path.join(_data_dir(), "mobile_pairing.json")
+    cfg = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = _json.load(f) or {}
+        except Exception:
+            cfg = {}
+    cfg["token"] = _secrets.token_urlsafe(24)
+    try:
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(cfg, f)
+    except Exception as e:
+        return _with_cors(_StarletteJSON({"error": str(e)}, status_code=500))
+    return _with_cors(_StarletteJSON({"ok": True, "token": cfg["token"]}))
+
+
+async def _mobile_chat_endpoint(request):
+    """GET /api/mobile/chat[?since=ISO_TIMESTAMP]
+
+    Devuelve mensajes del historial. Si `since` se pasa, devuelve solo
+    mensajes con timestamp > since (para polling incremental).
+
+    Cada mensaje incluye: role, content, timestamp, id.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    history = _read_json_safe("historial_ashley.json", [])
+    if not isinstance(history, list):
+        history = []
+
+    since = (request.query_params.get("since") or "").strip()
+    if since:
+        history = [m for m in history if (m.get("timestamp") or "") > since]
+
+    # Filtrar campos que el móvil necesita
+    out = []
+    for m in history:
+        if m.get("role") == "system_result":
+            # Mensajes de sistema (resultado de actions) — los incluimos
+            # como tipo distinto para que móvil pueda renderizar diferente
+            out.append({
+                "role": "system",
+                "content": m.get("content", ""),
+                "timestamp": m.get("timestamp", ""),
+                "id": m.get("id", ""),
+            })
+        else:
+            out.append({
+                "role": m.get("role", "assistant"),
+                "content": m.get("content", ""),
+                "timestamp": m.get("timestamp", ""),
+                "id": m.get("id", ""),
+                "image": m.get("image", ""),
+            })
+
+    return _with_cors(_StarletteJSON({"messages": out, "count": len(out)}))
+
+
+async def _mobile_facts_endpoint(request):
+    """GET /api/mobile/facts — devuelve los facts (memorias del user)."""
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    facts = _read_json_safe("hechos_ashley.json", [])
+    if not isinstance(facts, list):
+        facts = []
+
+    return _with_cors(_StarletteJSON({"facts": facts, "count": len(facts)}))
+
+
+async def _mobile_send_endpoint(request):
+    """POST /api/mobile/send — recibe {message: "..."}, dispara respuesta de Ashley.
+
+    Append user message a historial, genera respuesta de Ashley vía Grok
+    (sync, no streaming — móvil hace polling para verla), append respuesta
+    a historial. Devuelve confirmación.
+
+    Limitación conocida: el desktop Ashley (si está abierto en Reflex) NO
+    se entera del mensaje hasta que se refresque. Sync real-time entre
+    desktop y móvil queda para v2.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _with_cors(_StarletteJSON({"error": "invalid_json"}, status_code=400))
+
+    text = (body.get("message") or "").strip()
+    if not text:
+        return _with_cors(_StarletteJSON({"error": "empty_message"}, status_code=400))
+
+    import os
+    from datetime import datetime, timezone
+
+    # Append user message a historial
+    history = _read_json_safe("historial_ashley.json", [])
+    if not isinstance(history, list):
+        history = []
+
+    now_iso_str = datetime.now(timezone.utc).isoformat()
+    user_msg = {
+        "role": "user",
+        "content": text,
+        "timestamp": now_iso_str,
+        "id": f"mobile-u-{now_iso_str}",
+        "image": "",
+    }
+    history.append(user_msg)
+
+    # Generar respuesta de Ashley vía Grok (sync)
+    try:
+        from .grok_client import stream_response
+        from .prompts import build_system_prompt, build_device_section
+        from .parsing import (
+            extract_mood as _ext_mood,
+            extract_action as _ext_act,
+            extract_affection as _ext_aff,
+            clean_display as _clean_display,
+        )
+        from .i18n import load_language
+
+        facts = _read_json_safe("hechos_ashley.json", [])
+        diary = _read_json_safe("diario_ashley.json", [])
+        lang = load_language() or "es"
+
+        # v0.18.2 — el endpoint /api/mobile/send siempre viene del móvil,
+        # así que device_section informa a Ashley que está en el móvil
+        # del jefe (no en su PC) y le restringe los tags de actions.
+        sys_prompt = build_system_prompt(
+            facts=facts if isinstance(facts, list) else [],
+            diary=diary if isinstance(diary, list) else [],
+            voice_mode=False, lang=lang,
+            device_section=build_device_section("mobile", lang),
+        )
+
+        recent = history[-14:]
+        # stream_response es generador — concatenamos chunks
+        raw = "".join(t for t in stream_response(
+            recent, sys_prompt, use_web_search=False, trigger=None,
+        ))
+    except Exception as _e:
+        import logging
+        logging.getLogger("ashley.mobile").warning("send grok call failed: %s", _e)
+        # Save user message anyway, return error
+        try:
+            path = os.path.join(_data_dir(), "historial_ashley.json")
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return _with_cors(_StarletteJSON({
+            "error": "ashley_error",
+            "detail": str(_e),
+            "user_message_saved": True,
+        }, status_code=500))
+
+    # Parsear respuesta
+    clean, mood = _ext_mood(raw)
+    clean, _ = _ext_aff(clean)
+    clean, _ = _ext_act(clean)
+    clean = _clean_display(clean)
+
+    if not clean or len(clean) < 1:
+        clean = "..."
+
+    ashley_msg = {
+        "role": "assistant",
+        "content": clean,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "id": f"mobile-a-{now_iso_str}",
+        "image": "",
+        "mood": mood,
+    }
+    history.append(ashley_msg)
+
+    # Persistir
+    try:
+        path = os.path.join(_data_dir(), "historial_ashley.json")
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as _e:
+        import logging
+        logging.getLogger("ashley.mobile").warning("save history failed: %s", _e)
+
+    return _with_cors(_StarletteJSON({
+        "ok": True,
+        "user_message": user_msg,
+        "ashley_message": ashley_msg,
+    }))
+
+
+async def _mobile_sync_prompts_endpoint(request):
+    """GET /api/mobile/sync_prompts — devuelve los system prompts pre-construidos
+    para los 3 idiomas (es/en/fr) en versión "mobile-ready".
+
+    Cada prompt:
+      • Incluye toda la personalidad estable (~9.5K tokens) + rules + reglas.
+      • Tiene `device_section=mobile` ya inyectado (limita actions del PC).
+      • Las secciones dinámicas (facts/diary/time/mood/etc.) van como
+        placeholders que el brain JS sustituye en runtime con su propia data.
+
+    Usado por el brain JS del móvil al primer pareo (y en cada update de la
+    versión del desktop). Cacheado en IndexedDB del móvil.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    try:
+        from .prompts import build_system_prompt, build_device_section
+    except Exception as _e:
+        return _with_cors(_StarletteJSON(
+            {"error": "import_failed", "detail": str(_e)}, status_code=500
+        ))
+
+    languages = {}
+    for lang in ("es", "en", "fr"):
+        try:
+            # Construimos prompt "mobile-ready" sin facts/diary/dynamics.
+            # El brain JS añade lo dinámico al final del prompt antes de
+            # llamar al LLM.
+            prompt = build_system_prompt(
+                facts=[],
+                diary=[],
+                voice_mode=False,
+                lang=lang,
+                device_section=build_device_section("mobile", lang),
+            )
+            languages[lang] = {
+                "system_prompt": prompt,
+                "device_section_mobile": build_device_section("mobile", lang),
+            }
+        except Exception as _e:
+            languages[lang] = {"error": str(_e)}
+
+    payload = {
+        "version": "0.18.2",
+        "languages": languages,
+    }
+    return _with_cors(_StarletteJSON(payload))
+
+
+async def _mobile_sync_state_endpoint(request):
+    """GET /api/mobile/sync_state — devuelve TODOS los datos persistentes
+    de Ashley para que el móvil pueda funcionar offline.
+
+    Devuelve:
+      • chat_history (últimos 50 mensajes)
+      • facts
+      • diary (últimas 5 entradas)
+      • tastes
+      • reminders
+      • important
+      • important_dates
+      • goals
+      • stats
+      • mental_state (mood + preoccupation)
+      • affection (del último mensaje en mental state)
+      • language preference
+
+    Auth: requiere pairing token.
+    Llamado por el brain JS al pulsar "Sincronizar" o automáticamente al
+    detectar conexión con el PC.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    payload: dict = {"version": "0.18.2"}
+
+    # Chat history (últimos 50)
+    try:
+        history = _read_json_safe("historial_ashley.json", [])
+        if isinstance(history, list):
+            payload["chat_history"] = history[-50:]
+        else:
+            payload["chat_history"] = []
+    except Exception as _e:
+        payload["chat_history"] = []
+        payload["chat_history_error"] = str(_e)
+
+    # Facts
+    try:
+        facts = _read_json_safe("hechos_ashley.json", [])
+        payload["facts"] = facts if isinstance(facts, list) else []
+    except Exception:
+        payload["facts"] = []
+
+    # Diary (últimas 5)
+    try:
+        diary = _read_json_safe("diario_ashley.json", [])
+        if isinstance(diary, list):
+            payload["diary"] = diary[-5:]
+        else:
+            payload["diary"] = []
+    except Exception:
+        payload["diary"] = []
+
+    # Tastes
+    try:
+        payload["tastes"] = _read_json_safe("gustos_ashley.json", [])
+    except Exception:
+        payload["tastes"] = []
+
+    # Reminders + important
+    try:
+        payload["reminders"] = _read_json_safe("recordatorios_ashley.json", [])
+    except Exception:
+        payload["reminders"] = []
+    try:
+        payload["important"] = _read_json_safe("importantes_ashley.json", [])
+    except Exception:
+        payload["important"] = []
+
+    # Important dates (v0.18.0 fase 2)
+    try:
+        from .important_dates import load_dates
+        payload["important_dates"] = load_dates()
+    except Exception:
+        payload["important_dates"] = []
+
+    # Goals (v0.18.0 fase 3)
+    try:
+        from .goals import load_goals
+        payload["goals"] = load_goals()
+    except Exception:
+        payload["goals"] = []
+
+    # Stats (v0.18.0 fase 1)
+    try:
+        from .stats import load_stats
+        payload["stats"] = load_stats()
+    except Exception:
+        payload["stats"] = {}
+
+    # Mental state (mood + preoccupation)
+    try:
+        from .mental_state import load_state as _load_mental_state
+        payload["mental_state"] = _load_mental_state()
+    except Exception:
+        payload["mental_state"] = {}
+
+    # Affection — extraído del mental_state si existe, sino default 50
+    try:
+        affection = payload.get("mental_state", {}).get("affection", 50)
+        payload["affection"] = int(affection)
+    except Exception:
+        payload["affection"] = 50
+
+    # Language
+    try:
+        from .i18n import load_language
+        payload["language"] = load_language() or "es"
+    except Exception:
+        payload["language"] = "es"
+
+    return _with_cors(_StarletteJSON(payload))
+
+
+async def _mobile_sync_push_endpoint(request):
+    """POST /api/mobile/sync_push — recibe del móvil mensajes nuevos creados
+    offline y los mergea al historial del PC.
+
+    Body: {messages: [...], mental_state: {...} (opcional), tastes_added: [...] (opcional)}
+
+    El móvil hace push al volver a estar conectado con el PC. El PC mergea
+    cronológicamente por timestamp. NO es destructivo — los mensajes del
+    móvil se APPEND al historial existente (no reemplaza).
+
+    Auth: requiere pairing token.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _with_cors(_StarletteJSON({"error": "invalid_json"}, status_code=400))
+
+    new_messages = body.get("messages") or []
+    if not isinstance(new_messages, list):
+        return _with_cors(_StarletteJSON(
+            {"error": "messages_must_be_list"}, status_code=400
+        ))
+
+    # Merge cronológico al historial del PC
+    import os
+    from datetime import datetime, timezone
+
+    history = _read_json_safe("historial_ashley.json", [])
+    if not isinstance(history, list):
+        history = []
+
+    # Set de IDs existentes para evitar duplicados (idempotencia)
+    existing_ids = {m.get("id") for m in history if m.get("id")}
+
+    merged = list(history)
+    added = 0
+    for m in new_messages:
+        if not isinstance(m, dict):
+            continue
+        mid = m.get("id")
+        if mid and mid in existing_ids:
+            continue  # ya estaba — skip duplicate
+        # Normalizar timestamp (tolerante)
+        if not m.get("timestamp"):
+            m["timestamp"] = datetime.now(timezone.utc).isoformat()
+        merged.append(m)
+        if mid:
+            existing_ids.add(mid)
+        added += 1
+
+    # Re-orden por timestamp (mantener mensajes sin timestamp al final)
+    def _ts_key(msg):
+        try:
+            return datetime.fromisoformat(msg.get("timestamp", ""))
+        except Exception:
+            return datetime.max.replace(tzinfo=timezone.utc)
+
+    merged.sort(key=_ts_key)
+
+    # Truncar a últimos 200 (config: HISTORY_MAX) — el PC mantiene 50 default
+    # pero permitimos crecer durante merge para que el móvil offline no
+    # pierda mensajes en el push.
+    merged = merged[-200:]
+
+    # Persistir
+    try:
+        path = os.path.join(_data_dir(), "historial_ashley.json")
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(merged, f, ensure_ascii=False, indent=2)
+    except Exception as _e:
+        return _with_cors(_StarletteJSON(
+            {"error": "save_failed", "detail": str(_e)}, status_code=500
+        ))
+
+    return _with_cors(_StarletteJSON({
+        "ok": True,
+        "added": added,
+        "total": len(merged),
+        "duplicates_skipped": len(new_messages) - added,
+    }))
+
+
 def register_routes(app):
     """Insert API routes at the BEGINNING of the Starlette router.
     Include OPTIONS methods for CORS preflight."""
+    # ── Mobile API (v0.18.2) ──
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/status", _mobile_status_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/pairing_token", _mobile_pairing_token_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/qr_payload", _mobile_qr_payload_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/regen_token", _mobile_regen_token_endpoint, methods=["POST", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/chat", _mobile_chat_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/facts", _mobile_facts_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/send", _mobile_send_endpoint, methods=["POST", "OPTIONS"]))
+    # ── Sync endpoints (v0.18.2 — para brain JS offline) ──
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/sync_prompts", _mobile_sync_prompts_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/sync_state", _mobile_sync_state_endpoint, methods=["GET", "OPTIONS"]))
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/sync_push", _mobile_sync_push_endpoint, methods=["POST", "OPTIONS"]))
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/transcribe", _transcribe_endpoint, methods=["POST", "OPTIONS"]))
     app._api.router.routes.insert(0, _StarletteRoute(
