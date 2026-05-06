@@ -71,6 +71,42 @@ jobs:
           fi
           npx cap sync android
 
+      - name: Inject custom MainActivity (camera permission delegate)
+        working-directory: mobile-app
+        run: |
+          # El MainActivity.java por defecto de Capacitor NO override
+          # el WebChromeClient.onPermissionRequest. Sin este override,
+          # navigator.mediaDevices.getUserMedia() (lo que usa el QR scanner)
+          # falla con "Permission denied" sin siquiera mostrar el dialog
+          # del sistema. Reemplazamos por uno que grant automático.
+          PKG_PATH="android/app/src/main/java/com/ashleyia/mobile"
+          mkdir -p "$PKG_PATH"
+          cp android-overrides/MainActivity.java "$PKG_PATH/MainActivity.java"
+          echo "✓ MainActivity.java sobreescrito con WebChromeClient permission delegate"
+          cat "$PKG_PATH/MainActivity.java" | head -5
+
+      - name: Ensure CAMERA + RECORD_AUDIO permissions in manifest
+        working-directory: mobile-app
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "❌ AndroidManifest.xml not found at $MANIFEST"
+            exit 1
+          fi
+          # El plugin @capacitor/camera debería añadirlos automático,
+          # pero por defensividad los garantizamos aquí. Si ya están,
+          # grep no añade nada (idempotente).
+          if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
+            sed -i 's|<application |<uses-permission android:name="android.permission.CAMERA" />\n    <application |' "$MANIFEST"
+            echo "✓ Añadido CAMERA permission al manifest"
+          fi
+          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST"; then
+            sed -i 's|<application |<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <application |' "$MANIFEST"
+            echo "✓ Añadido RECORD_AUDIO permission al manifest"
+          fi
+          echo "--- Permissions in manifest: ---"
+          grep "uses-permission" "$MANIFEST" || echo "(none found)"
+
       - name: Make gradlew executable
         working-directory: mobile-app/android
         run: chmod +x gradlew
