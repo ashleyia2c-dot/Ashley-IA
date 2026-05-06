@@ -73,19 +73,21 @@ jobs:
         working-directory: mobile-app/android
         run: ./gradlew assembleDebug
 
-      - name: Find APK output
-        id: find_apk
-        working-directory: mobile-app/android
+      - name: Verify APK exists
         run: |
-          APK_PATH=$(find . -name "*-debug.apk" | head -n 1)
-          echo "Path: $APK_PATH"
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          APK="mobile-app/android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK" ]; then
+            echo "❌ APK not found at $APK"
+            find mobile-app/android -name "*.apk" 2>&1 || true
+            exit 1
+          fi
+          echo "✓ APK found: $(ls -lh $APK)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ashley-mobile-debug-apk
-          path: mobile-app/android/${{ steps.find_apk.outputs.apk_path }}
+          path: mobile-app/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
       - name: Create release on tag
@@ -93,7 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          files: mobile-app/android/${{ steps.find_apk.outputs.apk_path }}
+          files: mobile-app/android/app/build/outputs/apk/debug/app-debug.apk
           generate_release_notes: true
           body: |
             ## Ashley Mobile APK (Android)
