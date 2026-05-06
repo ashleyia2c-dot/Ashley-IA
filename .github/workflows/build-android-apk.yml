@@ -35,8 +35,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'mobile-app/package-lock.json'
+          # NO cache: el primer build no tiene package-lock.json (se genera
+          # con `npm install`). actions/setup-node falla si pides cache de un
+          # path que no existe. Tras el primer build podemos commitear el
+          # lock y reactivar el cache si queremos optimizar.
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
