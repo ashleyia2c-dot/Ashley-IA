@@ -111,6 +111,35 @@ def test_set_show_mobile_pair_method():
     )
 
 
+def test_refresh_method_uses_BACKEND_port_not_frontend():
+    """v0.18.2 bug fix CRÍTICO #2 — el dialog QR del desktop construye el
+    server URL inline (no via HTTP al endpoint), y AÚN llamaba a
+    _detect_frontend_port. El móvil intentaba conectar al puerto del
+    frontend Next.js que devuelve 404 para /api/mobile/*.
+
+    Bug raíz "page not found" / "TypeError sin red" reportado v0.18.2:
+    no era el endpoint qr_payload (que ya estaba arreglado), era ESTE
+    método del State del desktop que tiene su propia copia de la lógica.
+    """
+    src = MAIN_PY.read_text(encoding="utf-8")
+    section = re.search(
+        r"def _refresh_mobile_pair_data_local[\s\S]+?(?=\n    def |\n    async def |\Z)",
+        src,
+    )
+    assert section, "_refresh_mobile_pair_data_local no encontrado"
+    body = section.group(0)
+    assert "_detect_backend_port" in body, (
+        "_refresh_mobile_pair_data_local DEBE llamar _detect_backend_port. "
+        "Si llama _detect_frontend_port, el QR apunta a Next.js que NO tiene "
+        "los endpoints /api/mobile/* → móvil ve 404."
+    )
+    # Y NO debe seguir importando _detect_frontend_port para el dialog
+    assert "_detect_frontend_port" not in body, (
+        "_refresh_mobile_pair_data_local NO debe usar _detect_frontend_port — "
+        "el dialog del desktop debe usar backend port igual que el endpoint."
+    )
+
+
 def test_refresh_method_uses_local_helpers():
     """v0.18.2 bug fix — el refresh NO debe usar urllib.request.urlopen
     contra el propio backend. Eso bloquea el event loop (mismo proceso) y
@@ -133,8 +162,9 @@ def test_refresh_method_uses_local_helpers():
     assert "_detect_lan_ip" in body, (
         "_refresh_mobile_pair_data_local debe llamar _detect_lan_ip directamente"
     )
-    assert "_detect_frontend_port" in body, (
-        "_refresh_mobile_pair_data_local debe llamar _detect_frontend_port directamente"
+    # backend port (no frontend) — ver test específico de bug fix arriba
+    assert "_detect_backend_port" in body, (
+        "_refresh_mobile_pair_data_local debe llamar _detect_backend_port directamente"
     )
 
 

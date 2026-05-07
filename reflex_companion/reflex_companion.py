@@ -660,18 +660,23 @@ class State(rx.State):
     def _refresh_mobile_pair_data_local(self) -> None:
         """Genera el QR payload SIN HTTP loopback. Llama directamente a
         las funciones de api_routes (que son síncronas y locales). En
-        millonésimas de segundo, sin riesgo de deadlock."""
+        millonésimas de segundo, sin riesgo de deadlock.
+
+        v0.18.2 — usa _detect_BACKEND_port (no frontend). El móvil debe
+        llegar al backend Starlette (que tiene los endpoints /api/mobile/*).
+        El frontend Next.js NO conoce esas rutas → 404.
+        """
         import json as _json
         from urllib.parse import quote
         try:
             from .api_routes import (
                 _read_pairing_token,
                 _detect_lan_ip,
-                _detect_frontend_port,
+                _detect_backend_port,
             )
             token = _read_pairing_token() or ""
             lan_ip = _detect_lan_ip() or "127.0.0.1"
-            port = _detect_frontend_port()
+            port = _detect_backend_port()
             server = f"http://{lan_ip}:{port}"
 
             self.mobile_pair_server = server
