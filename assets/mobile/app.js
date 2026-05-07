@@ -803,8 +803,24 @@
     }
   }
 
+  // Flag global para pausar el scanner mientras intentamos conectar al PC.
+  // Sin esto, el loop sigue detectando el mismo QR cada frame y dispara
+  // múltiples conexiones simultáneas que fallan en bucle infinito —
+  // causando "temblor" del UI y spam de errores.
+  let scannerAttemptingConnection = false;
+  let scannerLastFailureAt = 0;
+
   async function scannerLoop() {
     if (scannerOverlay.hidden) return;
+    // PAUSA: si estamos intentando conectar O si hubo un fallo reciente
+    // (<5s), no procesar más QRs. Da tiempo al user a leer el error y
+    // decidir (reintentar / cerrar / manual).
+    const now = Date.now();
+    const inCooldown = (now - scannerLastFailureAt) < 5000;
+    if (scannerAttemptingConnection || inCooldown) {
+      scannerRafId = requestAnimationFrame(scannerLoop);
+      return;
+    }
     if (!scannerDetector || !scannerVideo.videoWidth) {
       scannerRafId = requestAnimationFrame(scannerLoop);
       return;
@@ -813,10 +829,17 @@
       const codes = await scannerDetector.detect(scannerVideo);
       if (codes && codes.length > 0) {
         const raw = codes[0].rawValue || '';
-        const handled = await onScannedQR(raw);
-        if (handled) {
-          closeScanner();
-          return;
+        scannerAttemptingConnection = true;
+        try {
+          const handled = await onScannedQR(raw);
+          if (handled) {
+            closeScanner();
+            return;
+          }
+          // QR válido pero conexión falló — entrar cooldown
+          scannerLastFailureAt = Date.now();
+        } finally {
+          scannerAttemptingConnection = false;
         }
       }
     } catch (e) {
@@ -842,23 +865,56 @@
     }
 
     setScannerStatus('Conectando a ' + s + '...', 'ok');
-    serverUrl = s;
-    token = t;
-    const status = await fetchStatus();
-    if (!status.ok || !status.paired) {
+    // Probar conexión ANTES de mutar las globales — sino, si falla, queda
+    // serverUrl/token corruptos y el polling background empieza a fallar.
+    let status;
+    try {
+      const ctrl = new AbortController();
+      const tmr = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(s + '/api/mobile/status', {
+        method: 'GET',
+        headers: { 'X-Ashley-Token': t },
+        signal: ctrl.signal,
+      });
+      clearTimeout(tmr);
+      if (!res.ok) {
+        setScannerStatus(
+          'PC respondió HTTP ' + res.status + '. Token incorrecto o servidor mal. ' +
+          'URL: ' + s + ' — espera 5s o pulsa "Manual".',
+          'error',
+        );
+        return false;
+      }
+      status = await res.json();
+    } catch (e) {
+      // Distinguir tipo de error para mejor diagnóstico
+      const errName = e.name || 'Error';
+      const errMsg = e.message || String(e);
+      let hint = '';
+      if (errName === 'AbortError' || errMsg.toLowerCase().includes('abort')) {
+        hint = ' (timeout 6s — PC no responde, ¿firewall?)';
+      } else if (errMsg.toLowerCase().includes('fetch')) {
+        hint = ' (sin red — verifica WiFi y firewall del PC)';
+      }
       setScannerStatus(
-        status.error
-          ? 'No se pudo conectar al PC. Revisa que esté encendido y misma red.'
-          : 'Token rechazado por el PC. ¿QR caducado?',
+        'No se conectó: ' + errName + hint + ' | ' + s,
         'error',
       );
       return false;
     }
-    // Save
+    if (!status || !status.paired) {
+      setScannerStatus(
+        'PC respondió pero token no aceptado (¿QR viejo?). Regenera token desde el PC.',
+        'error',
+      );
+      return false;
+    }
+    // OK — guardar y conectar
+    serverUrl = s;
+    token = t;
     localStorage.setItem(STORE_SERVER_URL, serverUrl);
     localStorage.setItem(STORE_TOKEN, token);
-    setScannerStatus('Conectado.', 'ok');
-    // Pequeña pausa para feedback visual
+    setScannerStatus('✓ Conectado.', 'ok');
     await new Promise(r => setTimeout(r, 600));
     await tryConnect();
     return true;
