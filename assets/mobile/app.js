@@ -16,6 +16,9 @@
   // Si móvil + PC están en misma LAN, podemos obtener nueva URL via lan_ip.
   const STORE_LAN_IP        = 'ashley.mobile.lan_ip';
   const STORE_BACKEND_PORT  = 'ashley.mobile.backend_port';
+  // v0.18.2 — cache del historial del chat para que el user vea sus
+  // conversaciones aunque el PC esté apagado al reiniciar la app.
+  const STORE_CHAT_CACHE    = 'ashley.mobile.chat_cache';
 
   // ─── State ──────────────────────────────────────────────────────
   let serverUrl = (localStorage.getItem(STORE_SERVER_URL) || '').replace(/\/$/, '');
@@ -240,6 +243,33 @@
     } finally {
       isRecovering = false;
     }
+  }
+
+  // v0.18.2 — Helpers para cache local del historial. Muestra chat
+  // anterior aunque el PC esté apagado al reiniciar la app, para que
+  // el user no vea "vacío" y crea que perdió todo.
+  function _hasCachedHistory() {
+    try {
+      const raw = localStorage.getItem(STORE_CHAT_CACHE);
+      if (!raw) return false;
+      const obj = JSON.parse(raw);
+      return !!(obj && Array.isArray(obj.msgs) && obj.msgs.length > 0);
+    } catch { return false; }
+  }
+  function _loadCachedHistory() {
+    try {
+      const raw = localStorage.getItem(STORE_CHAT_CACHE);
+      if (!raw) return false;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.msgs)) return false;
+      clearChat();
+      obj.msgs.forEach(appendMessage);
+      // El último msg es ahora la base — polling después solo traerá nuevos.
+      const lastTs = (obj.msgs[obj.msgs.length - 1].timestamp || '').trim();
+      lastTimestamp = lastTs || new Date().toISOString();
+      scrollToBottom();
+      return true;
+    } catch { return false; }
   }
 
   // Helper para detectar si el modo offline está configurado.
@@ -937,10 +967,22 @@
       }
     }
     if (!status.ok || !status.paired) {
-      // Si estamos en app screen (re-conectando tras un poll fail), mostrar
-      // overlay sin tirar al setup. Si NUNCA hubo conexión exitosa, ir
-      // al setup como antes.
+      // v0.18.2 — Si tenemos historial cached del último pareo exitoso,
+      // MOSTRAR ese chat en read-only en lugar de tirar al setup. El user
+      // ve sus conversaciones anteriores, sabe que NO está en vacío, y la
+      // app intenta reconectar en background.
       const everConnected = !!serverUrl;
+      const hasCache = _hasCachedHistory();
+      if (everConnected && hasCache) {
+        showScreen('app');
+        _loadCachedHistory();
+        showRecoveryNeeded(
+          status.error
+            ? 'PC sin conexión: ' + status.error + '. Estás viendo historial cached.'
+            : 'PC respondió pero no aceptó el token. Estás viendo historial cached.'
+        );
+        return false;
+      }
       if (everConnected && !appScreen.hidden) {
         showRecoveryNeeded(
           status.error
@@ -956,7 +998,6 @@
           : 'Token inválido o desconocido. Verifica el código de emparejamiento.',
         'error'
       );
-      // Pre-fill setup with current values for editing
       setupServerInput.value = serverUrl;
       setupTokenInput.value = token;
       return false;
@@ -970,19 +1011,21 @@
     if (allMsgs && allMsgs.length) {
       clearChat();
       allMsgs.forEach(appendMessage);
+      // v0.18.2 — Persistir historial en localStorage como cache offline.
+      // Si el user reinicia la app con el PC apagado, podemos mostrar
+      // este historial en lugar de un chat vacío que parece "perdiste todo".
+      try {
+        localStorage.setItem(
+          STORE_CHAT_CACHE,
+          JSON.stringify({ ts: Date.now(), msgs: allMsgs })
+        );
+      } catch {}
       // v0.18.2 — NUNCA dejar lastTimestamp = '' después de tryConnect.
-      // Si lo dejamos vacío, el siguiente pollOnce envía '?since=' que
-      // el backend interpreta como "trae todo el historial". El polling
-      // re-trae los msgs YA cargados → si dedupe falla por algún caso
-      // edge, duplicados acumulados.
-      // Fallback: si el último msg no tiene timestamp, usar AHORA en ISO
-      // (servidor solo devolverá msgs creados DESPUÉS de este momento).
       const lastTs = (allMsgs[allMsgs.length - 1].timestamp || '').trim();
       lastTimestamp = lastTs || new Date().toISOString();
       scrollToBottom();
     } else {
       renderEmptyChat();
-      // Sin mensajes — usar AHORA para que el polling solo traiga msgs nuevos
       lastTimestamp = new Date().toISOString();
     }
     setStatus('conectada');

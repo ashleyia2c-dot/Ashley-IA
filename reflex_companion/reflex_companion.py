@@ -1547,11 +1547,54 @@ class State(rx.State):
     # ─────────────────────────────────────────
 
     def save_history(self):
+        """Guarda el historial al disco con MERGE de mensajes del móvil.
+
+        v0.18.2 — bug fix: antes hacíamos save_json(self.messages) directo,
+        lo que SOBREESCRIBÍA los mensajes que el endpoint /api/mobile/send
+        había añadido al archivo mientras el desktop estaba abierto.
+        Síntoma: user habla con Ashley móvil → cierra desktop → reinicia
+        → no aparecen los msgs del móvil porque save_history del desktop
+        los pisó.
+
+        Fix: leer el archivo FRESH antes de write, merge con self.messages
+        por id (los del móvil que no estén en self.messages se appendean).
+        Limitación: si el user borra un msg en desktop entre el último
+        save_history y este, podría re-aparecer si el archivo ya lo tenía.
+        Trade-off aceptable — preservar mensajes del móvil > perder un
+        delete del desktop.
+        """
         # Screenshots son muy grandes para disco — se guardan sin imagen
         saveable = [
             {**m, "image": ""} if m.get("role") == "system_result" else m
             for m in self.messages
         ]
+
+        # Merge con el archivo: appendear msgs que el móvil escribió
+        # mientras el desktop tenía su propio self.messages en RAM.
+        try:
+            disk_msgs = load_json(CHAT_FILE, [])
+            if isinstance(disk_msgs, list) and disk_msgs:
+                own_ids = {m.get("id") for m in saveable if m.get("id")}
+                extra = [
+                    m for m in disk_msgs
+                    if m.get("id") and m.get("id") not in own_ids
+                ]
+                if extra:
+                    # Merge + sort cronológico por timestamp
+                    merged = saveable + extra
+                    def _ts_key(msg):
+                        return msg.get("timestamp", "") or ""
+                    merged.sort(key=_ts_key)
+                    saveable = merged[-MAX_HISTORY_MESSAGES:]
+                    # Actualizar self.messages para que la UI también vea
+                    # los msgs del móvil al próximo render
+                    self.messages = list(saveable)
+        except Exception as _e:
+            import logging
+            logging.getLogger("ashley").warning(
+                "save_history merge failed (writing self only): %s", _e
+            )
+
         save_json(CHAT_FILE, saveable)
 
     # ─────────────────────────────────────────

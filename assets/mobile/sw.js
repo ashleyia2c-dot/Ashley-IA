@@ -21,7 +21,7 @@
 // Este archivo se mantiene en el bundle por si algún SW antiguo
 // sigue activo en algún device — al arrancar y NO encontrar handlers
 // útiles, el cleanup script de index.html lo desregistra.
-const CACHE_VERSION = 'ashley-mobile-v0182-r14-deprecated';
+const CACHE_VERSION = 'ashley-mobile-v0182-r15-deprecated';
 const APP_SHELL = [
   '/mobile/index.html',
   '/mobile/app.css',
