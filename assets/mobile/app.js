@@ -292,15 +292,16 @@
     const emptyEl = chatEl.querySelector('.empty-chat');
     if (emptyEl) emptyEl.remove();
 
-    // v0.18.2 — DEDUPE por id. Sin esto, polling + optimistic + send
+    // v0.18.2 — DEDUPE en 2 capas. Sin esto, polling + optimistic + send
     // response añadían el mismo mensaje 3-4 veces porque cada path
     // llamaba appendMessage sin chequear duplicados.
     const msgId = (msg.id || '').trim();
+
+    // ── Capa 1: match exacto por data-id ──────────────────────────
     if (msgId) {
       const existing = chatEl.querySelector('[data-id="' + CSS.escape(msgId) + '"]');
       if (existing) {
         // Ya está en el DOM — solo actualizar contenido si cambió
-        // (caso: optimistic placeholder reemplazado por mensaje real)
         const existingBubble = existing.querySelector('.msg-bubble');
         if (existingBubble && msg.content && existingBubble.textContent !== msg.content) {
           existingBubble.textContent = msg.content;
@@ -308,6 +309,52 @@
         return; // skip añadir duplicado
       }
     }
+
+    // ── Capa 2: match fuzzy (contenido + role + timestamp cercano) ──
+    // El polling cada 2.5s puede traer el msg real del backend ANTES de
+    // que el response del send haga el id-swap del optimistic. Sin este
+    // fallback, el msg se duplica porque el id del polling (server-side)
+    // no coincide con el tempId optimistic ('local-XXX').
+    //
+    // Estrategia: si llega un msg con role+content idénticos a uno ya en
+    // el DOM, y el timestamp del existente es <5s antes del nuevo,
+    // PROMOVEMOS el data-id existente al server-id (en lugar de añadir).
+    if (msg.role && msg.content) {
+      const newTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
+      const expectedClass = (
+        msg.role === 'user' ? 'user' :
+        msg.role === 'system' || msg.role === 'system_result' ? 'system' :
+        'ashley'
+      );
+      const candidates = chatEl.querySelectorAll('.msg-row.' + expectedClass);
+      for (const row of candidates) {
+        const bubble = row.querySelector('.msg-bubble');
+        if (!bubble || bubble.textContent !== msg.content) continue;
+        // Mismo role + mismo content. Verificar que el data-id existente NO
+        // coincide ya con msgId (ya cubierto por Capa 1) y que la temporalidad
+        // es cercana (evita falso match si el user repite el mismo texto horas
+        // después).
+        const existingId = (row.dataset.id || '').trim();
+        if (existingId === msgId) return; // por si acaso
+        // Heurística: si el existente tiene id 'local-XXX' o 'mobile-offline-XXX'
+        // (optimistic), es CASI SEGURO que es el match. Promote sin chequear ts.
+        if (existingId.startsWith('local-') || existingId.startsWith('mobile-offline-')) {
+          row.dataset.id = msgId || existingId;
+          return; // skip añadir duplicado
+        }
+        // Si NO es optimistic, requerir ventana temporal cercana (<5s)
+        // para considerarlo el mismo. Ej: dos polling ticks consecutivos
+        // que traen el mismo msg por algún glitch del filtro since.
+        const existingTs = parseInt(row.dataset.ts || '0', 10);
+        if (existingTs && Math.abs(newTs - existingTs) < 5000) {
+          if (msgId) row.dataset.id = msgId;
+          return; // skip
+        }
+      }
+    }
+
+    // Guardar timestamp para fuzzy match futuro (Capa 2)
+    const tsEpoch = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
 
     const role = msg.role || 'assistant';
     const row = document.createElement('div');
@@ -317,6 +364,7 @@
       'ashley'
     );
     row.dataset.id = msgId;
+    row.dataset.ts = String(tsEpoch);  // para fuzzy dedupe (Capa 2)
 
     if (role === 'assistant') {
       const avatar = document.createElement('img');
