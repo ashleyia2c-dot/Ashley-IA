@@ -440,6 +440,50 @@ def test_lan_ip_detection_function_exists():
     )
 
 
+def test_qr_payload_uses_backend_port_not_frontend():
+    """v0.18.2 bug fix CRÍTICO — el server URL del QR debe apuntar al
+    BACKEND port (donde Starlette tiene los endpoints /api/mobile/*),
+    NO al frontend port (donde Reflex Next.js está y NO conoce esas rutas).
+
+    Bug raíz que rompía el pareo del móvil: cuando Reflex está en slow-path
+    (modo normal sin embedded server JS), el frontend port :17300 sirve
+    Next.js que devuelve 404 para /api/mobile/*. El móvil recibía
+    "page not found" y no podía pairing.
+
+    Fix: el QR tiene server=http://<ip>:<backend_port> — siempre tiene los
+    endpoints disponibles, sin depender del proxy del embedded server.
+    """
+    src = API_ROUTES.read_text(encoding="utf-8")
+    # Helper backend port debe existir
+    assert "_detect_backend_port" in src, (
+        "Falta _detect_backend_port — el QR no puede apuntar al backend"
+    )
+    # qr_payload debe usar backend port
+    section = re.search(
+        r"_mobile_qr_payload_endpoint[\s\S]+?(?=\nasync def |\ndef )",
+        src,
+    )
+    assert section, "qr_payload endpoint no encontrado"
+    body = section.group(0)
+    assert "_detect_backend_port" in body, (
+        "qr_payload debe usar _detect_backend_port (no _detect_frontend_port). "
+        "Sino el móvil intenta llamar al puerto del frontend Next.js que "
+        "devuelve 404 para /api/mobile/*."
+    )
+
+
+def test_rxconfig_backend_host_is_lan_accessible():
+    """rxconfig.py debe declarar backend_host='0.0.0.0' explícitamente
+    para que el móvil pueda llegar via LAN. Es el default de Reflex pero
+    lo hacemos explícito para que un upgrade futuro de Reflex que cambie
+    el default no rompa el pareo móvil silenciosamente."""
+    rxconfig = ROOT / "rxconfig.py"
+    src = rxconfig.read_text(encoding="utf-8")
+    assert 'backend_host="0.0.0.0"' in src or "backend_host='0.0.0.0'" in src, (
+        "rxconfig.py debe declarar backend_host='0.0.0.0' para LAN access móvil"
+    )
+
+
 def test_mobile_app_has_scan_qr_button():
     """index.html debe tener botón 'Escanear QR' como acción primaria."""
     html = (ASSETS_MOBILE / "index.html").read_text(encoding="utf-8")

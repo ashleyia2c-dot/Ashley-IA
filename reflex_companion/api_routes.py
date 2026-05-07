@@ -622,12 +622,35 @@ def _detect_frontend_port() -> int:
         return 17300
 
 
+def _detect_backend_port() -> int:
+    """Detecta el puerto del BACKEND (donde corre Starlette y los endpoints
+    /api/mobile/*). Es el que el móvil debe usar — siempre tiene los
+    endpoints, sin depender de proxy del frontend.
+
+    Reflex lo asigna dinámicamente y Electron lo pasa via env
+    ASHLEY_BACKEND_PORT. Sino default 17800.
+    """
+    import os
+    try:
+        return int(os.getenv("ASHLEY_BACKEND_PORT") or "17800")
+    except Exception:
+        return 17800
+
+
 async def _mobile_qr_payload_endpoint(request):
     """GET /api/mobile/qr_payload — devuelve datos para generar QR de pairing.
 
     SOLO accesible desde localhost. Devuelve JSON con server URL + token
     + IP detectada. La página /mobile/connect.html lo usa para generar el
     QR que el user escanea desde su móvil.
+
+    v0.18.2 — el server URL apunta al BACKEND port (no frontend), porque:
+      • El backend Starlette siempre tiene los endpoints /api/mobile/*
+      • El frontend Next.js NO conoce esas rutas (slow-path) y devuelve 404
+      • El embedded HTTP proxy de Electron (fast-path) sí proxea, pero no
+        siempre está activo. El backend es la fuente confiable.
+      • El móvil APK Capacitor sirve la PWA desde su bundle local — no
+        necesita el frontend del PC.
     """
     if request.method == "OPTIONS":
         return _cors_preflight()
@@ -636,7 +659,7 @@ async def _mobile_qr_payload_endpoint(request):
         return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
 
     lan_ip = _detect_lan_ip()
-    port = _detect_frontend_port()
+    port = _detect_backend_port()
     token = _read_pairing_token()
     server_url = f"http://{lan_ip}:{port}"
 
