@@ -2,43 +2,43 @@ package com.ashleyia.mobile;
 
 import android.os.Bundle;
 import android.webkit.PermissionRequest;
-import android.webkit.WebChromeClient;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 
 /**
  * MainActivity custom para Ashley Mobile.
  *
- * v0.18.2 — sobreescribe el WebChromeClient del Capacitor WebView para
- * delegar permisos de cámara/audio al sistema Android. Sin esto,
- * navigator.mediaDevices.getUserMedia() falla con "Permission denied"
- * sin siquiera mostrar el dialog del sistema.
+ * v0.18.2 — extiende el BridgeWebChromeClient de Capacitor (no WebChromeClient
+ * default de Android) y solo override onPermissionRequest. Esto preserva
+ * TODO lo que Capacitor hace por defecto (console.log, file chooser,
+ * fullscreen video, prompt dialogs, etc.) y solo cambia el comportamiento
+ * de permission requests para conceder grant automático.
  *
- * Necesario para que el QR scanner funcione (usa getUserMedia para
- * acceder a la cámara trasera).
+ * Bug que arregla: navigator.mediaDevices.getUserMedia() del QR scanner
+ * fallaba o se colgaba porque Capacitor no concedía el permiso al WebView
+ * aunque CAMERA estuviera en el AndroidManifest.
  *
- * El grant es automático porque la app es nuestra (no carga contenido
- * externo arbitrario que pudiera intentar acceder a la cámara). Si en
- * el futuro la app cargara contenido externo via WebView, habría que
- * filtrar las request.getResources() o pedir confirmación al user.
+ * Versión anterior reemplazaba el WebChromeClient entero — eso rompía el
+ * flujo de permisos nativos de Capacitor y la promise quedaba colgada.
  */
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Reemplazar el WebChromeClient default por uno que delegue
-        // permisos de hardware (cámara + mic) al sistema.
-        bridge.getWebView().setWebChromeClient(new WebChromeClient() {
+        // EXTENDER el chrome client de Capacitor, NO reemplazarlo entero.
+        bridge.getWebView().setWebChromeClient(new BridgeWebChromeClient(bridge) {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
+                // Auto-grant para hardware (cámara + audio). El sistema Android
+                // ya concedió el permiso a la app cuando se instaló (con CAMERA
+                // en el manifest). Aquí solo concedemos el grant del WebView
+                // al JS (sin esto, getUserMedia falla con "Permission denied"
+                // sin siquiera mostrar el dialog).
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        // Otorgar los permisos solicitados (camera, audio).
-                        // El sistema Android ya pidió permission al user
-                        // cuando la app se instaló si tiene CAMERA en el
-                        // manifest. Aquí solo concedemos el WebView grant.
                         request.grant(request.getResources());
                     }
                 });
