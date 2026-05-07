@@ -12,13 +12,21 @@
   // ─── Storage keys ──────────────────────────────────────────────
   const STORE_SERVER_URL = 'ashley.mobile.serverUrl';
   const STORE_TOKEN      = 'ashley.mobile.token';
+  // v0.18.2 — para auto-recovery cuando la URL del túnel cambia.
+  // Si móvil + PC están en misma LAN, podemos obtener nueva URL via lan_ip.
+  const STORE_LAN_IP        = 'ashley.mobile.lan_ip';
+  const STORE_BACKEND_PORT  = 'ashley.mobile.backend_port';
 
   // ─── State ──────────────────────────────────────────────────────
   let serverUrl = (localStorage.getItem(STORE_SERVER_URL) || '').replace(/\/$/, '');
   let token     = localStorage.getItem(STORE_TOKEN) || '';
+  let cachedLanIp = localStorage.getItem(STORE_LAN_IP) || '';
+  let cachedBackendPort = parseInt(localStorage.getItem(STORE_BACKEND_PORT) || '17800', 10);
   let lastTimestamp = '';
   let pollInterval = null;
   let isSending = false;
+  // Estado de recovery — true mientras intentamos auto-recuperar URL nueva
+  let isRecovering = false;
 
   // ─── DOM refs ──────────────────────────────────────────────────
   const setupScreen = document.getElementById('setup-screen');
@@ -108,6 +116,111 @@
     }, opts.headers || {});
     const res = await fetch(serverUrl + path, Object.assign({}, opts, { headers }));
     return res;
+  }
+
+  // v0.18.2 — Auto-recovery cuando la URL del túnel cached deja de
+  // responder. Cloudflare regenera URL en cada arranque del PC, así
+  // que el móvil queda con URL muerta. Si móvil + PC están en LAN,
+  // intentamos obtener la URL nueva via /api/mobile/tunnel_url
+  // contra la lan_ip cached del último pareo.
+  async function attemptAutoRecovery() {
+    if (isRecovering) return false;
+    if (!cachedLanIp || !token) return false;
+    isRecovering = true;
+    try {
+      const lanUrl = 'http://' + cachedLanIp + ':' + cachedBackendPort;
+      console.log('[recovery] intentando LAN auto-recovery →', lanUrl);
+      const ctrl = new AbortController();
+      const tmr = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(lanUrl + '/api/mobile/tunnel_url', {
+        method: 'GET',
+        headers: { 'X-Ashley-Token': token },
+        signal: ctrl.signal,
+      });
+      clearTimeout(tmr);
+      if (!res.ok) {
+        console.warn('[recovery] LAN respondió HTTP', res.status);
+        return false;
+      }
+      const data = await res.json();
+      const newUrl = (data.tunnel_url || '').trim() ||
+                     ('http://' + (data.lan_ip || cachedLanIp) + ':' + (data.port || cachedBackendPort));
+      if (!newUrl) return false;
+      // Verificar la URL nueva responde antes de adoptarla
+      const v = await fetch(newUrl + '/api/mobile/status', {
+        method: 'GET',
+        headers: { 'X-Ashley-Token': token },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+      });
+      if (!v.ok) {
+        console.warn('[recovery] URL nueva respondió HTTP', v.status);
+        return false;
+      }
+      // ✓ funciona — actualizar serverUrl persistente
+      const cleanUrl = newUrl.replace(/\/$/, '');
+      serverUrl = cleanUrl;
+      localStorage.setItem(STORE_SERVER_URL, cleanUrl);
+      // Refresh lan_ip y port por si cambiaron
+      if (data.lan_ip) {
+        cachedLanIp = data.lan_ip;
+        localStorage.setItem(STORE_LAN_IP, data.lan_ip);
+      }
+      if (data.port) {
+        cachedBackendPort = data.port;
+        localStorage.setItem(STORE_BACKEND_PORT, String(data.port));
+      }
+      console.log('[recovery] ✓ URL actualizada a', cleanUrl);
+      return true;
+    } catch (e) {
+      console.warn('[recovery] falló:', e && e.message);
+      return false;
+    } finally {
+      isRecovering = false;
+    }
+  }
+
+  // Overlay UI cuando NO se puede recuperar (móvil + PC en distintas
+  // redes, ej. boosters). CTA prominente para re-escanear sin tener
+  // que ir al setup screen manualmente.
+  function showRecoveryNeeded(reason) {
+    // Crear overlay si no existe
+    let overlay = document.getElementById('recovery-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'recovery-overlay';
+      overlay.className = 'recovery-overlay';
+      overlay.innerHTML =
+        '<div class="recovery-card">' +
+          '<div class="recovery-icon">📡</div>' +
+          '<h2 class="recovery-title">Tu PC tiene URL nueva</h2>' +
+          '<p class="recovery-text" id="recovery-reason"></p>' +
+          '<p class="recovery-hint">Esto pasa cuando Ashley se reinicia en tu PC. Re-escanea el QR para conectar a la URL nueva.</p>' +
+          '<button class="recovery-btn primary-btn" id="recovery-rescan-btn">Re-escanear QR</button>' +
+          '<button class="recovery-btn secondary-btn" id="recovery-manual-btn">Introducir manualmente</button>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      document.getElementById('recovery-rescan-btn').addEventListener('click', () => {
+        overlay.remove();
+        // Forzar abrir el scanner desde la setup screen para que el user
+        // pueda escanear el QR nuevo del PC.
+        showScreen('setup');
+        if (typeof openScanner === 'function') openScanner();
+      });
+      document.getElementById('recovery-manual-btn').addEventListener('click', () => {
+        overlay.remove();
+        showScreen('setup');
+        // Pre-fill con la URL anterior para que el user solo edite la nueva
+        if (setupServerInput) setupServerInput.value = serverUrl;
+        if (setupTokenInput) setupTokenInput.value = token;
+      });
+    }
+    const reasonEl = document.getElementById('recovery-reason');
+    if (reasonEl) reasonEl.textContent = reason || 'No se puede llegar a tu PC.';
+    overlay.hidden = false;
+  }
+  function hideRecoveryNeeded() {
+    const o = document.getElementById('recovery-overlay');
+    if (o) o.remove();
   }
 
   async function fetchStatus() {
@@ -457,10 +570,24 @@
   }
 
   // ─── Polling loop ──────────────────────────────────────────────
+  // Contador de fallos consecutivos para trigger auto-recovery al detectar
+  // URL muerta sin esperar al user a darse cuenta.
+  let _pollConsecutiveFailures = 0;
+  const _POLL_FAIL_THRESHOLD = 2;  // 2 polls fallidos seguidos = recovery
+
   async function pollOnce() {
     try {
       const newMsgs = await fetchMessages(lastTimestamp);
-      if (newMsgs === null) return;
+      if (newMsgs === null) {
+        // fetchStatus dentro de fetchMessages devolvió error (probablemente
+        // 401 o network). Contar como fallo.
+        _pollConsecutiveFailures += 1;
+        await _maybeRecover('poll devolvió null');
+        return;
+      }
+      // ✓ poll OK — reset contador, ocultar overlay si estaba visible
+      _pollConsecutiveFailures = 0;
+      hideRecoveryNeeded();
       if (newMsgs.length === 0) {
         setStatus('conectada');
         return;
@@ -474,9 +601,30 @@
       if (wasAtBottom) scrollToBottom();
       setStatus('conectada');
     } catch (e) {
-      setStatus('error', 'error');
-      console.warn('poll err:', e);
+      _pollConsecutiveFailures += 1;
+      console.warn('poll err:', e && e.message);
+      setStatus('reconectando...', 'error');
+      await _maybeRecover('TypeError o network');
     }
+  }
+
+  async function _maybeRecover(reason) {
+    if (_pollConsecutiveFailures < _POLL_FAIL_THRESHOLD) return;
+    // Intentar auto-recovery vía LAN
+    setStatus('buscando PC...', 'error');
+    const recovered = await attemptAutoRecovery();
+    if (recovered) {
+      _pollConsecutiveFailures = 0;
+      setStatus('conectada', 'ok');
+      hideRecoveryNeeded();
+      return;
+    }
+    // Recovery falló — mostrar overlay con CTA re-escanear
+    setStatus('PC no alcanzable', 'error');
+    showRecoveryNeeded(
+      'No se puede llegar a tu PC ni vía Cloudflare ni vía LAN. ' +
+      'Probablemente Ashley se reinició y tiene URL nueva.'
+    );
   }
 
   function startPolling() {
@@ -626,8 +774,32 @@
       return false;
     }
     setStatus('conectando…');
-    const status = await fetchStatus();
+    let status = await fetchStatus();
+    // v0.18.2 — Si la conexión inicial falla, intentar auto-recovery via LAN
+    // ANTES de tirar al user al setup screen. Cubre el caso típico:
+    // user reinició Ashley desktop → URL Cloudflare cambió → la cached
+    // está muerta → móvil debe encontrar la nueva.
+    if (!status.ok && cachedLanIp) {
+      setStatus('buscando PC...', 'error');
+      const recovered = await attemptAutoRecovery();
+      if (recovered) {
+        // Re-intentar status con la URL nueva
+        status = await fetchStatus();
+      }
+    }
     if (!status.ok || !status.paired) {
+      // Si estamos en app screen (re-conectando tras un poll fail), mostrar
+      // overlay sin tirar al setup. Si NUNCA hubo conexión exitosa, ir
+      // al setup como antes.
+      const everConnected = !!serverUrl;
+      if (everConnected && !appScreen.hidden) {
+        showRecoveryNeeded(
+          status.error
+            ? 'Error: ' + status.error
+            : 'Tu PC respondió pero no aceptó el token (¿re-emparejado?).'
+        );
+        return false;
+      }
       showScreen('setup');
       setSetupStatus(
         status.error
@@ -640,6 +812,9 @@
       setupTokenInput.value = token;
       return false;
     }
+    // Connection OK — reset failures + hide recovery overlay
+    _pollConsecutiveFailures = 0;
+    hideRecoveryNeeded();
     showScreen('app');
     // Load initial chat
     const allMsgs = await fetchMessages('');
@@ -941,6 +1116,19 @@
     if (!s || !t) {
       setScannerStatus('QR incompleto.', 'error');
       return false;
+    }
+
+    // v0.18.2 — el QR ahora puede traer también lan_ip + port para
+    // auto-recovery futura. Los persistimos en localStorage.
+    const newLanIp = (parsed.i || parsed.lan_ip || '').trim();
+    const newPort = parseInt(parsed.p || parsed.port || '17800', 10);
+    if (newLanIp) {
+      cachedLanIp = newLanIp;
+      localStorage.setItem(STORE_LAN_IP, newLanIp);
+    }
+    if (newPort) {
+      cachedBackendPort = newPort;
+      localStorage.setItem(STORE_BACKEND_PORT, String(newPort));
     }
 
     setScannerStatus('Conectando a ' + s + '...', 'ok');

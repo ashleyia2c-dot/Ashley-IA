@@ -845,6 +845,43 @@ async def _mobile_regen_token_endpoint(request):
     return _with_cors(_StarletteJSON({"ok": True, "token": cfg["token"]}))
 
 
+async def _mobile_tunnel_url_endpoint(request):
+    """GET /api/mobile/tunnel_url — devuelve la URL actual del Cloudflare
+    Tunnel + LAN IP + port.
+
+    Usado por el móvil para AUTO-RECOVERY cuando la URL cached del túnel
+    deja de responder (Cloudflare regenera URL en cada arranque del PC).
+
+    Si el móvil tiene la lan_ip cached del último pareo, llama a este
+    endpoint vía LAN para obtener la URL nueva del túnel — sin que el
+    user tenga que re-escanear el QR. Funciona si móvil y PC están en
+    la misma subnet LAN.
+
+    Si el móvil NO está en la misma LAN (boosters/mesh), este endpoint
+    también está expuesto vía Cloudflare, pero por definición el móvil
+    NO podría llegar (la URL Cloudflare cambió). En ese caso la UI
+    muestra "Re-escanear QR".
+
+    Auth: requiere pairing token. NO localhost-only para que el móvil
+    en LAN pueda llamar.
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    if not _check_mobile_auth(request):
+        return _unauthorized()
+
+    lan_ip = _detect_lan_ip()
+    port = _detect_backend_port()
+    tunnel_url = _read_tunnel_url()
+
+    return _with_cors(_StarletteJSON({
+        "tunnel_url": tunnel_url,        # vacío si túnel caído
+        "lan_ip": lan_ip,
+        "port": port,
+        "connection_mode": "tunnel" if tunnel_url else "lan",
+    }))
+
+
 async def _mobile_chat_endpoint(request):
     """GET /api/mobile/chat[?since=ISO_TIMESTAMP]
 
@@ -1304,6 +1341,9 @@ def register_routes(app):
         "/api/mobile/facts", _mobile_facts_endpoint, methods=["GET", "OPTIONS"]))
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/mobile/send", _mobile_send_endpoint, methods=["POST", "OPTIONS"]))
+    # ── tunnel_url para auto-recovery (v0.18.2) ──
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/mobile/tunnel_url", _mobile_tunnel_url_endpoint, methods=["GET", "OPTIONS"]))
     # ── Sync endpoints (v0.18.2 — para brain JS offline) ──
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/mobile/sync_prompts", _mobile_sync_prompts_endpoint, methods=["GET", "OPTIONS"]))

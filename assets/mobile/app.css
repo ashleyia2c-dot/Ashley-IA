@@ -727,6 +727,64 @@ body::before {
   background: rgba(212, 163, 115, 0.35);
 }
 
+/* ─── Recovery overlay (v0.18.2) ─────────────────────────────
+   Se muestra cuando la URL del túnel Cloudflare cambió (PC reinició)
+   y el móvil no puede llegar al PC ni vía túnel ni vía LAN cached.
+   CTA prominente para re-escanear sin tener que ir al setup manual. */
+.recovery-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 4, 8, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.25s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.recovery-card {
+  max-width: 380px;
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(212, 163, 115, 0.25);
+  border-radius: 18px;
+  padding: 28px 22px;
+  text-align: center;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.6);
+}
+.recovery-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+.recovery-title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.recovery-text {
+  margin: 0 0 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.recovery-hint {
+  margin: 0 0 22px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.recovery-btn {
+  width: 100%;
+  margin-top: 8px;
+}
+
 /* ─── Responsive: pequeñas adjustments ─────────────────────── */
 @media (min-width: 600px) {
   /* En tablets / desktop browser, limitar ancho */

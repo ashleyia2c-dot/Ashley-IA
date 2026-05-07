@@ -690,8 +690,13 @@ class State(rx.State):
             self.mobile_pair_lan_ip = lan_ip
 
             if token and lan_ip:
+                # v0.18.2 — incluimos lan_ip + port en el QR para que el
+                # móvil pueda hacer auto-recovery: si la URL del túnel
+                # cambia (cada arranque del PC), el móvil intenta obtener
+                # la URL nueva via /api/mobile/tunnel_url en la LAN IP.
+                # Solo funciona si móvil + PC están en la misma subnet.
                 qr_payload = _json.dumps(
-                    {"s": server, "t": token},
+                    {"s": server, "t": token, "i": lan_ip, "p": port},
                     separators=(",", ":"),
                 )
                 encoded = quote(qr_payload, safe="")
