@@ -99,18 +99,27 @@
     <main id="chat" class="chat" aria-live="polite"></main>
 
     <footer class="composer">
-      <textarea
+      <!--
+        v0.18.2 — Cambiado de <textarea> a <input type="text">.
+        Razón: Chromium WebView desactivó suggestions/predictive text para
+        textarea desde v92 (mitigación de spell-jacking, 2022). El IME
+        Android trata textarea como TYPE_TEXT_FLAG_MULTI_LINE → no muestra
+        predicciones. WhatsApp Web y Telegram Web usan <input> por esto.
+        autocomplete="off" paradójicamente activa MEJORES sugerencias en
+        Gboard porque deja la barra libre (no la reserva para autofill).
+      -->
+      <input
+        type="text"
         id="msg-input"
         placeholder="Escribe un mensaje..."
-        rows="1"
         autocapitalize="sentences"
         autocorrect="on"
+        autocomplete="off"
         spellcheck="true"
-        autocomplete="on"
         inputmode="text"
         enterkeyhint="send"
         lang="es"
-      ></textarea>
+      />
       <button id="send-btn" class="send-btn" aria-label="Enviar">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
       </button>

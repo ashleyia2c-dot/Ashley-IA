@@ -167,12 +167,29 @@ def test_workflow_replaces_app_icon():
     )
 
 
-def test_workflow_uses_imagemagick():
-    """Necesario para resize a múltiples tamaños mipmap."""
+def test_workflow_uses_pregenerated_icons():
+    """v0.18.2 — los iconos están PRE-GENERADOS en android-overrides/icons/
+    (commiteados al repo) y el workflow solo hace cp. Antes intentaba
+    usar ImageMagick que NO está pre-instalado en runners ubuntu-latest
+    de GitHub Actions (verificado en build #25518234900) — fallaba con
+    "ImageMagick no disponible, skipping" silencioso."""
     src = WORKFLOW.read_text(encoding="utf-8")
-    assert "magick" in src or "convert" in src, (
-        "Workflow debe usar ImageMagick (magick/convert) para resizing"
+    assert "android-overrides/icons" in src, (
+        "Workflow debe copiar iconos pre-generados de android-overrides/icons/"
     )
+    assert "ICONS_SRC" in src or "cp \"" in src, (
+        "Workflow debe usar cp en lugar de generar iconos en CI"
+    )
+
+    # Verificar que los iconos pre-generados existen en el repo
+    icons_dir = ROOT / "mobile-app" / "android-overrides" / "icons"
+    assert icons_dir.is_dir(), (
+        "Falta dir mobile-app/android-overrides/icons/ con iconos pre-generados"
+    )
+    densities = ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"]
+    for d in densities:
+        icon = icons_dir / f"mipmap-{d}" / "ic_launcher.png"
+        assert icon.is_file(), f"Falta icono pre-generado: {icon}"
 
 
 def test_workflow_generates_all_mipmap_sizes():

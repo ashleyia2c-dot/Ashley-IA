@@ -461,8 +461,7 @@ body::before {
 }
 #msg-input {
   flex: 1;
-  min-height: 44px;
-  max-height: 120px;
+  height: 44px;
   background: var(--bg-input);
   border: 1px solid rgba(212, 163, 115, 0.25);
   border-radius: 22px;
@@ -470,10 +469,12 @@ body::before {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 15px;
-  resize: none;
   outline: none;
   transition: border-color 0.15s;
   line-height: 1.4;
+  /* v0.18.2 — input single-line para que Gboard muestre suggestions
+     (textarea está roto en WebView desde Chromium v92). */
+  min-width: 0;
 }
 #msg-input:focus { border-color: var(--accent); }
 #msg-input::placeholder { color: var(--text-dim); }

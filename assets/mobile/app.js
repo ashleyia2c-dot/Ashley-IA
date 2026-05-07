@@ -252,6 +252,32 @@
     } catch { return false; }
   }
 
+  // v0.18.2 — Flag para bloquear que el recovery overlay re-aparezca
+  // cuando el user está intentando arreglar la conexión (en Settings,
+  // o re-pareando). Sin esto, pollOnce sigue fallando cada 2.5s y
+  // re-llama a showRecoveryNeeded → overlay aparece encima del panel
+  // de Settings que el user está usando → no puede tocar nada.
+  // Se setea cuando el user pulsa cualquier botón del overlay.
+  // Se resetea cuando: pollOnce tiene éxito, O cuando el user cierra
+  // settings panel, O tras 2 minutos.
+  let _userIsFixingConnection = false;
+  let _fixingResetTimer = null;
+  function _setUserFixingMode(active) {
+    _userIsFixingConnection = !!active;
+    if (_fixingResetTimer) {
+      clearTimeout(_fixingResetTimer);
+      _fixingResetTimer = null;
+    }
+    if (active) {
+      // Auto-reset tras 2 min para que no quede bloqueado para siempre
+      // si el user nunca cierra settings ni vuelve a chat.
+      _fixingResetTimer = setTimeout(() => {
+        _userIsFixingConnection = false;
+        _fixingResetTimer = null;
+      }, 2 * 60 * 1000);
+    }
+  }
+
   // Overlay UI cuando NO se puede recuperar (móvil + PC en distintas
   // redes, ej. boosters). CTA prominente para re-escanear sin tener
   // que ir al setup screen manualmente. Tambien menciona modo offline
@@ -287,11 +313,13 @@
         '</div>';
       document.body.appendChild(overlay);
       document.getElementById('recovery-rescan-btn').addEventListener('click', () => {
+        _setUserFixingMode(true);  // bloquear re-aparición durante el fix
         overlay.remove();
         showScreen('setup');
         if (typeof openScanner === 'function') openScanner();
       });
       document.getElementById('recovery-manual-btn').addEventListener('click', () => {
+        _setUserFixingMode(true);
         overlay.remove();
         showScreen('setup');
         if (setupServerInput) setupServerInput.value = serverUrl;
@@ -300,15 +328,21 @@
       const offlineBtn = document.getElementById('recovery-offline-btn');
       if (offlineBtn) {
         offlineBtn.addEventListener('click', () => {
+          // CRÍTICO: bloquear re-aparición del overlay sobre el panel
+          // de Settings (sino pollOnce sigue fallando cada 2.5s y el
+          // overlay reaparece tapando todo lo que el user intenta tocar).
+          _setUserFixingMode(true);
+          // PARAR el polling también — no hay PC que esté online así
+          // que pollear es desperdicio y solo causa más overlays.
+          stopPolling();
           overlay.remove();
-          // Abrir Settings panel directamente al modo offline
           if (settingsPanel) {
             settingsPanel.hidden = false;
-            // Pre-cargar valores
             if (settingsServerInput) settingsServerInput.value = serverUrl || '';
             if (settingsTokenInput) settingsTokenInput.value = token || '';
             setOfflineStatus(null);
-            // Scroll al panel offline (puede estar abajo)
+            // Scroll al panel offline tras un beat para que el panel
+            // tenga tiempo de renderear antes del scrollIntoView.
             setTimeout(() => {
               const offlineSection = document.getElementById('settings-offline-provider');
               if (offlineSection) offlineSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -693,6 +727,7 @@
       // ✓ poll OK — reset contador, ocultar overlay si estaba visible
       _pollConsecutiveFailures = 0;
       hideRecoveryNeeded();
+      _setUserFixingMode(false);  // conexión OK → resetear bloqueo overlay
       if (newMsgs.length === 0) {
         setStatus('conectada');
         return;
@@ -715,13 +750,22 @@
 
   async function _maybeRecover(reason) {
     if (_pollConsecutiveFailures < _POLL_FAIL_THRESHOLD) return;
-    // Intentar auto-recovery vía LAN
+    // v0.18.2 — Si el user YA está intentando arreglar (Settings abierto,
+    // re-pareando, etc.), NO mostramos el overlay encima — el user no
+    // podría tocar nada. El flag se resetea cuando: pollOnce tiene éxito,
+    // user vuelve al chat, o tras 2 min auto.
+    if (_userIsFixingConnection) {
+      console.log('[recovery] user already fixing — skip overlay');
+      return;
+    }
     setStatus('buscando PC...', 'error');
     const recovered = await attemptAutoRecovery();
     if (recovered) {
       _pollConsecutiveFailures = 0;
       setStatus('conectada', 'ok');
       hideRecoveryNeeded();
+      _setUserFixingMode(false);  // conexión OK → resetear bloqueo overlay
+      _setUserFixingMode(false);  // reset por si acaso
       return;
     }
     // Recovery falló — mostrar overlay con CTA re-escanear
@@ -962,7 +1006,7 @@
     isSending = true;
     sendBtn.disabled = true;
     inputEl.value = '';
-    inputEl.style.height = 'auto';
+    // (height ya no se ajusta — input single-line tiene height fija)
 
     // Optimistic: add user msg immediately
     const tempId = 'local-' + Date.now();
@@ -1399,10 +1443,23 @@
     setOfflineStatus(null);
     settingsPanel.hidden = false;
   });
-  settingsClose.addEventListener('click', () => { settingsPanel.hidden = true; });
-  settingsPanel.querySelector('.overlay-backdrop').addEventListener('click', () => {
+  // v0.18.2 — al cerrar settings, resetear el flag "fixing" porque el
+  // user ya terminó (o canceló) el proceso de arreglar la conexión.
+  // Si el user GUARDÓ offline config, la próxima vez que pollOnce falle,
+  // el path offline se activará en sendMessage. Si NO guardó nada, OK
+  // que vuelva a salir el overlay para que vea que sigue desconectado.
+  function _closeSettings() {
     settingsPanel.hidden = true;
-  });
+    _setUserFixingMode(false);
+    // Re-arrancar polling si tenemos credenciales (puede haberlas
+    // actualizado el user en este panel)
+    if (serverUrl && token && !appScreen.hidden) {
+      // Pequeño delay para que la UI se asiente
+      setTimeout(() => { startPolling(); }, 300);
+    }
+  }
+  settingsClose.addEventListener('click', _closeSettings);
+  settingsPanel.querySelector('.overlay-backdrop').addEventListener('click', _closeSettings);
   settingsSaveBtn.addEventListener('click', async () => {
     const newServer = settingsServerInput.value.trim().replace(/\/$/, '');
     const newToken  = settingsTokenInput.value.trim();
@@ -1555,6 +1612,10 @@
     };
     saveOfflineConfig(cfg);
     setOfflineStatus('✓ Configuración guardada. Ashley podrá chatear sin tu PC.', 'ok');
+    // v0.18.2 — Reset del flag "fixing" porque el user ya solucionó.
+    // Ya tiene modo offline configurado → si manda mensaje y PC offline,
+    // sendMessage usará el path BYOK directo. No necesita más overlays.
+    _setUserFixingMode(false);
   });
 
   // ─── Composer events ───────────────────────────────────────────
@@ -1566,11 +1627,10 @@
       handleSend();
     }
   });
-  // Auto-resize textarea
-  inputEl.addEventListener('input', () => {
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
-  });
+  // v0.18.2 — Removido auto-resize porque cambiamos textarea → input
+  // type="text" para que Gboard muestre suggestions predictive (textarea
+  // está roto en WebView Android desde Chromium v92). Input single-line:
+  // height fija desde CSS, sin scrollHeight.
 
   // v0.18.2 — Scroll automático al abrir el teclado, sino el último
   // mensaje queda OCULTO debajo del teclado nuevo. Tres triggers:
