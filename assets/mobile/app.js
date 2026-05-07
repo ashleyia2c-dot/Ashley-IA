@@ -88,7 +88,14 @@
     return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
   }
   function scrollToBottom() {
-    requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
+    // v0.18.2 — doble RAF para garantizar que el scroll sucede DESPUÉS
+    // del paint del teclado/keyboard. Sin esto, en Android el scroll
+    // ocurre antes del resize del viewport y queda mal posicionado.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        chatEl.scrollTop = chatEl.scrollHeight;
+      });
+    });
   }
 
   // ─── API calls ─────────────────────────────────────────────────
@@ -285,6 +292,23 @@
     const emptyEl = chatEl.querySelector('.empty-chat');
     if (emptyEl) emptyEl.remove();
 
+    // v0.18.2 — DEDUPE por id. Sin esto, polling + optimistic + send
+    // response añadían el mismo mensaje 3-4 veces porque cada path
+    // llamaba appendMessage sin chequear duplicados.
+    const msgId = (msg.id || '').trim();
+    if (msgId) {
+      const existing = chatEl.querySelector('[data-id="' + CSS.escape(msgId) + '"]');
+      if (existing) {
+        // Ya está en el DOM — solo actualizar contenido si cambió
+        // (caso: optimistic placeholder reemplazado por mensaje real)
+        const existingBubble = existing.querySelector('.msg-bubble');
+        if (existingBubble && msg.content && existingBubble.textContent !== msg.content) {
+          existingBubble.textContent = msg.content;
+        }
+        return; // skip añadir duplicado
+      }
+    }
+
     const role = msg.role || 'assistant';
     const row = document.createElement('div');
     row.className = 'msg-row ' + (
@@ -292,12 +316,16 @@
       role === 'system' ? 'system' :
       'ashley'
     );
-    row.dataset.id = msg.id || '';
+    row.dataset.id = msgId;
 
     if (role === 'assistant') {
       const avatar = document.createElement('img');
       avatar.className = 'msg-avatar';
-      avatar.src = serverUrl + '/ashley_pfp.jpg';
+      // v0.18.2 — usar imagen LOCAL del bundle Capacitor, no del servidor.
+      // Antes: serverUrl + '/ashley_pfp.jpg' fallaba con Cloudflare tunnel
+      // (apunta al backend, no al frontend que sirve estáticos). El APK
+      // ya lleva ashley_pfp.jpg en su propio bundle vía sync-assets.js.
+      avatar.src = './ashley_pfp.jpg';
       avatar.alt = 'Ashley';
       avatar.onerror = () => { avatar.style.display = 'none'; };
       row.appendChild(avatar);
@@ -1177,6 +1205,29 @@
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
   });
+
+  // v0.18.2 — Scroll automático al abrir el teclado, sino el último
+  // mensaje queda OCULTO debajo del teclado nuevo. Tres triggers:
+  //   1. inputEl.focus → user va a escribir → asegurar que ve el último
+  //      mensaje arriba del teclado
+  //   2. visualViewport.resize → Android dispara este cuando el teclado
+  //      abre/cierra (height del viewport cambia)
+  //   3. Tras enviar (handleSend ya hace scrollToBottom)
+  inputEl.addEventListener('focus', () => {
+    // Pequeño delay para que el teclado termine de abrir antes del scroll
+    setTimeout(() => scrollToBottom(), 250);
+  });
+  if ('visualViewport' in window && window.visualViewport) {
+    let _lastViewportHeight = window.visualViewport.height;
+    window.visualViewport.addEventListener('resize', () => {
+      const h = window.visualViewport.height;
+      // Si el viewport se hizo más PEQUEÑO (teclado abrió), scroll al fondo
+      if (h < _lastViewportHeight) {
+        scrollToBottom();
+      }
+      _lastViewportHeight = h;
+    });
+  }
 
   // ─── Visibility detection — pause polling when hidden ─────────
   document.addEventListener('visibilitychange', () => {

@@ -127,6 +127,58 @@ jobs:
           # Hard-fail si CAMERA no acabó en el manifest
           grep -q "android.permission.CAMERA" "$MANIFEST" || (echo "❌ CAMERA permission missing!" && exit 1)
 
+      - name: Replace default app icon with ashley_pfp.jpg
+        working-directory: mobile-app
+        run: |
+          # Capacitor genera un icono default genérico al hacer cap add android.
+          # Lo reemplazamos por la imagen de Ashley en todos los tamaños mipmap
+          # estándar de Android. ImageMagick está pre-instalado en runners
+          # ubuntu-latest de GitHub.
+          PFP="../assets/ashley_pfp.jpg"
+          RES="android/app/src/main/res"
+
+          if [ ! -f "$PFP" ]; then
+            echo "⚠ ashley_pfp.jpg no encontrado en assets/, skipping icon replace"
+            exit 0
+          fi
+
+          # Comando: 'magick' (IM 7+) o 'convert' (IM 6, deprecated)
+          if command -v magick >/dev/null 2>&1; then
+            CMD="magick"
+          elif command -v convert >/dev/null 2>&1; then
+            CMD="convert"
+          else
+            echo "⚠ ImageMagick no disponible, skipping icon replace"
+            exit 0
+          fi
+
+          # Tamaños mipmap estándar Android (densidad → dimensión px)
+          declare -A SIZES=(
+            ["mdpi"]="48"
+            ["hdpi"]="72"
+            ["xhdpi"]="96"
+            ["xxhdpi"]="144"
+            ["xxxhdpi"]="192"
+          )
+
+          for density in "${!SIZES[@]}"; do
+            size="${SIZES[$density]}"
+            dir="$RES/mipmap-$density"
+            mkdir -p "$dir"
+            # Generamos PNG cuadrado (Android los recorta a círculo si la
+            # device es adaptive). El recorte fitness es para que la cara
+            # de Ashley quede centrada y no se corte.
+            $CMD "$PFP" -resize "${size}x${size}^" -gravity center -extent "${size}x${size}" "$dir/ic_launcher.png"
+            $CMD "$PFP" -resize "${size}x${size}^" -gravity center -extent "${size}x${size}" "$dir/ic_launcher_round.png"
+            # Foreground para adaptive icon (Android 8+) — debe ser 108dp
+            # con safe zone de 66dp, por eso resize a 1.5x el size base
+            adaptive_size=$((size * 3 / 2))
+            $CMD "$PFP" -resize "${adaptive_size}x${adaptive_size}^" -gravity center -extent "${adaptive_size}x${adaptive_size}" "$dir/ic_launcher_foreground.png" 2>/dev/null || true
+          done
+
+          echo "✓ Iconos generados desde ashley_pfp.jpg en todos los tamaños mipmap"
+          ls -la "$RES/mipmap-xxxhdpi/" 2>&1 | head -5
+
       - name: Make gradlew executable
         working-directory: mobile-app/android
         run: chmod +x gradlew
