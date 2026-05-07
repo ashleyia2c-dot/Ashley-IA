@@ -14,6 +14,7 @@
     "release": "npm run prebuild-frontend && electron-builder --win --publish always"
   },
   "dependencies": {
+    "cloudflared": "^0.5.3",
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {

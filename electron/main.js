@@ -94,6 +94,12 @@ let frontendProcess = null;         // (legacy) sirv subprocess — ya no se usa
 let embeddedFrontendServer = null;  // v0.17.3 — servidor HTTP embebido que sirve .web/build/client.
                                     // Reemplaza sirv-cli para activar fast-path en producción.
                                     // Vive en el proceso de main.js → cero subprocesos extra.
+// v0.18.2 — Cloudflare tunnel para acceso móvil universal (LAN/4G/WiFi externo).
+// Sin esto, el móvil solo conecta si está en la misma subnet que el PC, lo
+// cual falla con boosters/mesh/AP isolation. El túnel da una URL pública
+// HTTPS que el móvil alcanza desde cualquier red.
+const cfTunnel = require('./cloudflared-tunnel');
+
 let mainWindow = null;
 let splashWindow = null;
 let onboardingWindow = null;
@@ -1681,6 +1687,28 @@ app.whenReady().then(async () => {
     startReflex(apiKey);
     await waitForReflex(STARTUP_TIMEOUT_MS);
 
+    // 4.5. Arrancar Cloudflare Quick Tunnel — acceso móvil universal.
+    // El móvil puede conectar desde CUALQUIER red (LAN, 4G, viaje) usando
+    // la URL pública del túnel. Sin esto, solo funciona si móvil+PC están
+    // en la misma subnet (falla con boosters/mesh/AP isolation).
+    // Asíncrono: NO bloquea el arranque de la ventana principal. Si falla,
+    // Ashley arranca igual y el QR usa LAN IP como fallback.
+    const tunnelUrlFile = path.join(ASHLEY_DATA_DIR, 'tunnel_url.txt');
+    cfTunnel.startTunnel({
+      localPort: REFLEX_BACKEND_PORT,
+      tunnelUrlFile,
+      log,
+      timeoutMs: 30000,
+    }).then((res) => {
+      if (res.ok) {
+        log(`Mobile tunnel ready: ${res.url}`);
+      } else {
+        log(`Mobile tunnel failed (LAN fallback active): ${res.error}`);
+      }
+    }).catch((e) => {
+      log(`Mobile tunnel exception (ignored, LAN fallback): ${e.message}`);
+    });
+
     // 4. Ventana principal
     createMainWindow();
 
@@ -1704,6 +1732,7 @@ app.on('window-all-closed', () => {
   // el handle del mic (wake_word PortAudio). Sin esto, "Apps están usando
   // tu micrófono" queda en la barra de Windows hasta reboot.
   gracefulShutdownBackend();
+  cfTunnel.stopTunnel(log);  // v0.18.2 — parar Cloudflare tunnel
   killReflex();
   app.quit();
 });
@@ -1712,8 +1741,9 @@ app.on('before-quit', () => {
   isShuttingDown = true;
   stopAutoUpdater();
   gracefulShutdownBackend();
+  cfTunnel.stopTunnel(log);
   killReflex();
 });
 
-process.on('SIGINT',  () => { isShuttingDown = true; gracefulShutdownBackend(); killReflex(); process.exit(0); });
+process.on('SIGINT',  () => { isShuttingDown = true; gracefulShutdownBackend(); cfTunnel.stopTunnel(log); killReflex(); process.exit(0); });
 process.on('SIGTERM', () => { isShuttingDown = true; gracefulShutdownBackend(); killReflex(); process.exit(0); });

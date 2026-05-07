@@ -662,9 +662,8 @@ class State(rx.State):
         las funciones de api_routes (que son síncronas y locales). En
         millonésimas de segundo, sin riesgo de deadlock.
 
-        v0.18.2 — usa _detect_BACKEND_port (no frontend). El móvil debe
-        llegar al backend Starlette (que tiene los endpoints /api/mobile/*).
-        El frontend Next.js NO conoce esas rutas → 404.
+        v0.18.2 — preferir Cloudflare Tunnel URL si está activo (permite
+        conectar desde CUALQUIER red), fallback a LAN IP si no.
         """
         import json as _json
         from urllib.parse import quote
@@ -673,11 +672,18 @@ class State(rx.State):
                 _read_pairing_token,
                 _detect_lan_ip,
                 _detect_backend_port,
+                _read_tunnel_url,
             )
             token = _read_pairing_token() or ""
             lan_ip = _detect_lan_ip() or "127.0.0.1"
             port = _detect_backend_port()
-            server = f"http://{lan_ip}:{port}"
+
+            # v0.18.2 — Cloudflare Tunnel URL gana sobre LAN IP cuando existe
+            tunnel_url = _read_tunnel_url()
+            if tunnel_url:
+                server = tunnel_url
+            else:
+                server = f"http://{lan_ip}:{port}"
 
             self.mobile_pair_server = server
             self.mobile_pair_token = token

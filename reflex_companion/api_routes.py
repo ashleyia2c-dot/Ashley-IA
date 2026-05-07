@@ -637,6 +637,32 @@ def _detect_backend_port() -> int:
         return 17800
 
 
+def _read_tunnel_url() -> str:
+    """v0.18.2 — Lee la URL del Cloudflare Quick Tunnel si está activo.
+
+    Electron escribe la URL pública del túnel a un archivo en el data dir
+    cuando arranca el túnel. Si el archivo existe Y la URL es válida (https://),
+    el QR del móvil debe usar esa URL en lugar de la LAN IP — porque permite
+    al móvil conectar desde CUALQUIER red (LAN, 4G, viaje), no solo cuando
+    está en la misma subnet del PC.
+
+    Devuelve "" si no hay túnel activo (fallback a LAN).
+    """
+    import os
+    try:
+        url_file = os.path.join(_data_dir(), "tunnel_url.txt")
+        if not os.path.isfile(url_file):
+            return ""
+        with open(url_file, "r", encoding="utf-8") as f:
+            url = f.read().strip()
+        # Validación básica: solo aceptamos HTTPS de Cloudflare
+        if url.startswith("https://") and ".trycloudflare.com" in url:
+            return url
+        return ""
+    except Exception:
+        return ""
+
+
 async def _mobile_qr_payload_endpoint(request):
     """GET /api/mobile/qr_payload — devuelve datos para generar QR de pairing.
 
@@ -661,13 +687,25 @@ async def _mobile_qr_payload_endpoint(request):
     lan_ip = _detect_lan_ip()
     port = _detect_backend_port()
     token = _read_pairing_token()
-    server_url = f"http://{lan_ip}:{port}"
+
+    # v0.18.2 — preferir Cloudflare Tunnel URL si está activo. Esto permite
+    # al móvil conectar desde CUALQUIER red (LAN, 4G, viaje) sin importar
+    # boosters/mesh/AP isolation. Fallback a LAN si el túnel no arrancó.
+    tunnel_url = _read_tunnel_url()
+    if tunnel_url:
+        server_url = tunnel_url
+        connection_mode = "tunnel"
+    else:
+        server_url = f"http://{lan_ip}:{port}"
+        connection_mode = "lan"
 
     return _with_cors(_StarletteJSON({
         "server": server_url,
         "token": token,
         "lan_ip": lan_ip,
         "port": port,
+        "tunnel_url": tunnel_url,        # vacío si no hay túnel
+        "connection_mode": connection_mode,  # "tunnel" | "lan"
     }))
 
 
