@@ -653,17 +653,51 @@
     scannerOverlay.hidden = false;
     setScannerStatus('Iniciando cámara...');
 
+    // Intento progresivo de constraints, de más estricto a más permisivo.
+    // El WebView de Capacitor a veces rechaza constraints específicas
+    // (width/height) con "Could not start video source" aunque la cámara
+    // las soporte en Chrome estándar. Empezamos simple y degradamos.
+    const attempts = [
+      // 1) Trasera (preferida para QR scanning), sin constraints de resolución
+      { video: { facingMode: 'environment' }, audio: false },
+      // 2) Trasera "ideal" (más permisivo)
+      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      // 3) Cualquier cámara (fallback final)
+      { video: true, audio: false },
+    ];
+
+    let lastError = null;
+    scannerStream = null;
+    for (let i = 0; i < attempts.length; i++) {
+      try {
+        scannerStream = await navigator.mediaDevices.getUserMedia(attempts[i]);
+        break;
+      } catch (e) {
+        lastError = e;
+        console.warn('camera attempt', i + 1, 'failed:', e.name, e.message);
+      }
+    }
+
+    if (!scannerStream) {
+      const errName = (lastError && lastError.name) || 'UnknownError';
+      const errMsg = (lastError && lastError.message) || '(sin detalle)';
+      setScannerStatus(
+        'Sin acceso a cámara: ' + errName + ' — ' + errMsg +
+        '. Cierra otras apps de cámara o usa entrada manual.',
+        'error'
+      );
+      return;
+    }
+
     try {
-      // Cámara trasera en móvil (environment)
-      scannerStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
       scannerVideo.srcObject = scannerStream;
       await scannerVideo.play();
       setScannerStatus('Apunta al QR del PC');
     } catch (e) {
-      setScannerStatus('Sin acceso a cámara: ' + (e.message || e.name), 'error');
+      setScannerStatus('Error reproduciendo video: ' + (e.message || e.name), 'error');
+      // Liberar stream para no dejar la cámara colgada
+      try { scannerStream.getTracks().forEach((t) => t.stop()); } catch {}
+      scannerStream = null;
       return;
     }
 
