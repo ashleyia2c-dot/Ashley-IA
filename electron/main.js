@@ -758,11 +758,20 @@ function makeLineLogger(prefix, isErr) {
 // Bug real reportado v0.18.2: cambios al State.py no se reflejaban en
 // runtime — se ejecutaba código viejo del .pyc cacheado.
 //
-// Fix: en DEV mode, borrar __pycache__ antes de cada arranque. Penalty
-// ~100ms al startup. En PROD (instalado), el .pyc nunca está stale porque
-// el .py no se modifica → no hace falta borrar.
+// Fix: cuando NO estamos en el .exe instalado (app.isPackaged === false),
+// borrar __pycache__ antes de cada arranque. Penalty ~100ms al startup.
+// En el .exe instalado, el .py no se modifica nunca → el .pyc es siempre
+// válido y queremos cachearlo para arranques más rápidos.
+//
+// IMPORTANTE: usamos !app.isPackaged en lugar de DEV_MODE porque DEV_MODE
+// solo es true si el user pasó --dev al spawn — y el .bat de ashley-electron
+// NO lo pasa, así que la guarda no se aplicaba en el caso real del user.
+function _isDevWorkspace() {
+  return !app.isPackaged;
+}
+
 function _clearStalePycache() {
-  if (!DEV_MODE) return;
+  if (!_isDevWorkspace()) return;
   try {
     const pycacheDirs = [
       path.join(PROJECT_ROOT, 'reflex_companion', '__pycache__'),
@@ -776,7 +785,7 @@ function _clearStalePycache() {
       }
     }
     if (cleaned > 0) {
-      log(`Cleaned ${cleaned} __pycache__ dir(s) for fresh module load (dev only)`);
+      log(`Cleaned ${cleaned} __pycache__ dir(s) for fresh module load (dev workspace)`);
     }
   } catch (e) {
     log(`pycache cleanup warning: ${e && e.message}`);
@@ -954,7 +963,7 @@ function _startSplitProcesses(apiKey) {
       // .pyc viejo se sigue usando. En PROD el .py no se modifica → el
       // bytecode es siempre válido y queremos cachearlo para arranques
       // más rápidos.
-      ...(DEV_MODE ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
+      ...(_isDevWorkspace() ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
     },
     shell: false,
     windowsHide: true,
@@ -1177,7 +1186,7 @@ function _startSingleReflexProcess(apiKey) {
       PYTHONIOENCODING: 'utf-8',
       // v0.18.2 — DEV mode: no escribir bytecode .pyc para evitar que
       // cambios al .py no se reflejen por usar cache stale.
-      ...(DEV_MODE ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
+      ...(_isDevWorkspace() ? { PYTHONDONTWRITEBYTECODE: '1' } : {}),
     },
     shell: false,
     windowsHide: true,
