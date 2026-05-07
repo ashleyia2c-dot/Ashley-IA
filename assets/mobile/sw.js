@@ -15,7 +15,7 @@
 // recibiendo el shell cacheado del SW viejo aunque actualicen el APK.
 // Síntoma: bugs supuestamente fixeados (dedupe, avatar, scroll) NO
 // aparecen para users en update — están corriendo código viejo.
-const CACHE_VERSION = 'ashley-mobile-v0182-r11';
+const CACHE_VERSION = 'ashley-mobile-v0182-r12';
 const APP_SHELL = [
   '/mobile/index.html',
   '/mobile/app.css',

@@ -130,54 +130,47 @@ jobs:
       - name: Replace default app icon with ashley_pfp.jpg
         working-directory: mobile-app
         run: |
-          # Capacitor genera un icono default genérico al hacer cap add android.
-          # Lo reemplazamos por la imagen de Ashley en todos los tamaños mipmap
-          # estándar de Android. ImageMagick está pre-instalado en runners
-          # ubuntu-latest de GitHub.
-          PFP="../assets/ashley_pfp.jpg"
+          # v0.18.2 — los iconos están PRE-GENERADOS en android-overrides/icons/
+          # (commiteados en el repo). Generados con mobile-app/scripts/gen-icons.py
+          # localmente desde assets/ashley_pfp.jpg.
+          # Por qué pre-generados: ImageMagick NO está pre-instalado en runners
+          # ubuntu-latest de GitHub Actions (verificado en build #25518234900),
+          # y `apt-get install` añade tiempo + complejidad. Pre-gen es más
+          # robusto, reproducible y rápido.
+          ICONS_SRC="android-overrides/icons"
           RES="android/app/src/main/res"
 
-          if [ ! -f "$PFP" ]; then
-            echo "⚠ ashley_pfp.jpg no encontrado en assets/, skipping icon replace"
-            exit 0
+          if [ ! -d "$ICONS_SRC" ]; then
+            echo "❌ Icons source dir not found: $ICONS_SRC"
+            echo "Run: venv/Scripts/python mobile-app/scripts/gen-icons.py"
+            exit 1
           fi
 
-          # Comando: 'magick' (IM 7+) o 'convert' (IM 6, deprecated)
-          if command -v magick >/dev/null 2>&1; then
-            CMD="magick"
-          elif command -v convert >/dev/null 2>&1; then
-            CMD="convert"
-          else
-            echo "⚠ ImageMagick no disponible, skipping icon replace"
-            exit 0
-          fi
-
-          # Tamaños mipmap estándar Android (densidad → dimensión px)
-          declare -A SIZES=(
-            ["mdpi"]="48"
-            ["hdpi"]="72"
-            ["xhdpi"]="96"
-            ["xxhdpi"]="144"
-            ["xxxhdpi"]="192"
-          )
-
-          for density in "${!SIZES[@]}"; do
-            size="${SIZES[$density]}"
-            dir="$RES/mipmap-$density"
-            mkdir -p "$dir"
-            # Generamos PNG cuadrado (Android los recorta a círculo si la
-            # device es adaptive). El recorte fitness es para que la cara
-            # de Ashley quede centrada y no se corte.
-            $CMD "$PFP" -resize "${size}x${size}^" -gravity center -extent "${size}x${size}" "$dir/ic_launcher.png"
-            $CMD "$PFP" -resize "${size}x${size}^" -gravity center -extent "${size}x${size}" "$dir/ic_launcher_round.png"
-            # Foreground para adaptive icon (Android 8+) — debe ser 108dp
-            # con safe zone de 66dp, por eso resize a 1.5x el size base
-            adaptive_size=$((size * 3 / 2))
-            $CMD "$PFP" -resize "${adaptive_size}x${adaptive_size}^" -gravity center -extent "${adaptive_size}x${adaptive_size}" "$dir/ic_launcher_foreground.png" 2>/dev/null || true
+          # Copiar todos los iconos a la estructura mipmap esperada por Android
+          DENSITIES="mdpi hdpi xhdpi xxhdpi xxxhdpi"
+          MISSING=0
+          for density in $DENSITIES; do
+            src_dir="$ICONS_SRC/mipmap-$density"
+            dst_dir="$RES/mipmap-$density"
+            if [ ! -d "$src_dir" ]; then
+              echo "❌ Missing icons for density: $density"
+              MISSING=$((MISSING + 1))
+              continue
+            fi
+            mkdir -p "$dst_dir"
+            cp "$src_dir/ic_launcher.png" "$dst_dir/ic_launcher.png"
+            cp "$src_dir/ic_launcher_round.png" "$dst_dir/ic_launcher_round.png"
+            cp "$src_dir/ic_launcher_foreground.png" "$dst_dir/ic_launcher_foreground.png" 2>/dev/null || true
+            echo "✓ Copied icons → $dst_dir"
           done
 
-          echo "✓ Iconos generados desde ashley_pfp.jpg en todos los tamaños mipmap"
-          ls -la "$RES/mipmap-xxxhdpi/" 2>&1 | head -5
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ $MISSING density(ies) missing icons"
+            exit 1
+          fi
+
+          echo "--- Icons in xxxhdpi: ---"
+          ls -la "$RES/mipmap-xxxhdpi/"
 
       - name: Make gradlew executable
         working-directory: mobile-app/android
