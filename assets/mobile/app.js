@@ -77,9 +77,36 @@
   const settingsOfflineStatus   = document.getElementById('settings-offline-status');
 
   // ─── Helpers ───────────────────────────────────────────────────
+  // v0.18.2 — pre-warm flag para que el IME (teclado de Android) se
+  // inicialice solo la primera vez. WebView de Android tarda 1-2s en
+  // bind con el IME al primer focus de la sesión. Con pre-warm, se hace
+  // OFF-screen (no abre el teclado) → cuando el user toca el textarea
+  // por primera vez, el teclado aparece instant en lugar de tardar.
+  let _imeWarmedUp = false;
+  function _warmUpIME() {
+    if (_imeWarmedUp) return;
+    _imeWarmedUp = true;
+    try {
+      // Crear input invisible, focus + blur. Esto fuerza al WebView a
+      // inicializar el IME sin abrir el teclado realmente.
+      const dummy = document.createElement('input');
+      dummy.type = 'text';
+      dummy.style.cssText = 'position:fixed;top:-200px;left:-200px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      dummy.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(dummy);
+      dummy.focus();
+      requestAnimationFrame(() => {
+        dummy.blur();
+        setTimeout(() => { try { dummy.remove(); } catch {} }, 100);
+      });
+    } catch {}
+  }
+
   function showScreen(name) {
     setupScreen.hidden = name !== 'setup';
     appScreen.hidden   = name !== 'app';
+    // Pre-warm IME al primer mostrar app screen
+    if (name === 'app') _warmUpIME();
   }
 
   function setStatus(text, kind) {
@@ -215,40 +242,80 @@
     }
   }
 
+  // Helper para detectar si el modo offline está configurado.
+  function _hasOfflineConfig() {
+    try {
+      const cfg = localStorage.getItem('ashley.mobile.offline_config');
+      if (!cfg) return false;
+      const parsed = JSON.parse(cfg);
+      return !!(parsed && parsed.provider && parsed.apiKey);
+    } catch { return false; }
+  }
+
   // Overlay UI cuando NO se puede recuperar (móvil + PC en distintas
   // redes, ej. boosters). CTA prominente para re-escanear sin tener
-  // que ir al setup screen manualmente.
+  // que ir al setup screen manualmente. Tambien menciona modo offline
+  // como alternativa para que el user no DEPENDA del PC encendido.
   function showRecoveryNeeded(reason) {
     // Crear overlay si no existe
     let overlay = document.getElementById('recovery-overlay');
+    const hasOffline = _hasOfflineConfig();
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'recovery-overlay';
       overlay.className = 'recovery-overlay';
+      // v0.18.2 — Si NO hay offline config, ofrecer también activar modo
+      // offline para que la app funcione sin depender del PC encendido.
+      const offlineCta = hasOffline
+        ? '<p class="recovery-hint" style="margin-top:14px;color:#a8d4a8">' +
+          '✓ Tienes modo offline configurado, pero el chat actual usa el PC. ' +
+          'Reinicia Ashley en el PC y vuelve aquí.</p>'
+        : '<button class="recovery-btn secondary-btn" id="recovery-offline-btn" ' +
+          'style="margin-top:8px;border-color:rgba(135,195,135,0.40);color:#a8d4a8">' +
+          '📵 Activar modo offline (sin PC)</button>';
       overlay.innerHTML =
         '<div class="recovery-card">' +
           '<div class="recovery-icon">📡</div>' +
-          '<h2 class="recovery-title">Tu PC tiene URL nueva</h2>' +
+          '<h2 class="recovery-title">No se conecta con tu PC</h2>' +
           '<p class="recovery-text" id="recovery-reason"></p>' +
-          '<p class="recovery-hint">Esto pasa cuando Ashley se reinicia en tu PC. Re-escanea el QR para conectar a la URL nueva.</p>' +
+          '<p class="recovery-hint">Esto puede pasar si Ashley se reinició en tu PC ' +
+          '(URL nueva), o si tu PC está apagado. Re-escanea el QR para conectar a ' +
+          'la URL actual.</p>' +
           '<button class="recovery-btn primary-btn" id="recovery-rescan-btn">Re-escanear QR</button>' +
           '<button class="recovery-btn secondary-btn" id="recovery-manual-btn">Introducir manualmente</button>' +
+          offlineCta +
         '</div>';
       document.body.appendChild(overlay);
       document.getElementById('recovery-rescan-btn').addEventListener('click', () => {
         overlay.remove();
-        // Forzar abrir el scanner desde la setup screen para que el user
-        // pueda escanear el QR nuevo del PC.
         showScreen('setup');
         if (typeof openScanner === 'function') openScanner();
       });
       document.getElementById('recovery-manual-btn').addEventListener('click', () => {
         overlay.remove();
         showScreen('setup');
-        // Pre-fill con la URL anterior para que el user solo edite la nueva
         if (setupServerInput) setupServerInput.value = serverUrl;
         if (setupTokenInput) setupTokenInput.value = token;
       });
+      const offlineBtn = document.getElementById('recovery-offline-btn');
+      if (offlineBtn) {
+        offlineBtn.addEventListener('click', () => {
+          overlay.remove();
+          // Abrir Settings panel directamente al modo offline
+          if (settingsPanel) {
+            settingsPanel.hidden = false;
+            // Pre-cargar valores
+            if (settingsServerInput) settingsServerInput.value = serverUrl || '';
+            if (settingsTokenInput) settingsTokenInput.value = token || '';
+            setOfflineStatus(null);
+            // Scroll al panel offline (puede estar abajo)
+            setTimeout(() => {
+              const offlineSection = document.getElementById('settings-offline-provider');
+              if (offlineSection) offlineSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+          }
+        });
+      }
     }
     const reasonEl = document.getElementById('recovery-reason');
     if (reasonEl) reasonEl.textContent = reason || 'No se puede llegar a tu PC.';
@@ -1513,8 +1580,12 @@
   //      abre/cierra (height del viewport cambia)
   //   3. Tras enviar (handleSend ya hace scrollToBottom)
   inputEl.addEventListener('focus', () => {
-    // Pequeño delay para que el teclado termine de abrir antes del scroll
-    setTimeout(() => scrollToBottom(), 250);
+    // v0.18.2 — scroll inmediato + scroll diferido como fallback. El
+    // visualViewport.resize listener cubre el caso "teclado terminó de
+    // abrir" pero ese evento puede tardar 200-500ms en dispositivos
+    // lentos. Con scroll inmediato el chat ya empieza a re-acomodarse.
+    scrollToBottom();
+    setTimeout(() => scrollToBottom(), 150);
   });
   if ('visualViewport' in window && window.visualViewport) {
     let _lastViewportHeight = window.visualViewport.height;
