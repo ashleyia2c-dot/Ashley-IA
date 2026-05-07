@@ -171,7 +171,13 @@ def test_refresh_method_uses_local_helpers():
 def test_regenerate_uses_local_token_generation():
     """v0.18.2 bug fix — regenerate NO debe usar urllib.request.urlopen
     contra /api/mobile/regen_token (loopback bloquea event loop). Genera
-    el nuevo token directamente con secrets.token_urlsafe."""
+    el nuevo token directamente.
+
+    En la versión inicial usábamos secrets.token_urlsafe inline. En v0.18.2
+    refinado usamos el helper _generate_new_token_record + _persist_pairing_record
+    que preservan otros campos del JSON (lan_disabled) + añaden created_at
+    para auto-rotation 30 días. Aceptamos cualquiera de los dos approaches.
+    """
     src = MAIN_PY.read_text(encoding="utf-8")
     section = re.search(
         r"async def regenerate_mobile_token[\s\S]+?(?=\n    def |\n    async def |\Z)",
@@ -179,8 +185,14 @@ def test_regenerate_uses_local_token_generation():
     )
     assert section
     body = section.group(0)
-    assert "secrets.token_urlsafe" in body, (
-        "regenerate_mobile_token debe usar secrets.token_urlsafe (no HTTP loopback)"
+    # Debe usar secrets.token_urlsafe directo o el helper que internamente lo usa
+    uses_token_gen = (
+        "secrets.token_urlsafe" in body
+        or "_generate_new_token_record" in body
+    )
+    assert uses_token_gen, (
+        "regenerate_mobile_token debe generar token nuevo (secrets.token_urlsafe "
+        "directo o vía helper _generate_new_token_record)"
     )
     # No debe haber urlopen contra propio backend
     assert "urlopen" not in body, (

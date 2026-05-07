@@ -10,7 +10,12 @@
  * última UI vista. Los mensajes nuevos requieren red al PC del user.
  * ════════════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'ashley-mobile-v1';
+// v0.18.2-r10 — bumpear CACHE_VERSION al cambiar app.js / app.css.
+// Sin bump, los users que ya instalaron una versión anterior siguen
+// recibiendo el shell cacheado del SW viejo aunque actualicen el APK.
+// Síntoma: bugs supuestamente fixeados (dedupe, avatar, scroll) NO
+// aparecen para users en update — están corriendo código viejo.
+const CACHE_VERSION = 'ashley-mobile-v0182-r10';
 const APP_SHELL = [
   '/mobile/index.html',
   '/mobile/app.css',

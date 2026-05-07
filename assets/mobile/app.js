@@ -118,26 +118,53 @@
     return res;
   }
 
+  // v0.18.2 — Helper para fetch con timeout robusto. AbortSignal.timeout
+  // NO existe en WebViews viejos de Android (Capacitor 6 puede correr en
+  // WebView 70+, pero el polyfill no es universal). Usamos AbortController
+  // + setTimeout que SÍ funciona en cualquier WebView con fetch.
+  async function _fetchWithTimeout(url, opts, timeoutMs) {
+    const ctrl = new AbortController();
+    const tmr = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
+    } finally {
+      clearTimeout(tmr);
+    }
+  }
+
   // v0.18.2 — Auto-recovery cuando la URL del túnel cached deja de
   // responder. Cloudflare regenera URL en cada arranque del PC, así
   // que el móvil queda con URL muerta. Si móvil + PC están en LAN,
   // intentamos obtener la URL nueva via /api/mobile/tunnel_url
   // contra la lan_ip cached del último pareo.
   async function attemptAutoRecovery() {
-    if (isRecovering) return false;
-    if (!cachedLanIp || !token) return false;
+    if (isRecovering) {
+      console.log('[recovery] already in progress — skip');
+      return false;
+    }
+    if (!cachedLanIp) {
+      console.log('[recovery] sin cachedLanIp — no se puede LAN recovery');
+      return false;
+    }
+    if (!token) {
+      console.log('[recovery] sin token — no se puede recovery');
+      return false;
+    }
     isRecovering = true;
     try {
       const lanUrl = 'http://' + cachedLanIp + ':' + cachedBackendPort;
       console.log('[recovery] intentando LAN auto-recovery →', lanUrl);
-      const ctrl = new AbortController();
-      const tmr = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(lanUrl + '/api/mobile/tunnel_url', {
-        method: 'GET',
-        headers: { 'X-Ashley-Token': token },
-        signal: ctrl.signal,
-      });
-      clearTimeout(tmr);
+      let res;
+      try {
+        res = await _fetchWithTimeout(
+          lanUrl + '/api/mobile/tunnel_url',
+          { method: 'GET', headers: { 'X-Ashley-Token': token } },
+          4000,
+        );
+      } catch (e) {
+        console.warn('[recovery] LAN fetch falló:', e && e.message);
+        return false;
+      }
       if (!res.ok) {
         console.warn('[recovery] LAN respondió HTTP', res.status);
         return false;
@@ -145,13 +172,22 @@
       const data = await res.json();
       const newUrl = (data.tunnel_url || '').trim() ||
                      ('http://' + (data.lan_ip || cachedLanIp) + ':' + (data.port || cachedBackendPort));
-      if (!newUrl) return false;
+      if (!newUrl) {
+        console.warn('[recovery] no hay URL en respuesta');
+        return false;
+      }
       // Verificar la URL nueva responde antes de adoptarla
-      const v = await fetch(newUrl + '/api/mobile/status', {
-        method: 'GET',
-        headers: { 'X-Ashley-Token': token },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
-      });
+      let v;
+      try {
+        v = await _fetchWithTimeout(
+          newUrl + '/api/mobile/status',
+          { method: 'GET', headers: { 'X-Ashley-Token': token } },
+          5000,
+        );
+      } catch (e) {
+        console.warn('[recovery] URL nueva fetch falló:', e && e.message);
+        return false;
+      }
       if (!v.ok) {
         console.warn('[recovery] URL nueva respondió HTTP', v.status);
         return false;
@@ -172,7 +208,7 @@
       console.log('[recovery] ✓ URL actualizada a', cleanUrl);
       return true;
     } catch (e) {
-      console.warn('[recovery] falló:', e && e.message);
+      console.warn('[recovery] excepción inesperada:', e && e.message);
       return false;
     } finally {
       isRecovering = false;
@@ -455,11 +491,13 @@
           row.dataset.id = msgId || existingId;
           return; // skip añadir duplicado
         }
-        // Si NO es optimistic, requerir ventana temporal cercana (<5s)
-        // para considerarlo el mismo. Ej: dos polling ticks consecutivos
-        // que traen el mismo msg por algún glitch del filtro since.
+        // Si NO es optimistic, requerir ventana temporal cercana (<30s)
+        // para considerarlo el mismo. Antes era 5s pero clock drift entre
+        // móvil y servidor (común en Android, segundos a minutos) hacía
+        // fail el match → APPEND duplicado. 30s cubre la mayoría de drift
+        // sin riesgo de match falso (user no escribe lo MISMO en 30s).
         const existingTs = parseInt(row.dataset.ts || '0', 10);
-        if (existingTs && Math.abs(newTs - existingTs) < 5000) {
+        if (existingTs && Math.abs(newTs - existingTs) < 30000) {
           if (msgId) row.dataset.id = msgId;
           return; // skip
         }
@@ -821,10 +859,20 @@
     if (allMsgs && allMsgs.length) {
       clearChat();
       allMsgs.forEach(appendMessage);
-      lastTimestamp = allMsgs[allMsgs.length - 1].timestamp || '';
+      // v0.18.2 — NUNCA dejar lastTimestamp = '' después de tryConnect.
+      // Si lo dejamos vacío, el siguiente pollOnce envía '?since=' que
+      // el backend interpreta como "trae todo el historial". El polling
+      // re-trae los msgs YA cargados → si dedupe falla por algún caso
+      // edge, duplicados acumulados.
+      // Fallback: si el último msg no tiene timestamp, usar AHORA en ISO
+      // (servidor solo devolverá msgs creados DESPUÉS de este momento).
+      const lastTs = (allMsgs[allMsgs.length - 1].timestamp || '').trim();
+      lastTimestamp = lastTs || new Date().toISOString();
       scrollToBottom();
     } else {
       renderEmptyChat();
+      // Sin mensajes — usar AHORA para que el polling solo traiga msgs nuevos
+      lastTimestamp = new Date().toISOString();
     }
     setStatus('conectada');
     startPolling();
@@ -1103,7 +1151,7 @@
   }
 
   async function onScannedQR(raw) {
-    // El payload del QR es JSON: {s: "http://...", t: "..."}
+    // El payload del QR es JSON: {s, t, i, p} (server, token, lan_ip, port).
     let parsed;
     try {
       parsed = JSON.parse(raw);
@@ -1118,22 +1166,14 @@
       return false;
     }
 
-    // v0.18.2 — el QR ahora puede traer también lan_ip + port para
-    // auto-recovery futura. Los persistimos en localStorage.
+    // v0.18.2 — Capturar lan_ip + port pero NO persistir hasta que la
+    // conexión SÍ funcione. Bug previo: si el QR fallaba, persistíamos
+    // un lan_ip nuevo que NO funcionaba, corrompiendo el cache de
+    // auto-recovery del último pareo exitoso.
     const newLanIp = (parsed.i || parsed.lan_ip || '').trim();
     const newPort = parseInt(parsed.p || parsed.port || '17800', 10);
-    if (newLanIp) {
-      cachedLanIp = newLanIp;
-      localStorage.setItem(STORE_LAN_IP, newLanIp);
-    }
-    if (newPort) {
-      cachedBackendPort = newPort;
-      localStorage.setItem(STORE_BACKEND_PORT, String(newPort));
-    }
 
     setScannerStatus('Conectando a ' + s + '...', 'ok');
-    // Probar conexión ANTES de mutar las globales — sino, si falla, queda
-    // serverUrl/token corruptos y el polling background empieza a fallar.
     let status;
     try {
       const ctrl = new AbortController();
@@ -1146,27 +1186,42 @@
       clearTimeout(tmr);
       if (!res.ok) {
         setScannerStatus(
-          'PC respondió HTTP ' + res.status + '. Token incorrecto o servidor mal. ' +
-          'URL: ' + s + ' — espera 5s o pulsa "Manual".',
+          'PC respondió HTTP ' + res.status + '. Token incorrecto o servidor mal.',
           'error',
         );
+        // v0.18.2 — Si el QR escaneado falla, intentar auto-recovery via
+        // LAN cached del pareo anterior (si existe). Cubre: el user
+        // escaneó un QR viejo de un arranque anterior pero todavía está
+        // en la misma red de su PC.
+        const recovered = await attemptAutoRecovery();
+        if (recovered) {
+          setScannerStatus('✓ Recuperado vía LAN del último pareo', 'ok');
+          await new Promise(r => setTimeout(r, 600));
+          await tryConnect();
+          return true;
+        }
         return false;
       }
       status = await res.json();
     } catch (e) {
-      // Distinguir tipo de error para mejor diagnóstico
       const errName = e.name || 'Error';
       const errMsg = e.message || String(e);
+      console.warn('[QR scan] fetch failed:', errName, errMsg);
       let hint = '';
       if (errName === 'AbortError' || errMsg.toLowerCase().includes('abort')) {
-        hint = ' (timeout 6s — PC no responde, ¿firewall?)';
+        hint = ' (timeout 6s — PC no responde)';
       } else if (errMsg.toLowerCase().includes('fetch')) {
-        hint = ' (sin red — verifica WiFi y firewall del PC)';
+        hint = ' (sin red — ¿WiFi/firewall?)';
       }
-      setScannerStatus(
-        'No se conectó: ' + errName + hint + ' | ' + s,
-        'error',
-      );
+      setScannerStatus('No se conectó: ' + errName + hint, 'error');
+      // Auto-recovery también en error de red
+      const recovered = await attemptAutoRecovery();
+      if (recovered) {
+        setScannerStatus('✓ Recuperado vía LAN del último pareo', 'ok');
+        await new Promise(r => setTimeout(r, 600));
+        await tryConnect();
+        return true;
+      }
       return false;
     }
     if (!status || !status.paired) {
@@ -1176,11 +1231,19 @@
       );
       return false;
     }
-    // OK — guardar y conectar
+    // ✓ Conexión OK — AHORA persistir todo (server URL + token + LAN cache)
     serverUrl = s;
     token = t;
     localStorage.setItem(STORE_SERVER_URL, serverUrl);
     localStorage.setItem(STORE_TOKEN, token);
+    if (newLanIp) {
+      cachedLanIp = newLanIp;
+      localStorage.setItem(STORE_LAN_IP, newLanIp);
+    }
+    if (newPort) {
+      cachedBackendPort = newPort;
+      localStorage.setItem(STORE_BACKEND_PORT, String(newPort));
+    }
     setScannerStatus('✓ Conectado.', 'ok');
     await new Promise(r => setTimeout(r, 600));
     await tryConnect();

@@ -37,7 +37,13 @@ from starlette.routing import Route as _StarletteRoute
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin":  "*",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Requested-With",
+    # v0.18.2 — CRÍTICO: incluir X-Ashley-Token. Sin esto, el browser hace
+    # CORS preflight OPTIONS y el server NO lo declara como header permitido
+    # → browser rechaza el request real → fetch() lanza TypeError "Failed
+    # to fetch". Síntoma reportado: "TypeError sin red" en el móvil al
+    # escanear QR. Causa raíz #1 del pareo roto cross-origin (Capacitor
+    # WebView → Cloudflare tunnel).
+    "Access-Control-Allow-Headers": "Content-Type, X-Requested-With, X-Ashley-Token",
     "Access-Control-Max-Age":       "86400",
 }
 

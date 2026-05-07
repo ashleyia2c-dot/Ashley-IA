@@ -732,13 +732,14 @@ class State(rx.State):
         self.mobile_pair_qr_url = ""  # ocultar QR viejo durante regen
         yield  # flush UI → user ve el spinner
         try:
-            from .api_routes import _data_dir
-            data_dir = _data_dir()
-            os.makedirs(data_dir, exist_ok=True)
-            path = os.path.join(data_dir, "mobile_pairing.json")
-            new_token = secrets.token_urlsafe(24)
-            with open(path, "w", encoding="utf-8") as f:
-                _json.dump({"token": new_token}, f)
+            # v0.18.2 — usar el helper _persist_pairing_record que preserva
+            # otros campos del JSON (lan_disabled, etc.) y añade created_at
+            # para el auto-rotation 30 días. Antes hacíamos json.dump directo
+            # con solo {token: X}, descartando created_at y borrando otros
+            # campos opcionales del user.
+            from .api_routes import _generate_new_token_record, _persist_pairing_record
+            record = _generate_new_token_record()
+            _persist_pairing_record(record)
         except Exception as _e:
             import logging
             logging.getLogger("ashley.mobile_pair").warning(
