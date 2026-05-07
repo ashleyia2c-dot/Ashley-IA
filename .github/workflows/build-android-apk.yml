@@ -93,19 +93,39 @@ jobs:
             echo "❌ AndroidManifest.xml not found at $MANIFEST"
             exit 1
           fi
-          # El plugin @capacitor/camera debería añadirlos automático,
-          # pero por defensividad los garantizamos aquí. Si ya están,
-          # grep no añade nada (idempotente).
+          echo "--- Manifest BEFORE: ---"
+          cat "$MANIFEST"
+
+          # awk insert tras la línea <manifest ...> (siempre la primera).
+          # Usamos awk en lugar de sed porque <application> en Capacitor tiene
+          # atributos en líneas siguientes (newline tras la palabra), y sed
+          # con el patrón "<application " (espacio) NO matcheaba → permisos
+          # no se añadían (bug real del run #6).
           if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
-            sed -i 's|<application |<uses-permission android:name="android.permission.CAMERA" />\n    <application |' "$MANIFEST"
-            echo "✓ Añadido CAMERA permission al manifest"
+            awk '/<manifest/ && !done {
+                print
+                print "    <uses-permission android:name=\"android.permission.CAMERA\" />"
+                done=1
+                next
+              } 1' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+            echo "✓ Añadido CAMERA"
           fi
           if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST"; then
-            sed -i 's|<application |<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <application |' "$MANIFEST"
-            echo "✓ Añadido RECORD_AUDIO permission al manifest"
+            awk '/<manifest/ && !done {
+                print
+                print "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />"
+                done=1
+                next
+              } 1' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+            echo "✓ Añadido RECORD_AUDIO"
           fi
-          echo "--- Permissions in manifest: ---"
-          grep "uses-permission" "$MANIFEST" || echo "(none found)"
+
+          echo "--- Manifest AFTER: ---"
+          cat "$MANIFEST"
+          echo "--- Permissions found: ---"
+          grep "uses-permission" "$MANIFEST" || (echo "❌ NO permissions in manifest!" && exit 1)
+          # Hard-fail si CAMERA no acabó en el manifest
+          grep -q "android.permission.CAMERA" "$MANIFEST" || (echo "❌ CAMERA permission missing!" && exit 1)
 
       - name: Make gradlew executable
         working-directory: mobile-app/android
