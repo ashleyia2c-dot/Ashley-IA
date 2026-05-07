@@ -645,24 +645,105 @@
     scannerStatus.className = 'scanner-status' + (kind ? ' ' + kind : '');
   }
 
+  // ─── Capacitor permission helper ───────────────────────────────
+  // Capacitor 6 NO pide runtime permission de CAMERA al sistema cuando se
+  // llama navigator.mediaDevices.getUserMedia() desde JS. Tener CAMERA en
+  // el AndroidManifest sólo declara el permiso — Android 6+ requiere que
+  // la app PIDA explícitamente al user con un dialog runtime.
+  // Sin esto, getUserMedia se cuelga indefinidamente esperando un stream
+  // que nunca llega (el OS no abre la cámara sin permission del user).
+  //
+  // Solución: usar el plugin Camera de Capacitor (que sí maneja el runtime
+  // permission flow) para PEDIR permission ANTES de getUserMedia.
+  async function _requestCameraPermissionViaCapacitor() {
+    try {
+      const C = window.Capacitor;
+      if (!C || !C.Plugins || !C.Plugins.Camera) {
+        // No estamos en el APK Capacitor (ej: probando en browser dev) —
+        // saltarse este paso. getUserMedia pedirá permission directamente.
+        console.log('Capacitor.Plugins.Camera no disponible (browser dev mode)');
+        return { granted: true, note: 'no_capacitor' };
+      }
+      // checkPermissions primero para no spamear el dialog si ya está concedido
+      let status = null;
+      try {
+        status = await C.Plugins.Camera.checkPermissions();
+      } catch (e) {
+        console.warn('checkPermissions failed:', e);
+      }
+      if (status && status.camera === 'granted') {
+        return { granted: true, note: 'already_granted' };
+      }
+      // Pedir explícitamente — Android muestra el dialog del sistema
+      const res = await C.Plugins.Camera.requestPermissions({
+        permissions: ['camera'],
+      });
+      const granted = (res && res.camera === 'granted');
+      return { granted, note: 'requested:' + (res && res.camera) };
+    } catch (e) {
+      console.warn('requestCameraPermissionViaCapacitor error:', e);
+      // Fallback: intentar getUserMedia igual — si Android tiene el permiso
+      // a otro nivel, podría funcionar.
+      return { granted: false, note: 'error:' + (e.message || e.name) };
+    }
+  }
+
+  // Wrap getUserMedia con timeout — sino se cuelga indefinidamente cuando
+  // el WebView no responde (ej. permission no concedida y no rejecta).
+  function _getUserMediaWithTimeout(constraints, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('getUserMedia timeout (' + timeoutMs + 'ms)'));
+      }, timeoutMs);
+      navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+        if (settled) {
+          // Llegó tarde — liberar el stream que ya nadie usará
+          try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(stream);
+      }).catch((err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
   async function openScanner() {
     if (!('mediaDevices' in navigator) || !navigator.mediaDevices.getUserMedia) {
       setSetupStatus('Tu navegador no soporta acceso a cámara. Usa entrada manual.', 'error');
       return;
     }
     scannerOverlay.hidden = false;
+    setScannerStatus('Pidiendo permiso de cámara...');
+
+    // PASO 1 — pedir runtime permission via Capacitor (Android dialog).
+    const permResult = await _requestCameraPermissionViaCapacitor();
+    console.log('camera permission result:', permResult);
+    if (!permResult.granted) {
+      setScannerStatus(
+        'Permiso de cámara denegado (' + permResult.note +
+        '). Ve a Settings → Apps → Ashley → Permisos → Cámara para activar.',
+        'error'
+      );
+      return;
+    }
+
     setScannerStatus('Iniciando cámara...');
 
-    // Intento progresivo de constraints, de más estricto a más permisivo.
-    // El WebView de Capacitor a veces rechaza constraints específicas
-    // (width/height) con "Could not start video source" aunque la cámara
-    // las soporte en Chrome estándar. Empezamos simple y degradamos.
+    // PASO 2 — abrir el stream con constraints progresivas + timeout.
+    // El WebView de Capacitor a veces se cuelga si las constraints no
+    // son soportadas. Timeout 5s por intento evita el "infinito".
     const attempts = [
-      // 1) Trasera (preferida para QR scanning), sin constraints de resolución
       { video: { facingMode: 'environment' }, audio: false },
-      // 2) Trasera "ideal" (más permisivo)
       { video: { facingMode: { ideal: 'environment' } }, audio: false },
-      // 3) Cualquier cámara (fallback final)
       { video: true, audio: false },
     ];
 
@@ -670,7 +751,7 @@
     scannerStream = null;
     for (let i = 0; i < attempts.length; i++) {
       try {
-        scannerStream = await navigator.mediaDevices.getUserMedia(attempts[i]);
+        scannerStream = await _getUserMediaWithTimeout(attempts[i], 5000);
         break;
       } catch (e) {
         lastError = e;
