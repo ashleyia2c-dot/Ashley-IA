@@ -224,6 +224,9 @@
         const mood = moodMatch ? moodMatch[1].toLowerCase() : 'default';
         const cleanText = raw
           .replace(/\[(?:mood|action|affection):[^\]]*\]/gi, '')
+          // v0.18.2 — Ashley a veces inventa [system:X] como marker
+          // interno (alucinación). Strippear del display offline también.
+          .replace(/\[\s*system\s*:[^\]]*\]/gi, '')
           .replace(/\s+$/, '')
           .trim() || '...';
         const now = new Date().toISOString();

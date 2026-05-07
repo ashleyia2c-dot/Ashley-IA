@@ -77,6 +77,15 @@ def clean_display(text: str) -> str:
     text = re.sub(r'\[(?:mood|action|affection)[^\]]*$', '', text, flags=re.IGNORECASE)
     # Captura variantes extra: a veces el LLM añade espacios o mayúsculas
     text = re.sub(r'\[\s*affection\s*:\s*[^\]]*\]', '', text, flags=re.IGNORECASE)
+    # ── v0.18.2 — Bug "[system:proactive_message]" alucinado ──────────────
+    # Ashley a veces inventa tags estilo [system:X] aunque no estén en el
+    # protocolo. Pasa más en proactivos donde el LLM pierde contexto del
+    # formato esperado y se inventa un "marker" interno. Strippear cualquier
+    # [system:X] / [System:X] / [SYSTEM:X] (con o sin contenido).
+    text = re.sub(r'\[\s*system\s*:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\s*system\s*:[^\]]*$', '', text, flags=re.IGNORECASE)  # parcial al final
+    # También bare "[system]" sin colon (raro pero posible)
+    text = re.sub(r'\[\s*system\s*\]', '', text, flags=re.IGNORECASE)
     # ── Bug C (v0.16.14) — tags BARE sin prefijo "action:" ──────────────
     # Caso real reportado: Ashley emitió "[save_taste:proyectos:mejorando
     # voz de Ashley]" SIN el prefijo "action:". El regex anterior solo

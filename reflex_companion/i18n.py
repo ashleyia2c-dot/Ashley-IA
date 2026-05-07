@@ -153,6 +153,7 @@ UI = {
         "mobile_pair_regen_warn": "Regenerating invalidates any paired phones. They'll have to scan again.",
         "mobile_pair_close":     "Close",
         "mobile_pair_help":      "No mobile yet? Download Ashley Mobile (.apk) from your purchase email.",
+        "mobile_pair_security_warning": "⚠️ Don't share this QR. Anyone who scans it gets full access to your conversations with Ashley.",
 
         # News feed (v0.13.3) — Ashley pone aquí sus descubrimientos
         "pill_news":         "News",
@@ -383,6 +384,7 @@ UI = {
         "mobile_pair_regen_warn": "Regenerar invalida los móviles ya pareados. Tendrán que escanear de nuevo.",
         "mobile_pair_close":     "Cerrar",
         "mobile_pair_help":      "¿Aún sin móvil? Descarga Ashley Mobile (.apk) del correo de tu compra.",
+        "mobile_pair_security_warning": "⚠️ No compartas este QR. Quien lo escanee tiene acceso total a tus conversaciones con Ashley.",
 
         # News feed
         "pill_news":         "Noticias",
@@ -607,6 +609,7 @@ UI = {
         "mobile_pair_regen_warn": "Régénérer invalide les mobiles déjà appairés. Ils devront re-scanner.",
         "mobile_pair_close":     "Fermer",
         "mobile_pair_help":      "Pas encore de mobile ? Télécharge Ashley Mobile (.apk) depuis l'email d'achat.",
+        "mobile_pair_security_warning": "⚠️ Ne partage pas ce QR. Quiconque le scanne accède à toutes tes conversations avec Ashley.",
 
         # News feed
         "pill_news":         "Actus",

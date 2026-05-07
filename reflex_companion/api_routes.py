@@ -522,36 +522,140 @@ def _read_json_safe(filename: str, default):
         return default
 
 
-def _read_pairing_token() -> str:
-    """Lee el pairing token. Si no existe, lo genera y persiste."""
-    import os
+# v0.18.2 — Auto-rotation: el token se regenera automáticamente cada N días
+# para limitar el blast radius si alguien lo filtra. El user re-empareja el
+# móvil (regenera localStorage en el APK) escaneando el QR nuevo.
+_TOKEN_ROTATION_DAYS = 30
+
+
+def _generate_new_token_record() -> dict:
+    """Genera un token nuevo + timestamp. Usado por _read_pairing_token
+    al primer arranque y por la auto-rotation."""
     import secrets
+    from datetime import datetime, timezone
+    return {
+        "token": secrets.token_urlsafe(24),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _persist_pairing_record(record: dict) -> None:
+    """Escribe el record (token + created_at) a mobile_pairing.json
+    preservando otros campos (lan_disabled, etc.) si existen."""
+    import os
+    path = os.path.join(_data_dir(), "mobile_pairing.json")
+    existing = {}
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                existing = _json.load(f) or {}
+    except Exception:
+        pass
+    # Merge — preserva lan_disabled u otros campos opcionales del user
+    existing.update(record)
+    try:
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(existing, f)
+    except Exception:
+        pass
+
+
+def _read_pairing_token() -> str:
+    """Lee el pairing token. Si no existe, lo genera. Si tiene >N días,
+    lo auto-rota (el móvil tendrá que re-escanear).
+    """
+    import os
+    from datetime import datetime, timezone
     path = os.path.join(_data_dir(), "mobile_pairing.json")
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = _json.load(f)
-                tok = (data.get("token") or "").strip()
-                if tok:
-                    return tok
+            tok = (data.get("token") or "").strip()
+            created_at = (data.get("created_at") or "").strip()
+            if tok:
+                # v0.18.2 — chequear edad del token
+                if created_at:
+                    try:
+                        created = datetime.fromisoformat(created_at)
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        age_days = (datetime.now(timezone.utc) - created).days
+                        if age_days >= _TOKEN_ROTATION_DAYS:
+                            # Auto-rotación: regenerar y persistir
+                            new_record = _generate_new_token_record()
+                            _persist_pairing_record(new_record)
+                            return new_record["token"]
+                    except Exception:
+                        pass
+                else:
+                    # Token sin created_at (legacy) — añadir timestamp pero
+                    # mantener el token actual (no romper móviles ya pareados).
+                    _persist_pairing_record({
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                return tok
         except Exception:
             pass
-    # Generar nuevo (32 caracteres URL-safe)
-    new_token = secrets.token_urlsafe(24)
-    try:
-        os.makedirs(_data_dir(), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            _json.dump({"token": new_token}, f)
-    except Exception:
-        pass
-    return new_token
+    # Primera vez — generar nuevo
+    record = _generate_new_token_record()
+    _persist_pairing_record(record)
+    return record["token"]
+
+
+# ─────────────────────────────────────────────
+# Rate limiting (v0.18.2)
+# ─────────────────────────────────────────────
+#
+# Defensa contra: si alguien filtra el QR, el atacante con el token podría
+# spammear /api/mobile/send para drenar la API key del LLM del user.
+# Sliding window: 60 requests/min por token. Un user normal nunca llega
+# a 10/min — el límite solo afecta abuso real.
+
+import time as _time
+import threading as _threading
+
+_RATE_LIMIT_MAX_PER_MIN = 60
+_RATE_LIMIT_WINDOW_SEC = 60.0
+_rate_limit_log: dict[str, list[float]] = {}
+_rate_limit_lock = _threading.Lock()
+
+
+def _is_rate_limited(token: str) -> bool:
+    """True si el token excedió el límite en la ventana actual.
+    Side effect: registra el timestamp del request actual.
+    Thread-safe."""
+    if not token:
+        return False
+    now = _time.time()
+    with _rate_limit_lock:
+        bucket = _rate_limit_log.setdefault(token, [])
+        # Purgar timestamps fuera de ventana
+        cutoff = now - _RATE_LIMIT_WINDOW_SEC
+        bucket[:] = [t for t in bucket if t >= cutoff]
+        if len(bucket) >= _RATE_LIMIT_MAX_PER_MIN:
+            return True
+        bucket.append(now)
+        return False
 
 
 def _check_mobile_auth(request) -> bool:
-    """True si el request lleva el token correcto en X-Ashley-Token."""
+    """True si el request lleva el token correcto en X-Ashley-Token Y
+    no está rate-limited. Mismo error 401 ambos casos para no leakear
+    a un atacante si su problema es token mal vs rate limit."""
     expected = _read_pairing_token()
     given = request.headers.get("x-ashley-token", "").strip()
-    return bool(expected) and given == expected
+    if not (expected and given == expected):
+        return False
+    # Token correcto — chequear rate limit
+    if _is_rate_limited(given):
+        import logging
+        logging.getLogger("ashley.mobile").warning(
+            "rate-limit hit (token suffix=...%s)", given[-6:]
+        )
+        return False
+    return True
 
 
 def _unauthorized():

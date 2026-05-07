@@ -72,6 +72,12 @@ export function cleanDisplay(text) {
   text = text.replace(/\[(?:mood|action|affection)[^\]]*$/gi, '');
   // Variantes con whitespace en affection
   text = text.replace(/\[\s*affection\s*:\s*[^\]]*\]/gi, '');
+  // v0.18.2 — Ashley a veces inventa [system:proactive_message] / [system:X]
+  // como si fuera marker interno (alucinación, no está en el protocolo).
+  // Strippear cualquier [system:...] del display.
+  text = text.replace(/\[\s*system\s*:[^\]]*\]/gi, '');
+  text = text.replace(/\[\s*system\s*:[^\]]*$/gi, '');  // parcial al final
+  text = text.replace(/\[\s*system\s*\]/gi, '');         // bare
 
   // Tags bare sin "action:" prefix
   const bareList = _BARE_ACTION_TYPES.join('|');

@@ -1418,6 +1418,25 @@ def mobile_pair_dialog() -> rx.Component:
                         align="center",
                         width="100%",
                     ),
+                    # ── v0.18.2 — Aviso de seguridad ──────────────────
+                    # El QR contiene el pairing token (192 bits CSPRNG).
+                    # Quien escanee = acceso al chat history + facts +
+                    # puede gastar la API key del user mandando msgs.
+                    # El user puede regenerar el token desde el botón
+                    # debajo si sospecha compromise.
+                    rx.box(
+                        rx.text(
+                            State.t["mobile_pair_security_warning"],
+                            color="#ffb380",
+                            font_size="11px",
+                            line_height="1.5",
+                        ),
+                        padding="8px 12px",
+                        bg="rgba(255, 154, 76, 0.08)",
+                        border="1px solid rgba(255, 154, 76, 0.25)",
+                        border_radius="8px",
+                        margin_top="6px",
+                    ),
                     # Help text + acciones
                     rx.text(
                         State.t["mobile_pair_help"],
