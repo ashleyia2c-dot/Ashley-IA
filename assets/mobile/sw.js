@@ -15,7 +15,13 @@
 // recibiendo el shell cacheado del SW viejo aunque actualicen el APK.
 // Síntoma: bugs supuestamente fixeados (dedupe, avatar, scroll) NO
 // aparecen para users en update — están corriendo código viejo.
-const CACHE_VERSION = 'ashley-mobile-v0182-r13';
+// v0.18.2 — Desactivado: el SW ya no se registra desde index.html
+// porque causaba bugs cacheando app.js viejo entre updates del APK.
+// Capacitor sirve archivos del bundle local sin necesidad de SW.
+// Este archivo se mantiene en el bundle por si algún SW antiguo
+// sigue activo en algún device — al arrancar y NO encontrar handlers
+// útiles, el cleanup script de index.html lo desregistra.
+const CACHE_VERSION = 'ashley-mobile-v0182-r14-deprecated';
 const APP_SHELL = [
   '/mobile/index.html',
   '/mobile/app.css',

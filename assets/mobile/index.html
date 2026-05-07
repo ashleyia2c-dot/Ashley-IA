@@ -211,14 +211,39 @@
     </div>
   </div>
 
-  <script src="/mobile/app.js"></script>
+  <!--
+    v0.18.2 — DESREGISTRAR el Service Worker en lugar de registrarlo.
+    Razón: el SW estaba pensado para PWA web (carga offline del shell),
+    pero en el APK Capacitor TODOS los archivos vienen del bundle local
+    y NO necesitamos cache adicional. El SW solo causaba problemas:
+    cacheaba versiones viejas de app.js entre updates del APK, y los
+    fixes nuevos NO llegaban al user hasta hacer Clear Storage manual.
+
+    Este script desregistra cualquier SW existente Y mata cualquier cache
+    asociado. Auto-cleanup para users que tenían SW de versiones previas.
+  -->
   <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/mobile/sw.js', { scope: '/mobile/' })
-          .catch(err => console.warn('SW registration failed:', err));
-      });
-    }
+    (async function _killStaleServiceWorker() {
+      if (!('serviceWorker' in navigator)) return;
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) {
+          await reg.unregister();
+          console.log('[sw] desregistrado SW viejo');
+        }
+        // También borrar todos los caches de SW
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            await caches.delete(key);
+            console.log('[sw] cache borrado:', key);
+          }
+        }
+      } catch (e) {
+        console.warn('[sw] cleanup falló:', e && e.message);
+      }
+    })();
   </script>
+  <script src="/mobile/app.js"></script>
 </body>
 </html>
