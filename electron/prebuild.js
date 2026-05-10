@@ -21,24 +21,24 @@ const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
 
-// v0.19.2 — prefer python-embed/ (portable, lo que se bundlea), fallback al
-// venv/ tradicional para devs que aún no han corrido tools/setup_python_embed.py.
-function resolveReflexBin() {
+// v0.19.3 — usamos python.exe -m reflex (no reflex.exe, que tiene path
+// absoluto baked-in al python que hizo el pip install).
+function resolvePythonExe() {
   const isWin = process.platform === 'win32';
-  const embedBin = isWin
-    ? path.join(ROOT, 'python-embed', 'Scripts', 'reflex.exe')
-    : path.join(ROOT, 'python-embed', 'bin', 'reflex');
-  if (fs.existsSync(embedBin)) return embedBin;
-  const venvBin = isWin
-    ? path.join(ROOT, 'venv', 'Scripts', 'reflex.exe')
-    : path.join(ROOT, 'venv', 'bin', 'reflex');
-  return venvBin;
+  const embedPy = isWin
+    ? path.join(ROOT, 'python-embed', 'python.exe')
+    : path.join(ROOT, 'python-embed', 'bin', 'python');
+  if (fs.existsSync(embedPy)) return embedPy;
+  const venvPy = isWin
+    ? path.join(ROOT, 'venv', 'Scripts', 'python.exe')
+    : path.join(ROOT, 'venv', 'bin', 'python');
+  return venvPy;
 }
 
-const REFLEX_BIN = resolveReflexBin();
+const PYTHON_EXE = resolvePythonExe();
 
-if (!fs.existsSync(REFLEX_BIN)) {
-  console.error(`[prebuild] Cannot find reflex binary at ${REFLEX_BIN}`);
+if (!fs.existsSync(PYTHON_EXE)) {
+  console.error(`[prebuild] Cannot find python.exe at ${PYTHON_EXE}`);
   console.error('[prebuild] No has corrido el setup de Python embeddable.');
   console.error('[prebuild] Run: python tools/setup_python_embed.py');
   console.error('[prebuild] (Alternativa legacy: python -m venv venv && venv/Scripts/pip install -r requirements.txt)');
@@ -55,7 +55,9 @@ try { fs.mkdirSync(exportDir, { recursive: true }); } catch {}
 console.log('[prebuild] Forcing fresh frontend build — no stale assets in installer.');
 console.log('[prebuild] This takes ~10s on cold cache, ~3s on warm.');
 try {
-  execSync(`"${REFLEX_BIN}" export --frontend-only --zip-dest-dir "${exportDir}"`, {
+  // v0.19.3 — `python -m reflex export` en lugar de `reflex export` para
+  // evitar el shim con path absoluto baked-in.
+  execSync(`"${PYTHON_EXE}" -m reflex export --frontend-only --zip-dest-dir "${exportDir}"`, {
     cwd: ROOT,
     stdio: 'inherit',
   });

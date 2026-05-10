@@ -31,22 +31,23 @@ app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 //     El script corre desde la carpeta electron/, así que la raíz del
 //     proyecto es el padre (__dirname/../). Pero si alguien clonó con
 //     otra estructura de carpetas, caemos en los candidates de backup.
-// v0.19.2 — Cambiado de `venv/` a `python-embed/`. El venv tradicional
-// no funcionaba en PCs ajenos al de build porque su python.exe es un
-// shim que apunta al path absoluto del Python "home" (ej. C:\hostedtoolcache
-// del runner de GH Actions, o el path del laptop del dev). Python embeddable
-// es una distro autocontenida sin paths absolutos — funciona en cualquier
-// Windows x64 sin dependencias previas. Setup: tools/setup_python_embed.py.
+// v0.19.2 — Cambiado de `venv/` a `python-embed/`. Versión 2 (v0.19.3): NO
+// usar los .exe shims que crea pip. Esos shims TAMBIÉN tienen paths absolutos
+// hardcoded al python.exe que los creó (ej. D:\a\Ashley-IA\python-embed\python.exe
+// del runner GH Actions). En PC ajeno → "Fatal error in launcher: Unable to
+// create process". Solución: invocar `python.exe -m reflex` directamente —
+// salta el shim por completo y siempre funciona porque python.exe es relativo
+// al bundle.
 function resolveProjectRoot() {
   // Caso packaged: todo el stack está en resources/
   if (app.isPackaged) {
     const bundled = process.resourcesPath;
-    if (fs.existsSync(path.join(bundled, 'python-embed', 'Scripts', 'reflex.exe'))) {
+    if (fs.existsSync(path.join(bundled, 'python-embed', 'python.exe'))) {
       return bundled;
     }
     // Fallback al venv viejo por compatibilidad si alguien rebuilda con
     // configuración antigua. Aviso clarito en el log para diagnosticar.
-    if (fs.existsSync(path.join(bundled, 'venv', 'Scripts', 'reflex.exe'))) {
+    if (fs.existsSync(path.join(bundled, 'venv', 'Scripts', 'python.exe'))) {
       log(`WARNING: bundled venv detected — installer should use python-embed instead`);
       return bundled;
     }
@@ -63,8 +64,8 @@ function resolveProjectRoot() {
   ];
   for (const p of candidates) {
     if (p && (
-        fs.existsSync(path.join(p, 'python-embed', 'Scripts', 'reflex.exe')) ||
-        fs.existsSync(path.join(p, 'venv', 'Scripts', 'reflex.exe'))
+        fs.existsSync(path.join(p, 'python-embed', 'python.exe')) ||
+        fs.existsSync(path.join(p, 'venv', 'Scripts', 'python.exe'))
       )) {
       return p;
     }
@@ -73,13 +74,19 @@ function resolveProjectRoot() {
 }
 
 const PROJECT_ROOT = resolveProjectRoot();
-// v0.19.2 — Prefer python-embed/ (portable). Fallback a venv/ solo en dev
-// cuando el dev aún no ha corrido `python tools/setup_python_embed.py`.
-const VENV_REFLEX = (() => {
-  const embed = path.join(PROJECT_ROOT, 'python-embed', 'Scripts', 'reflex.exe');
+// v0.19.3 — Apuntamos a python.exe en lugar de reflex.exe. Lo lanzamos vía
+// `python.exe -m reflex run ...` en lugar de `reflex.exe run ...` para evitar
+// el shim de pip con path absoluto baked-in. python.exe del embeddable es
+// portable de verdad.
+const PYTHON_EXE = (() => {
+  const embed = path.join(PROJECT_ROOT, 'python-embed', 'python.exe');
   if (fs.existsSync(embed)) return embed;
-  return path.join(PROJECT_ROOT, 'venv', 'Scripts', 'reflex.exe');
+  return path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
 })();
+// VENV_REFLEX queda como nombre legacy del binario que se invoca, pero ahora
+// es python.exe. Los args anteponen `-m reflex` al spawn.
+const VENV_REFLEX = PYTHON_EXE;
+const REFLEX_INVOCATION_ARGS = ['-m', 'reflex'];
 const REFLEX_HOST = '127.0.0.1';
 // Puertos base. Si están ocupados (procesos zombis de sesiones previas,
 // Hyper-V reservando rangos, etc.) buscamos el siguiente libre.
@@ -964,7 +971,11 @@ function _startSplitProcesses(apiKey) {
   const buildDir = path.join(webDir, 'build', 'client');
 
   // ── Backend Python (sólo el API/WebSocket, no sirve frontend) ──
+  // v0.19.3 — usamos python.exe -m reflex en lugar de reflex.exe directo,
+  // porque el shim reflex.exe de pip lleva el path absoluto del Python que
+  // hizo el install (rompe en cualquier PC que no sea el de build).
   reflexProcess = spawn(VENV_REFLEX, [
+    ...REFLEX_INVOCATION_ARGS,
     'run',
     '--env', 'prod',
     '--backend-only',
@@ -1199,7 +1210,9 @@ function _proxyToBackend(clientReq, clientRes) {
 
 // Slow-path original: un solo proceso reflex que compila + sirve todo.
 function _startSingleReflexProcess(apiKey) {
+  // v0.19.3 — usamos python.exe -m reflex (ver comentario en _startSplitProcesses).
   reflexProcess = spawn(VENV_REFLEX, [
+    ...REFLEX_INVOCATION_ARGS,
     'run',
     '--env', 'prod',
     '--frontend-port', String(REFLEX_FRONTEND_PORT),
