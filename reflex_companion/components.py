@@ -153,6 +153,17 @@ def streaming_bubble():
 
 
 def thinking_indicator():
+    """Indicador de "pensando..." con dots bounce.
+
+    v0.19.4 — texto de "pensando" pasado de hardcoded en HTML f-string a
+    componente Reflex reactivo (rx.text con State.t["status_thinking"]).
+    Antes el texto "pensando" se interpolaba al cargar el módulo y nunca
+    se actualizaba al cambiar idioma. Ahora se traduce reactivamente
+    a los 7 idiomas (en/es/fr/ja/de/ru/ko).
+
+    Los 3 dots animados sí siguen como HTML porque son decoración pura
+    (sin texto), no hay nada que traducir.
+    """
     State = _get_state()
     return rx.cond(
         State.is_thinking,
@@ -160,15 +171,27 @@ def thinking_indicator():
             rx.hstack(
                 _ashley_avatar(src=State.current_image),
                 rx.box(
-                    rx.html(f"""
-                    <div style="display:flex;align-items:center;gap:6px;padding:12px 18px;">
-                        <span style="font-size:12px;color:{COLOR_PRIMARY};margin-right:4px;font-style:italic;opacity:0.85;">pensando</span>
+                    rx.hstack(
+                        # Texto "pensando..." reactivo al idioma
+                        rx.text(
+                            State.t["status_thinking"],
+                            font_size="12px",
+                            color=COLOR_PRIMARY,
+                            font_style="italic",
+                            opacity="0.85",
+                            margin_right="4px",
+                        ),
+                        # 3 dots con bounce animation (decoración, no texto)
+                        rx.html(f"""
                         <span style="width:8px;height:8px;border-radius:50%;background:{COLOR_PRIMARY};display:inline-block;animation:bounce 1.2s infinite ease-in-out;animation-delay:0s"></span>
-                        <span style="width:8px;height:8px;border-radius:50%;background:{COLOR_PRIMARY};display:inline-block;animation:bounce 1.2s infinite ease-in-out;animation-delay:0.2s"></span>
-                        <span style="width:8px;height:8px;border-radius:50%;background:{COLOR_PRIMARY};display:inline-block;animation:bounce 1.2s infinite ease-in-out;animation-delay:0.4s"></span>
+                        <span style="width:8px;height:8px;border-radius:50%;background:{COLOR_PRIMARY};display:inline-block;animation:bounce 1.2s infinite ease-in-out;animation-delay:0.2s;margin-left:4px;"></span>
+                        <span style="width:8px;height:8px;border-radius:50%;background:{COLOR_PRIMARY};display:inline-block;animation:bounce 1.2s infinite ease-in-out;animation-delay:0.4s;margin-left:4px;"></span>
                         <style>@keyframes bounce{{0%,60%,100%{{transform:translateY(0);opacity:.4}}30%{{transform:translateY(-8px);opacity:1}}}}</style>
-                    </div>
-                    """),
+                        """),
+                        spacing="0",
+                        align="center",
+                        padding="12px 18px",
+                    ),
                     class_name="bubble-ashley",
                     border_radius="4px 22px 22px 22px",
                     display="inline-block",
