@@ -10,6 +10,10 @@
 #
 # GitHub Actions:
 #   - Checkout del código
+#   - Instala Python 3.12 + crea venv + instala requirements.txt (← v0.19.0:
+#     ESENCIAL — sin esto, prebuild.js falla porque no encuentra reflex.exe.
+#     Tanto v0.17.4 como v0.18.0 pidieron release y se quedaron a medias por
+#     este bug. Ahora arreglado.)
 #   - Instala Node 20
 #   - Instala deps de electron
 #   - Corre electron-builder con --publish always
@@ -35,13 +39,31 @@ jobs:
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
+        with:
+          lfs: false  # VRM (47MB) y otros assets binarios no usan LFS aún
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'  # acelera runs futuros (~30-90s ahorrados)
+
+      - name: Create venv + install Python requirements
+        # PrebUild.js necesita venv/Scripts/reflex.exe. Sin este step,
+        # `npm run prebuild-frontend` revienta con "Cannot find reflex
+        # binary" (root cause de los fallos de v0.17.4 y v0.18.0).
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\python.exe -m pip install --upgrade pip
+          .\venv\Scripts\pip.exe install -r requirements.txt
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install electron dependencies
         working-directory: ./electron
         run: npm install
 
