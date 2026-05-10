@@ -86,14 +86,14 @@ purchasing) may use cookies; see their privacy policy.
 - **Portability**: the JSON files are human-readable and standard.
 - **Correction**: you can edit any of those JSON files manually if you want
   to correct something Ashley remembered wrong.
-- **License deactivation**: contact us at hello@ashley-ia.com to deactivate
+- **License deactivation**: contact us at ashleyia2c@gmail.com to deactivate
   your license remotely if you lose access to your PC.
 
 ### Children
 
-Ashley is not intended for users under 13. We do not knowingly allow
-accounts for minors. If you believe a minor has installed Ashley, please
-contact us.
+Ashley is not intended for users under 16 (per EU GDPR). We do not knowingly
+allow accounts for minors. If you believe a minor has installed Ashley,
+please contact us.
 
 ### Changes
 
@@ -103,7 +103,7 @@ announced in-app.
 
 ### Contact
 
-Questions, concerns, data deletion requests: **hello@ashley-ia.com**
+Questions, concerns, data deletion requests: **ashleyia2c@gmail.com**
 """
 
 _TERMS_EN = """## Terms of Service
@@ -157,7 +157,7 @@ relating to Ashley is limited to the amount you paid for your license.
 ### Refunds
 
 We honor refunds within **14 days of purchase**, no questions asked.
-Contact hello@ashley-ia.com with your license key. Refunds processed via
+Contact ashleyia2c@gmail.com with your license key. Refunds processed via
 Lemon Squeezy in 1-5 business days.
 
 ### Termination
@@ -167,12 +167,12 @@ Ashley anytime by uninstalling.
 
 ### Governing law
 
-These terms are governed by the laws of [JURISDICTION TO BE FILLED IN BY
-THE SELLER]. Disputes will be resolved in the courts of that jurisdiction.
+These terms are governed by the laws of Belgium. Disputes will be resolved
+in the courts of Belgium.
 
 ### Contact
 
-Questions, refund requests, support: **hello@ashley-ia.com**
+Questions, refund requests, support: **ashleyia2c@gmail.com**
 """
 
 
@@ -242,14 +242,14 @@ usar cookies; consulta su política.
 - **Portabilidad**: los archivos JSON son legibles y estándar.
 - **Rectificación**: puedes editar manualmente esos JSON si quieres
   corregir algo que Ashley recordó mal.
-- **Desactivación de licencia**: contacta hello@ashley-ia.com para
+- **Desactivación de licencia**: contacta ashleyia2c@gmail.com para
   desactivar tu licencia remotamente si pierdes acceso a tu PC.
 
 ### Menores
 
-Ashley no está pensada para usuarios menores de 13 años. No permitimos
-conscientemente cuentas de menores. Si crees que un menor ha instalado
-Ashley, por favor contacta con nosotros.
+Ashley no está pensada para usuarios menores de 16 años (per RGPD UE).
+No permitimos conscientemente cuentas de menores. Si crees que un menor
+ha instalado Ashley, por favor contacta con nosotros.
 
 ### Cambios
 
@@ -259,7 +259,7 @@ significativos se anunciarán dentro de la app.
 
 ### Contacto
 
-Preguntas, dudas, peticiones de borrado de datos: **hello@ashley-ia.com**
+Preguntas, dudas, peticiones de borrado de datos: **ashleyia2c@gmail.com**
 """
 
 _TERMS_ES = """## Términos de Servicio
@@ -317,7 +317,7 @@ pagaste por tu licencia.
 ### Reembolsos
 
 Honramos reembolsos dentro de los **14 días desde la compra**, sin hacer
-preguntas. Contacta hello@ashley-ia.com con tu license key. Los
+preguntas. Contacta ashleyia2c@gmail.com con tu license key. Los
 reembolsos se procesan vía Lemon Squeezy en 1-5 días hábiles.
 
 ### Terminación
@@ -327,13 +327,12 @@ usar Ashley en cualquier momento desinstalando.
 
 ### Ley aplicable
 
-Estos términos se rigen por las leyes de [JURISDICCIÓN A RELLENAR POR EL
-VENDEDOR]. Las disputas se resolverán en los tribunales de esa
-jurisdicción.
+Estos términos se rigen por las leyes de Bélgica. Las disputas se resolverán
+en los tribunales de Bélgica.
 
 ### Contacto
 
-Preguntas, reembolsos, soporte: **hello@ashley-ia.com**
+Preguntas, reembolsos, soporte: **ashleyia2c@gmail.com**
 """
 
 
