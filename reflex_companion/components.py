@@ -621,23 +621,28 @@ def license_gate() -> rx.Component:
                         placeholder=State.t["license_placeholder"],
                         id="license_key",
                         name="license_key",
-                        # v0.19.10 — fix: la key se veía ilegible.
-                        # Antes: font_size=11px + letter_spacing=0.5px + JetBrains Mono
-                        # (que no carga en Electron sin internet) → rendering mezclaba
-                        # los caracteres haciéndolos imposibles de leer al pegar.
-                        # Ahora: 16px + letra-spacing más generoso + Consolas como
-                        # primary (siempre disponible en Windows) + color brillante.
+                        # v0.19.11 — fix: la key se veía ilegible (font 11px).
+                        # v0.19.12 — fix #2: las keys de Lemon Squeezy son
+                        # ~36 chars (UUID-style XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
+                        # y NO cabían en la caja con text_align=center
+                        # (se mostraba el medio recortado). Cambios:
+                        #   1. text_align: center → left (user ve el inicio)
+                        #   2. letter_spacing: 1.5px → 1px (más chars caben)
+                        #   3. font_size: 16px → 14px (más chars caben)
+                        #   4. parent vstack: 460px → 540px (caja más ancha)
+                        #   5. padding interior: 16px → 14px horizontal
+                        #   6. cursor blinking visible para confirmar input ON
                         font_family="'Consolas', 'Courier New', monospace",
                         bg="rgba(255,255,255,0.06)",
                         color="#fff5e6",
                         border="1px solid rgba(255,255,255,0.18)",
                         border_radius="10px",
-                        padding="16px 14px",
-                        font_size="16px",
-                        letter_spacing="1.5px",
+                        padding="14px",
+                        font_size="14px",
+                        letter_spacing="1px",
                         font_weight="500",
                         width="100%",
-                        text_align="center",
+                        text_align="left",  # ← KEY FIX: ver el inicio, no el medio
                         auto_focus=True,
                         _focus={
                             "border": "1px solid rgba(255,154,238,0.55)",
@@ -647,8 +652,9 @@ def license_gate() -> rx.Component:
                         },
                         _placeholder={
                             "color": "#666",
-                            "letter_spacing": "1px",
-                            "font_size": "14px",
+                            "letter_spacing": "0.5px",
+                            "font_size": "13px",
+                            "text_align": "center",  # placeholder centered (más bonito vacío)
                         },
                     ),
                     rx.cond(
@@ -717,7 +723,9 @@ def license_gate() -> rx.Component:
             ),
             spacing="4",
             align="center",
-            width="460px",
+            # v0.19.12 — 460px era demasiado estrecho para keys de Lemon
+            # Squeezy de 36 chars (formato UUID). 540px ahora.
+            width="540px",
             padding="44px 36px",
             bg="rgba(255,255,255,0.025)",
             border="1px solid rgba(255,255,255,0.07)",
