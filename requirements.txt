@@ -9,6 +9,14 @@ websockets
 requests
 openai>=1.50.0
 
+# v0.19.0 — Faltaban en requirements.txt aunque vivían en el venv local
+# (instaladas a mano o como deps transitivas pinneadas por algo). Sin
+# ellas el build de GH Actions rompe en el primer import:
+#   ModuleNotFoundError: No module named 'dotenv'  → config.py:1
+#   ModuleNotFoundError: No module named 'xai_sdk' → grok_client.py
+python-dotenv>=1.0.0
+xai-sdk>=1.11.0
+
 # ── Voice / Wake word (v0.14.0) ──────────────────────────────
 # Estas deps tienen que estar instaladas para que el user final
 # tenga voz + wake word out-of-the-box. NO debe descargar nada
