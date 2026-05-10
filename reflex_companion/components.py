@@ -712,7 +712,7 @@ def license_gate() -> rx.Component:
                 ),
                 rx.link(
                     State.t["license_lost_key"],
-                    href="mailto:hello@ashley-ia.com",
+                    href="mailto:ashleyia2c@gmail.com",
                     is_external=True,
                     color="#777",
                     font_size="11px",
