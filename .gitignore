@@ -12,6 +12,12 @@ venv/
 .venv/
 env/
 
+# v0.19.2 — Python embeddable distribution autocontenida que reemplaza al venv
+# tradicional para bundlear en el .exe (el venv graba paths absolutos al Python
+# host y no funciona en otros PCs). Se regenera con `python tools/setup_python_embed.py`.
+python-embed/
+.cache/python-embed-downloads/
+
 # ───────── Secrets ─────────
 # .env contiene XAI_API_KEY y otras claves — NUNCA subir
 .env

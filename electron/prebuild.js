@@ -20,14 +20,28 @@ const fs = require('fs');
 const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
-const REFLEX_BIN = process.platform === 'win32'
-  ? path.join(ROOT, 'venv', 'Scripts', 'reflex.exe')
-  : path.join(ROOT, 'venv', 'bin', 'reflex');
+
+// v0.19.2 — prefer python-embed/ (portable, lo que se bundlea), fallback al
+// venv/ tradicional para devs que aún no han corrido tools/setup_python_embed.py.
+function resolveReflexBin() {
+  const isWin = process.platform === 'win32';
+  const embedBin = isWin
+    ? path.join(ROOT, 'python-embed', 'Scripts', 'reflex.exe')
+    : path.join(ROOT, 'python-embed', 'bin', 'reflex');
+  if (fs.existsSync(embedBin)) return embedBin;
+  const venvBin = isWin
+    ? path.join(ROOT, 'venv', 'Scripts', 'reflex.exe')
+    : path.join(ROOT, 'venv', 'bin', 'reflex');
+  return venvBin;
+}
+
+const REFLEX_BIN = resolveReflexBin();
 
 if (!fs.existsSync(REFLEX_BIN)) {
   console.error(`[prebuild] Cannot find reflex binary at ${REFLEX_BIN}`);
-  console.error('[prebuild] Did you create the venv and install requirements?');
-  console.error('[prebuild] Run: python -m venv venv && venv/Scripts/pip install -r requirements.txt');
+  console.error('[prebuild] No has corrido el setup de Python embeddable.');
+  console.error('[prebuild] Run: python tools/setup_python_embed.py');
+  console.error('[prebuild] (Alternativa legacy: python -m venv venv && venv/Scripts/pip install -r requirements.txt)');
   process.exit(1);
 }
 

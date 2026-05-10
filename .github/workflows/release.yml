@@ -42,21 +42,22 @@ jobs:
         with:
           lfs: false  # VRM (47MB) y otros assets binarios no usan LFS aún
 
-      - name: Setup Python 3.12
+      - name: Setup Python 3.12 (host runner — solo para correr el setup script)
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'  # acelera runs futuros (~30-90s ahorrados)
+          python-version: '3.12.10'  # debe coincidir con PYTHON_VERSION en setup_python_embed.py
+          cache: 'pip'
 
-      - name: Create venv + install Python requirements
-        # PrebUild.js necesita venv/Scripts/reflex.exe. Sin este step,
-        # `npm run prebuild-frontend` revienta con "Cannot find reflex
-        # binary" (root cause de los fallos de v0.17.4 y v0.18.0).
+      - name: Setup Python embeddable distribution
+        # v0.19.2 — sustituye al venv tradicional. tools/setup_python_embed.py
+        # descarga el zip embeddable de python.org, instala pip, instala
+        # requirements.txt al site-packages embebido. Resultado: python-embed/
+        # 100% portable, funciona en cualquier Windows x64 sin Python preinstalado.
+        # Causa raíz que esto arregla: el venv tradicional graba paths absolutos
+        # en pyvenv.cfg + python.exe shim, así que al bundlearlo en el installer
+        # y desplegarlo en otro PC daba "No Python at C:\hostedtoolcache\..."
         shell: pwsh
-        run: |
-          python -m venv venv
-          .\venv\Scripts\python.exe -m pip install --upgrade pip
-          .\venv\Scripts\pip.exe install -r requirements.txt
+        run: python tools/setup_python_embed.py
 
       - name: Setup Node 20
         uses: actions/setup-node@v4

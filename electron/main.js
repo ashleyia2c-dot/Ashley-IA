@@ -31,16 +31,26 @@ app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 //     El script corre desde la carpeta electron/, así que la raíz del
 //     proyecto es el padre (__dirname/../). Pero si alguien clonó con
 //     otra estructura de carpetas, caemos en los candidates de backup.
+// v0.19.2 — Cambiado de `venv/` a `python-embed/`. El venv tradicional
+// no funcionaba en PCs ajenos al de build porque su python.exe es un
+// shim que apunta al path absoluto del Python "home" (ej. C:\hostedtoolcache
+// del runner de GH Actions, o el path del laptop del dev). Python embeddable
+// es una distro autocontenida sin paths absolutos — funciona en cualquier
+// Windows x64 sin dependencias previas. Setup: tools/setup_python_embed.py.
 function resolveProjectRoot() {
   // Caso packaged: todo el stack está en resources/
   if (app.isPackaged) {
     const bundled = process.resourcesPath;
-    if (fs.existsSync(path.join(bundled, 'venv', 'Scripts', 'reflex.exe'))) {
+    if (fs.existsSync(path.join(bundled, 'python-embed', 'Scripts', 'reflex.exe'))) {
       return bundled;
     }
-    // Si el installer por alguna razón no tiene el venv, avisamos clarito
-    // en el log para que soporte pueda diagnosticar.
-    log(`WARNING: packaged app but no venv in ${bundled} — installer is broken`);
+    // Fallback al venv viejo por compatibilidad si alguien rebuilda con
+    // configuración antigua. Aviso clarito en el log para diagnosticar.
+    if (fs.existsSync(path.join(bundled, 'venv', 'Scripts', 'reflex.exe'))) {
+      log(`WARNING: bundled venv detected — installer should use python-embed instead`);
+      return bundled;
+    }
+    log(`WARNING: packaged app but no python-embed in ${bundled} — installer is broken`);
     return bundled; // seguimos para que el error posterior sea específico
   }
 
@@ -52,7 +62,10 @@ function resolveProjectRoot() {
     'C:\\reflex-companion',
   ];
   for (const p of candidates) {
-    if (p && fs.existsSync(path.join(p, 'venv', 'Scripts', 'reflex.exe'))) {
+    if (p && (
+        fs.existsSync(path.join(p, 'python-embed', 'Scripts', 'reflex.exe')) ||
+        fs.existsSync(path.join(p, 'venv', 'Scripts', 'reflex.exe'))
+      )) {
       return p;
     }
   }
@@ -60,7 +73,13 @@ function resolveProjectRoot() {
 }
 
 const PROJECT_ROOT = resolveProjectRoot();
-const VENV_REFLEX = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'reflex.exe');
+// v0.19.2 — Prefer python-embed/ (portable). Fallback a venv/ solo en dev
+// cuando el dev aún no ha corrido `python tools/setup_python_embed.py`.
+const VENV_REFLEX = (() => {
+  const embed = path.join(PROJECT_ROOT, 'python-embed', 'Scripts', 'reflex.exe');
+  if (fs.existsSync(embed)) return embed;
+  return path.join(PROJECT_ROOT, 'venv', 'Scripts', 'reflex.exe');
+})();
 const REFLEX_HOST = '127.0.0.1';
 // Puertos base. Si están ocupados (procesos zombis de sesiones previas,
 // Hyper-V reservando rangos, etc.) buscamos el siguiente libre.
@@ -741,16 +760,22 @@ async function resolveApiKey() {
 }
 
 // ─── Line-buffered logger ─────────────────────────────────────────────────
+// v0.19.2 — antes escribía a process.stdout/stderr de Electron. En una app
+// packagaged sin terminal eso va a NINGÚN LADO → cuando Python crasheaba en
+// otro PC, el stderr se tiraba a la basura y solo veíamos "Reflex process
+// exited (code=1)" sin ningún detalle del crash.
+//
+// Fix: usar log() (que escribe a main.log persistente) para que cualquier
+// output del backend Python quede registrado y diagnosticable post-mortem.
 function makeLineLogger(prefix, isErr) {
   let buf = '';
   return (chunk) => {
     buf += chunk.toString('utf8');
     const parts = buf.split(/\r?\n|\r/);
     buf = parts.pop();
-    const out = isErr ? process.stderr : process.stdout;
     for (const line of parts) {
       const t = line.trim();
-      if (t) out.write(`[${prefix}] ${t}\n`);
+      if (t) log(`[${prefix}${isErr ? ' ERR' : ''}] ${t}`);
     }
   };
 }

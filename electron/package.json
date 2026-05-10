@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -89,8 +89,8 @@
         ]
       },
       {
-        "from": "../venv",
-        "to": "venv",
+        "from": "../python-embed",
+        "to": "python-embed",
         "filter": [
           "**/*",
           "!**/__pycache__/**",
@@ -99,7 +99,8 @@
           "!Lib/site-packages/pip/**",
           "!Lib/site-packages/setuptools/**",
           "!**/tests/**",
-          "!**/test/**"
+          "!**/test/**",
+          "!.cache/**"
         ]
       }
     ],
