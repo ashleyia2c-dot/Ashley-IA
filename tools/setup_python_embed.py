@@ -112,13 +112,23 @@ def patch_pth_file(embed_dir: Path) -> None:
 
 
 def bootstrap_pip(embed_dir: Path) -> None:
-    """Instala pip en el embeddable usando get-pip.py."""
+    """Instala pip + setuptools + wheel en el embeddable usando get-pip.py.
+
+    NOTA: get-pip.py por defecto solo instala pip (no setuptools ni wheel).
+    Pero muchos paquetes PEP 517 fallan al hacer source build sin setuptools
+    (vimos esto en CI: BackendUnavailable: Cannot import 'setuptools.build_meta').
+    Por eso le pasamos explícitamente setuptools + wheel.
+    """
     get_pip = DOWNLOADS / "get-pip.py"
     download(GET_PIP_URL, get_pip)
     python_exe = embed_dir / "python.exe"
-    log("bootstrapping pip")
+    log("bootstrapping pip + setuptools + wheel")
     subprocess.run(
-        [str(python_exe), str(get_pip), "--no-warn-script-location"],
+        [
+            str(python_exe), str(get_pip),
+            "--no-warn-script-location",
+            "setuptools", "wheel",  # ← extras explícitos para PEP 517 builds
+        ],
         check=True,
     )
 
