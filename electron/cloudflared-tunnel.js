@@ -80,28 +80,107 @@ function getStatus() {
 }
 
 /**
+ * Resuelve el path REAL al binario cloudflared, arreglando el bug clásico
+ * de Electron + asar.
+ *
+ * v0.19.10 — root cause de "Error: spawn ...\app.asar\node_modules\cloudflared\bin\cloudflared.exe ENOENT":
+ *
+ * El paquete npm `cloudflared` calcula `bin` con `path.join(__dirname, 'bin', 'cloudflared.exe')`.
+ * Cuando el módulo vive dentro de `app.asar`, __dirname devuelve un path tipo
+ * `.../resources/app.asar/node_modules/cloudflared`. Aunque el config de
+ * electron-builder tenga `asarUnpack: ['node_modules/cloudflared/**']` y el
+ * binario REAL viva en `app.asar.unpacked/...`, el path que devuelve `bin`
+ * sigue apuntando a la versión "virtual" dentro de asar — y `spawn()` NO
+ * puede ejecutar binarios desde dentro de un asar archive.
+ *
+ * Fix: reemplazar manualmente `app.asar` → `app.asar.unpacked` en el path
+ * antes de pasarlo a spawn. Si el archivo unpacked existe → usarlo. Si no
+ * → fallback a download.
+ */
+function resolveCloudflaredBinPath(rawBin) {
+  if (!rawBin) return rawBin;
+  // Caso producción packaged: el path tiene `app.asar` pero el binario
+  // real está en `app.asar.unpacked` (electron-builder asarUnpack).
+  if (rawBin.includes(`${path.sep}app.asar${path.sep}`) ||
+      rawBin.includes('/app.asar/')) {
+    const unpacked = rawBin.replace(
+      /([\\/])app\.asar([\\/])/,
+      '$1app.asar.unpacked$2',
+    );
+    if (fs.existsSync(unpacked)) {
+      return unpacked;
+    }
+    // Si el unpacked tampoco existe, devolvemos el rawBin para que el caller
+    // ejecute la rama de download (cae a install()).
+  }
+  return rawBin;
+}
+
+/**
  * Verifica que cloudflared está disponible. Si no, intenta auto-instalar
  * el binario via el paquete npm (descarga al primer uso).
+ *
+ * v0.19.10 — añadido fallback robusto:
+ *   1. Intenta path canonical de la npm package (con fix asar.unpacked)
+ *   2. Si no existe físicamente → descarga via install() del paquete
+ *   3. Si la descarga falla porque el package está dentro de asar → descarga
+ *      a una ubicación alternativa en %APPDATA%\Ashley\bin\
  */
 async function ensureCloudflaredBinary(log) {
   if (!cloudflared) {
     throw new Error('paquete cloudflared no instalado en node_modules');
   }
-  // El paquete `cloudflared` expone `bin` y `install` para garantizar binary
-  const { bin, install } = cloudflared;
-  if (!bin) {
+  const { bin: rawBin, install } = cloudflared;
+  if (!rawBin) {
     throw new Error('cloudflared.bin no expuesto por el paquete');
   }
-  if (!fs.existsSync(bin)) {
-    log(`Descargando cloudflared binary (~25MB) — solo primera vez...`);
-    try {
-      await install(bin);
-      log(`✓ cloudflared descargado a: ${bin}`);
-    } catch (e) {
-      throw new Error(`download de cloudflared falló: ${e.message}`);
-    }
+
+  // Fix asar — apunta al unpacked si estamos en build packagaged
+  const bin = resolveCloudflaredBinPath(rawBin);
+  if (fs.existsSync(bin)) {
+    return bin;
   }
-  return bin;
+
+  // Si no existe en disco (ni el original ni el unpacked), intentamos
+  // descargarlo. Primero al path original (puede fallar en asar — read-only).
+  log(`Descargando cloudflared binary (~25MB) — solo primera vez...`);
+  try {
+    await install(bin);
+    if (fs.existsSync(bin)) {
+      log(`✓ cloudflared descargado a: ${bin}`);
+      return bin;
+    }
+  } catch (e) {
+    // EROFS / EACCES / asar virtual fs → usamos fallback
+    log(`download al path canonical falló (${e.message}), probando fallback`);
+  }
+
+  // Fallback: descarga a %APPDATA%\Ashley\bin\cloudflared.exe (writable
+  // siempre, sobrevive a re-installs del .exe principal).
+  const userBinDir = path.join(
+    process.env.APPDATA || process.env.HOME || '.',
+    'Ashley',
+    'bin',
+  );
+  try {
+    fs.mkdirSync(userBinDir, { recursive: true });
+  } catch {}
+  const fallbackBin = path.join(userBinDir, 'cloudflared.exe');
+  if (fs.existsSync(fallbackBin)) {
+    log(`✓ cloudflared encontrado en fallback location: ${fallbackBin}`);
+    return fallbackBin;
+  }
+  log(`Descargando cloudflared a fallback: ${fallbackBin}`);
+  try {
+    await install(fallbackBin);
+    if (!fs.existsSync(fallbackBin)) {
+      throw new Error('install() returned ok pero el archivo no se creó');
+    }
+    log(`✓ cloudflared descargado a fallback: ${fallbackBin}`);
+    return fallbackBin;
+  } catch (e) {
+    throw new Error(`download de cloudflared falló (incluido fallback): ${e.message}`);
+  }
 }
 
 /**

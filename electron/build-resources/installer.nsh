@@ -1,62 +1,93 @@
-; installer.nsh — kills any process holding Ashley files BEFORE
-; NSIS tries to overwrite them. Without this, the user gets the
-; "Cannot close Ashley" dialog during auto-update.
+; installer.nsh — defensas críticas del installer/uninstaller de Ashley.
 ;
-; Strategy: simple taskkill on the EXACT image names Ashley spawns.
-; No filters, no PowerShell — just brute force. The trade-off is
-; that if the user has another Python/Node app running, it'll get
-; killed too — but during an Ashley update that's an acceptable
-; compromise versus a broken installer.
-;
-; We hook into MULTIPLE NSIS macros (customInit + customInstall) so
-; the kill fires in both early init and right before file copy.
-; Belt and braces — if one hook timing is wrong, the other catches it.
+; Hace 3 cosas:
+;   1. Mata procesos de Ashley en marcha antes de overwrite
+;   2. (v0.19.10) NO mata python/node de OTROS apps del user — solo
+;      los hijos de Ashley (filtrado por CommandLine via PowerShell)
+;   3. (v0.19.10) Limpia carpetas huérfanas de installs interrumpidos
+;      (caso real: orphan uninstallerIcon.ico bloqueaba install nuevo)
+
+!include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 ; ─────────────────────────────────────────────────────────────────
-; Reusable macro that does the actual killing.
+; Macro reutilizable: matar procesos de Ashley en marcha.
 ;
-; CRITICAL: do NOT use `/T` on Ashley.exe. When auto-update runs,
-; electron-updater spawns THIS installer as a CHILD of the running
-; Ashley.exe. `taskkill /T` walks the whole process tree, so if we
-; kill Ashley.exe with /T from inside customInit we suicide the
-; installer itself — splash flashes for a moment then everything
-; vanishes (the v0.13.6 → 0.13.7 bug).
+; CRITICAL: NO usar `/T` sobre Ashley.exe. Cuando auto-update corre,
+; electron-updater spawna ESTE installer como CHILD del Ashley.exe en
+; ejecución. `taskkill /T` walka el process tree, así que matar
+; Ashley.exe con /T desde customInit suicidaría el installer mismo
+; (bug histórico v0.13.6 → 0.13.7).
 ;
-; Workaround: kill each Electron renderer/helper by image name
-; (multiple Ashley.exe instances all match `taskkill /F /IM`),
-; then mop up the spawned children explicitly. None of those use
-; /T, so the installer's own tree survives.
+; v0.19.10 — el original mataba `python.exe` y `node.exe` sin filtrar.
+; Eso ASESINABA cualquier IDE Python/Node del user (VS Code, IntelliJ
+; con Python interpreter, scripts Node en background, etc). Cambio:
+; filtrar por CommandLine via PowerShell. Solo matamos procesos cuyo
+; CommandLine contiene "ashley\resources" (= hijo de NUESTRA app).
 ; ─────────────────────────────────────────────────────────────────
 !macro KillAshleyProcesses
-  ; Kill ALL Ashley.exe instances (main + GPU + renderer + utility),
-  ; but withOUT /T — see the CRITICAL note above.
+  ; Kill TODAS las instancias de Ashley.exe (main + GPU + renderer +
+  ; utility), pero SIN /T — ver nota CRITICAL arriba. Es seguro porque
+  ; el nombre exacto "Ashley.exe" solo existe en NUESTRA app.
   nsExec::Exec 'taskkill /F /IM "Ashley.exe"'
 
-  ; Mop up the spawned children Ashley would otherwise leak. These
-  ; live as siblings in the process tree (re-parented to System once
-  ; Ashley.exe dies), so we have to name them explicitly.
-  nsExec::Exec 'taskkill /F /IM "python.exe"'
-  nsExec::Exec 'taskkill /F /IM "node.exe"'
-  nsExec::Exec 'taskkill /F /IM "bun.exe"'
-  nsExec::Exec 'taskkill /F /IM "reflex.exe"'
+  ; v0.19.10 — kill SOLO los python/node/bun/reflex hijos de Ashley.
+  ; PowerShell filtra por CommandLine — si VS Code tiene un Python
+  ; interpreter abierto, NO lo matamos (su CommandLine no contiene
+  ; "ashley\resources").
+  nsExec::Exec 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { ($_.Name -match \"^(python|node|bun|reflex)\") -and ($_.CommandLine -like \"*ashley\\resources*\") } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"'
 
-  ; Wait 2s for Windows to release file handles. Without this,
-  ; the kill returns instantly but the .exe lock can persist.
+  ; Esperar 2s para que Windows libere los file handles. Sin esto, el
+  ; kill devuelve al instante pero el lock del .exe puede persistir.
   Sleep 2000
 !macroend
 
-; Runs as part of .onInit — VERY early, before any NSIS UI.
-!macro customInit
-  !insertmacro KillAshleyProcesses
+; ─────────────────────────────────────────────────────────────────
+; v0.19.10 — Cleanup defensivo de instalación huérfana.
+;
+; Bug observado en el dev PC: si una instalación previa se interrumpió
+; (Ctrl+C en uninstaller, crash de Windows, antivirus matando el process,
+; user cierra el wizard a la mitad), queda una carpeta
+; `$LOCALAPPDATA\Programs\ashley\` con UN SOLO archivo
+; (`uninstallerIcon.ico`) y SIN Ashley.exe.
+;
+; El nuevo installer detecta esa carpeta como "instalación previa",
+; intenta upgrade, se confunde y se cierra silenciosamente sin instalar
+; nada — el wizard se abre, pides "solo para mí", y se cierra sin error.
+;
+; Fix: si la carpeta target existe PERO no tiene Ashley.exe, la borramos
+; antes de empezar el install. Es seguro: si tuviera una instalación
+; legítima, Ashley.exe estaría ahí y NO entramos en la rama de delete.
+; ─────────────────────────────────────────────────────────────────
+!macro CleanupOrphanInstallDir
+  ; $LOCALAPPDATA\Programs\ashley\ es el target perUser por defecto.
+  ${If} ${FileExists} "$LOCALAPPDATA\Programs\ashley\*"
+    ${IfNot} ${FileExists} "$LOCALAPPDATA\Programs\ashley\Ashley.exe"
+      ; Carpeta existe pero falta el binario principal → orphan.
+      DetailPrint "Detectada instalacion huerfana sin Ashley.exe — limpiando"
+      RMDir /r "$LOCALAPPDATA\Programs\ashley"
+      Sleep 500  ; dejar que Windows libere los handles
+    ${EndIf}
+  ${EndIf}
 !macroend
 
-; Runs inside the install Section, right before file extraction.
-; Backup in case customInit timing wasn't enough.
+; ─────────────────────────────────────────────────────────────────
+; HOOKS de electron-builder (estos nombres son fixed por el template)
+; ─────────────────────────────────────────────────────────────────
+
+; Runs como parte de .onInit — MUY temprano, antes de la UI de NSIS.
+!macro customInit
+  !insertmacro KillAshleyProcesses
+  !insertmacro CleanupOrphanInstallDir
+!macroend
+
+; Runs dentro de la install Section, justo antes de file extraction.
+; Backup en caso de que el timing del customInit no fuera suficiente.
 !macro customInstall
   !insertmacro KillAshleyProcesses
 !macroend
 
-; Same treatment for the uninstaller.
+; Mismo trato para el uninstaller.
 !macro customUnInit
   !insertmacro KillAshleyProcesses
 !macroend
