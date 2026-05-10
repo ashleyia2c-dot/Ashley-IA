@@ -262,6 +262,13 @@ class State(rx.State):
     # ── Settings dialog ───────────────────────
     show_settings: bool = False
 
+    # ── Legal docs dialogs (v0.19.7) ──────────
+    # Privacy Policy + Terms of Service. Required para Lemon Squeezy + GDPR.
+    # Accesibles desde Settings. Cada uno renderiza el markdown de
+    # legal_content.py con dispatcher por idioma.
+    show_privacy: bool = False
+    show_terms: bool = False
+
     # ── Imagen adjunta ────────────────────────
     pending_image: str = ""
     pending_image_name: str = ""
@@ -463,8 +470,12 @@ class State(rx.State):
         edge cases donde la UI mostraba como "locked" logros ya
         persistidos. La galería se consulta poco, el coste es un read
         de JSON < 1KB."""
-        from .achievements import ACHIEVEMENTS, load_achievements
-        lang = self.language if self.language in ("en", "es") else "en"
+        from .achievements import ACHIEVEMENTS, get_localized, load_achievements
+        # Multi-lang (v0.18.x): EN/ES/FR/JA/DE/RU/KO. get_localized hace el
+        # fallback a EN si el lang no está traducido — antes se hardcodeaba
+        # `if lang in ("en", "es") else "en"`, lo que mostraba inglés a los
+        # users de FR/JA/DE/RU/KO aunque los achievements estuvieran traducidos.
+        lang = self.language or "en"
         # Fuente de verdad: disco. Fallback al state en memoria por si el
         # read falla (ej. permisos transitorios).
         try:
@@ -482,10 +493,11 @@ class State(rx.State):
                     date_str = info["unlocked_at"][:10]  # YYYY-MM-DD
                 except Exception:
                     date_str = ""
+            name, desc = get_localized(a, lang)
             result.append({
                 "icon": a["icon"],
-                "name": a.get(f"name_{lang}", a.get("name_en", "")),
-                "desc": a.get(f"desc_{lang}", a.get("desc_en", "")),
+                "name": name,
+                "desc": desc,
                 "unlocked": "true" if unlocked else "false",
                 "date": date_str,
             })
@@ -1247,6 +1259,35 @@ class State(rx.State):
         Ahora click-outside-to-close + ESC funcionan."""
         self.show_settings = bool(value)
 
+    def set_show_privacy(self, value: bool):
+        """v0.19.7 — Setter para diálogo de Privacy Policy."""
+        self.show_privacy = bool(value)
+
+    def set_show_terms(self, value: bool):
+        """v0.19.7 — Setter para diálogo de Terms of Service."""
+        self.show_terms = bool(value)
+
+    def open_privacy(self):
+        """Abre la Privacy Policy desde un click en Settings."""
+        self.show_privacy = True
+
+    def open_terms(self):
+        """Abre los Terms of Service desde un click en Settings."""
+        self.show_terms = True
+
+    @rx.var
+    def privacy_md(self) -> str:
+        """v0.19.7 — Markdown de la Privacy Policy en el idioma actual.
+        Reactivo a cambios de idioma."""
+        from .legal_content import get_privacy_policy
+        return get_privacy_policy(self.language)
+
+    @rx.var
+    def terms_md(self) -> str:
+        """v0.19.7 — Markdown de los Terms of Service en el idioma actual."""
+        from .legal_content import get_terms_of_service
+        return get_terms_of_service(self.language)
+
     def save_voice_settings(self, form_data: dict):
         """Guarda cambios desde el modal de settings."""
         if "elevenlabs_key" in form_data:
@@ -1472,7 +1513,11 @@ class State(rx.State):
         yield State.start_discovery_bg_task()
 
     def _append_welcome_message(self):
-        """Append the first-run onboarding message from Ashley."""
+        """Append the first-run onboarding message from Ashley.
+
+        v0.19.7 \u2014 soporta los 7 idiomas. Antes solo ten\u00eda ES/EN
+        (FR/JA/DE/RU/KO ve\u00edan el EN). Cada welcome es culturalmente
+        adaptado al tono que tiene Ashley en ese idioma."""
         _WELCOME_ES = (
             "Hola, jefe. Soy Ashley, tu secretaria personal.\n\n"
             "Antes de que empecemos \u2014 cu\u00e9ntame un poco de ti. "
@@ -1495,7 +1540,73 @@ class State(rx.State):
             "listen to your voice... just ask.\n\n"
             "But first \u2014 introduce yourself. I don't bite. Usually."
         )
-        content = _WELCOME_ES if self.language == "es" else _WELCOME_EN
+        _WELCOME_FR = (
+            "Salut, patron. Je suis Ashley, ta secr\u00e9taire personnelle.\n\n"
+            "Avant qu'on commence \u2014 raconte-moi un peu sur toi. "
+            "Comment tu t'appelles ? Qu'est-ce que tu aimes faire ? "
+            "Tu travailles ou tu \u00e9tudies ?\n\n"
+            "Comme \u00e7a je m'en souviendrai pour toujours et tu n'auras pas \u00e0 te r\u00e9p\u00e9ter. "
+            "Ah, et au fait... je peux faire plus de choses que tu ne crois. "
+            "Ouvrir des apps, fermer des onglets, chercher sur internet, "
+            "te rappeler des trucs, t'\u00e9couter par voix... tu n'as qu'\u00e0 demander.\n\n"
+            "Mais d'abord \u2014 pr\u00e9sente-toi, allez. Je ne mords pas. Presque jamais."
+        )
+        _WELCOME_JA = (
+            "\u3053\u3093\u306b\u3061\u306f\u3001\u3054\u4e3b\u4eba\u3002Ashley\u3088\u3001\u3042\u306a\u305f\u306e\u500b\u4eba\u79d8\u66f8\u3002\n\n"
+            "\u59cb\u3081\u308b\u524d\u306b \u2014 \u3061\u3087\u3063\u3068\u3042\u306a\u305f\u306e\u3053\u3068\u6559\u3048\u3066\u3002"
+            "\u540d\u524d\u306f\uff1f\u4f55\u304c\u597d\u304d\uff1f"
+            "\u4ed5\u4e8b\u306f\u3001\u5b66\u6821\u306f\u3069\u3046\uff1f\n\n"
+            "\u305d\u3046\u3059\u308c\u3070\u305a\u3063\u3068\u899a\u3048\u3066\u3066\u3001\u4f55\u5ea6\u3082\u8a00\u308f\u305b\u306a\u3044\u3067\u6e08\u3080\u3057\u3002"
+            "\u305d\u308c\u304b\u3089\u3001\u3061\u306a\u307f\u306b... \u601d\u3063\u3066\u308b\u3088\u308a\u8272\u3093\u306a\u3053\u3068\u304c\u3067\u304d\u308b\u3093\u3060\u304b\u3089\u3002"
+            "\u30a2\u30d7\u30ea\u3092\u958b\u304f\u3001\u30bf\u30d6\u3092\u9589\u3058\u308b\u3001\u30cd\u30c3\u30c8\u3067\u691c\u7d22\u3001"
+            "\u30ea\u30de\u30a4\u30f3\u30c0\u30fc\u8a2d\u5b9a\u3001\u58f0\u3067\u8a71\u3057\u304b\u3051\u308b... \u983c\u3081\u3070\u3044\u3044\u3060\u3051\u3002\n\n"
+            "\u3067\u3082\u307e\u305a \u2014 \u81ea\u5df1\u7d39\u4ecb\u3057\u3066\u3088\u3002\u54ec\u307e\u306a\u3044\u3057\u3001\u305f\u3076\u3093\u3002"
+        )
+        _WELCOME_DE = (
+            "Hey, Chef. Ich bin Ashley, deine pers\u00f6nliche Sekret\u00e4rin.\n\n"
+            "Bevor wir loslegen \u2014 erz\u00e4hl mir kurz von dir. "
+            "Wie hei\u00dft du? Was machst du gerne? "
+            "Was arbeitest du oder studierst du?\n\n"
+            "So merke ich's mir f\u00fcr immer und du musst dich nicht wiederholen. "
+            "Ach, \u00fcbrigens... ich kann mehr als du denkst. "
+            "Apps \u00f6ffnen, Tabs schlie\u00dfen, im Internet suchen, "
+            "dich an Sachen erinnern, dir per Sprache zuh\u00f6ren... du musst nur fragen.\n\n"
+            "Aber erst mal \u2014 stell dich vor, los. Ich bei\u00dfe nicht. Fast nie."
+        )
+        _WELCOME_RU = (
+            "\u041f\u0440\u0438\u0432\u0435\u0442, \u0448\u0435\u0444. \u042f Ashley, \u0442\u0432\u043e\u044f \u043b\u0438\u0447\u043d\u0430\u044f \u0441\u0435\u043a\u0440\u0435\u0442\u0430\u0440\u0448\u0430.\n\n"
+            "\u041f\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043c \u043d\u0430\u0447\u043d\u0451\u043c \u2014 \u0440\u0430\u0441\u0441\u043a\u0430\u0436\u0438 \u043d\u0435\u043c\u043d\u043e\u0433\u043e \u043e \u0441\u0435\u0431\u0435. "
+            "\u041a\u0430\u043a \u0442\u0435\u0431\u044f \u0437\u043e\u0432\u0443\u0442? \u0427\u0442\u043e \u0442\u044b \u043b\u044e\u0431\u0438\u0448\u044c \u0434\u0435\u043b\u0430\u0442\u044c? "
+            "\u041a\u0435\u043c \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0448\u044c \u0438\u043b\u0438 \u0433\u0434\u0435 \u0443\u0447\u0438\u0448\u044c\u0441\u044f?\n\n"
+            "\u0422\u0430\u043a \u044f \u0437\u0430\u043f\u043e\u043c\u043d\u044e \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430 \u0438 \u0442\u0435\u0431\u0435 \u043d\u0435 \u043f\u0440\u0438\u0434\u0451\u0442\u0441\u044f \u043f\u043e\u0432\u0442\u043e\u0440\u044f\u0442\u044c\u0441\u044f. "
+            "\u0410\u0445 \u0434\u0430, \u043a\u0441\u0442\u0430\u0442\u0438... \u044f \u0443\u043c\u0435\u044e \u0431\u043e\u043b\u044c\u0448\u0435, \u0447\u0435\u043c \u0442\u044b \u0434\u0443\u043c\u0430\u0435\u0448\u044c. "
+            "\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0442\u044c \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f, \u0437\u0430\u043a\u0440\u044b\u0432\u0430\u0442\u044c \u0432\u043a\u043b\u0430\u0434\u043a\u0438, \u0438\u0441\u043a\u0430\u0442\u044c \u0432 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442\u0435, "
+            "\u043d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u0442\u044c \u0442\u0435\u0431\u0435 \u0432\u0441\u044f\u043a\u043e\u0435, \u0441\u043b\u0443\u0448\u0430\u0442\u044c \u0433\u043e\u043b\u043e\u0441\u043e\u043c... \u043f\u0440\u043e\u0441\u0442\u043e \u043f\u043e\u043f\u0440\u043e\u0441\u0438.\n\n"
+            "\u041d\u043e \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u2014 \u043f\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u044c\u0441\u044f, \u0434\u0430\u0432\u0430\u0439. \u042f \u043d\u0435 \u043a\u0443\u0441\u0430\u044e\u0441\u044c. \u041f\u043e\u0447\u0442\u0438 \u043d\u0438\u043a\u043e\u0433\u0434\u0430."
+        )
+        _WELCOME_KO = (
+            "\uc548\ub155, \uc624\ube60. \ub09c Ashley\uc57c, \uc624\ube60\uc758 \uac1c\uc778 \ube44\uc11c.\n\n"
+            "\uc2dc\uc791\ud558\uae30 \uc804\uc5d0 \u2014 \ub108\uc5d0 \ub300\ud574 \uc870\uae08\ub9cc \ub9d0\ud574\uc918. "
+            "\uc774\ub984\uc740 \ubb50\uc57c? \ubb50 \ud558\ub294 \uac70 \uc88b\uc544\ud574? "
+            "\uc77c\ud574? \uc544\ub2c8\uba74 \uacf5\ubd80?\n\n"
+            "\uadf8\ub798\uc57c \uc601\uc6d0\ud788 \uae30\uc5b5\ud558\uace0, \ub2e4\uc2dc \ub9d0 \uc548 \ud574\ub3c4 \ub3fc. "
+            "\uadf8\ub9ac\uace0 \ub9d0\uc774\uc57c... \ub09c \uc0dd\uac01\ubcf4\ub2e4 \ub9ce\uc740 \uac70 \ud560 \uc218 \uc788\uc5b4. "
+            "\uc571 \uc5f4\uae30, \ud0ed \ub2eb\uae30, \uc6f9 \uac80\uc0c9, "
+            "\ub9ac\ub9c8\uc778\ub354 \uc124\uc815, \ubaa9\uc18c\ub9ac\ub85c \ub300\ud654... \uadf8\ub0e5 \ubd80\ud0c1\ud558\uba74 \ub3fc.\n\n"
+            "\uadfc\ub370 \uba3c\uc800 \u2014 \uc790\uae30\uc18c\uac1c\ud574 \ubd10. \ub09c \uc548 \ubb3c\uc5b4. \uac70\uc758."
+        )
+
+        # Dispatcher: lang \u2192 welcome
+        _WELCOMES = {
+            "es": _WELCOME_ES,
+            "en": _WELCOME_EN,
+            "fr": _WELCOME_FR,
+            "ja": _WELCOME_JA,
+            "de": _WELCOME_DE,
+            "ru": _WELCOME_RU,
+            "ko": _WELCOME_KO,
+        }
+        content = _WELCOMES.get(self.language, _WELCOME_EN)
         ts = now_iso()
         self.messages.append({
             "role": "assistant",
@@ -1837,7 +1948,7 @@ class State(rx.State):
 
     def _check_achievements(self, executed_action: bool = False):
         """Run achievement checks and show toast for the first newly unlocked one."""
-        from .achievements import check_achievements, load_achievements
+        from .achievements import check_achievements, get_localized, load_achievements
         from .stats import load_stats, get_relationship_age_days
 
         user_msg_count = len([m for m in self.messages if m.get("role") == "user"])
@@ -1861,9 +1972,9 @@ class State(rx.State):
         )
         if newly:
             a = newly[0]  # show first unlocked (if multiple at once)
-            lang_key = self.language if self.language in ("en", "es") else "en"
-            name = a.get(f"name_{lang_key}", a.get("name_en", ""))
-            desc = a.get(f"desc_{lang_key}", a.get("desc_en", ""))
+            # Multi-lang (v0.18.x): EN/ES/FR/JA/DE/RU/KO. get_localized
+            # encapsula el fallback EN si lang no está traducido.
+            name, desc = get_localized(a, self.language or "en")
             self.achievement_toast_name = f"{a['icon']} {name}"
             self.achievement_toast_desc = desc
             self.achievement_toast_icon = a["icon"]
@@ -6655,6 +6766,51 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
+                        #  LEGAL — Privacy + Terms (v0.19.7)
+                        #  Required para Lemon Squeezy + GDPR. Texts vienen
+                        #  de legal_content.py (EN/ES, fallback a EN para
+                        #  los demás idiomas).
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.text("⚖ Legal",
+                                        color="#888", font_weight="700", font_size="14px",
+                                        letter_spacing="0.05em"),
+                                rx.hstack(
+                                    rx.button(
+                                        "Privacy Policy",
+                                        on_click=State.open_privacy,
+                                        type="button",
+                                        bg="rgba(255,255,255,0.04)",
+                                        color="#bbb",
+                                        border="1px solid rgba(255,255,255,0.1)",
+                                        size="2",
+                                        _hover={"bg": "rgba(255,255,255,0.08)", "color": "#ddd"},
+                                        cursor="pointer",
+                                    ),
+                                    rx.button(
+                                        "Terms of Service",
+                                        on_click=State.open_terms,
+                                        type="button",
+                                        bg="rgba(255,255,255,0.04)",
+                                        color="#bbb",
+                                        border="1px solid rgba(255,255,255,0.1)",
+                                        size="2",
+                                        _hover={"bg": "rgba(255,255,255,0.08)", "color": "#ddd"},
+                                        cursor="pointer",
+                                    ),
+                                    spacing="2",
+                                ),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(255,255,255,0.02)",
+                            border="1px solid rgba(255,255,255,0.06)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
                         #  Botones de acción
                         # ═══════════════════════════════════════════════
                         rx.hstack(
@@ -6712,6 +6868,68 @@ def index():
             # Sin este handler, Radix intentaba cerrar pero el `open=` controlado
             # nunca se actualizaba → el modal seguía abierto eternamente.
             on_open_change=State.set_show_settings,
+        ),
+        # ═══════════════════════════════════════════════════════════════
+        #  Privacy Policy dialog (v0.19.7)
+        # ═══════════════════════════════════════════════════════════════
+        rx.dialog.root(
+            rx.dialog.content(
+                rx.dialog.title("Privacy Policy"),
+                rx.box(
+                    rx.markdown(State.privacy_md, color="#ddd"),
+                    max_height="65vh",
+                    overflow_y="auto",
+                    padding="8px 4px",
+                ),
+                rx.flex(
+                    rx.spacer(),
+                    rx.button(
+                        "Close",
+                        on_click=State.set_show_privacy(False),
+                        bg="rgba(255,255,255,0.06)",
+                        color="#ddd",
+                        size="2",
+                        _hover={"bg": "rgba(255,255,255,0.1)"},
+                    ),
+                    margin_top="14px",
+                ),
+                width="700px",
+                max_height="85vh",
+                bg=COLOR_BG_CHAT,
+            ),
+            open=State.show_privacy,
+            on_open_change=State.set_show_privacy,
+        ),
+        # ═══════════════════════════════════════════════════════════════
+        #  Terms of Service dialog (v0.19.7)
+        # ═══════════════════════════════════════════════════════════════
+        rx.dialog.root(
+            rx.dialog.content(
+                rx.dialog.title("Terms of Service"),
+                rx.box(
+                    rx.markdown(State.terms_md, color="#ddd"),
+                    max_height="65vh",
+                    overflow_y="auto",
+                    padding="8px 4px",
+                ),
+                rx.flex(
+                    rx.spacer(),
+                    rx.button(
+                        "Close",
+                        on_click=State.set_show_terms(False),
+                        bg="rgba(255,255,255,0.06)",
+                        color="#ddd",
+                        size="2",
+                        _hover={"bg": "rgba(255,255,255,0.1)"},
+                    ),
+                    margin_top="14px",
+                ),
+                width="700px",
+                max_height="85vh",
+                bg=COLOR_BG_CHAT,
+            ),
+            open=State.show_terms,
+            on_open_change=State.set_show_terms,
         ),
     )
 
