@@ -10,8 +10,11 @@ Sin esto, el user tendría que:
 Con esto: un click en Settings → la app encuentra los shortcuts de
 Chrome/Edge/Brave/Opera/Opera GX/Vivaldi en Desktop, Start Menu y Taskbar,
 y les añade `--remote-debugging-port=9222` al campo Arguments del .lnk.
-Hace backup en `<shortcut>.lnk.bak` antes de modificar — el user puede
-revertir desactivando el toggle.
+
+v0.19.6 — Backups antes vivían junto al .lnk original (ej. en el ESCRITORIO
+del user, ensuciando), ahora viven en %APPDATA%\\Ashley\\data\\browser_lnk_backups\\
+con un nombre que codifica el path original via hash. Migration automática
+mueve cualquier .bak suelto del escritorio a la carpeta nueva al primer uso.
 
 NO modifica el .exe del browser, solo los .lnk. Si el user abre el
 browser por otro camino (ej: doble click directo en chrome.exe, otra
@@ -23,11 +26,63 @@ Usa PowerShell + WScript.Shell COM para leer/escribir .lnk. NO requiere
 dependencias extra (PowerShell viene con Windows).
 """
 
+import hashlib
 import subprocess
 import os
 import shutil
 from pathlib import Path
 from typing import Optional
+
+
+# v0.19.6 — Carpeta donde guardamos los .bak (limpios, en el data dir de Ashley
+# en lugar de tirados al lado de cada .lnk original).
+def _backup_dir() -> Path:
+    from .config import _data_path
+    d = Path(_data_path("browser_lnk_backups"))
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _backup_path_for(lnk_path: str) -> Path:
+    """Path donde guardamos el .bak del .lnk original.
+
+    Formato: {basename}.{shorthash}.lnk.bak
+    El shorthash codifica el path completo para evitar colisiones cuando
+    hay 2 shortcuts del mismo browser en sitios distintos (ej: Desktop +
+    Start Menu).
+    """
+    p = Path(lnk_path)
+    h = hashlib.sha256(str(p.resolve()).encode("utf-8")).hexdigest()[:8]
+    safe_name = p.stem  # "Google Chrome.lnk" → "Google Chrome"
+    return _backup_dir() / f"{safe_name}.{h}.lnk.bak"
+
+
+def _migrate_legacy_backup(lnk_path: str) -> None:
+    """v0.19.6 — Si existe un .bak antiguo junto al .lnk (versiones previas),
+    lo movemos a la carpeta nueva. Idempotente."""
+    legacy = lnk_path + ".bak"
+    if not os.path.exists(legacy):
+        return
+    new_path = _backup_path_for(lnk_path)
+    if new_path.exists():
+        # Ya migrado en una run anterior: borramos el legacy duplicado
+        try:
+            os.remove(legacy)
+        except Exception:
+            pass
+        return
+    try:
+        shutil.move(legacy, str(new_path))
+    except Exception:
+        # Si falla el move (permisos), intentar copy + delete
+        try:
+            shutil.copy2(legacy, str(new_path))
+            os.remove(legacy)
+        except Exception:
+            pass
 
 
 CDP_FLAG = "--remote-debugging-port=9222"
@@ -165,6 +220,11 @@ def find_browser_shortcuts() -> list[dict]:
                 if exe_name not in _CHROMIUM_EXES:
                     continue
                 args = info.get("arguments") or ""
+                # v0.19.6 — limpieza opportunistic: si hay un .bak legacy
+                # tirado al lado de este .lnk, lo movemos a la carpeta nueva
+                # del data dir. Así desde la primera vez que el user abre
+                # Settings → CDP, los .bak desaparecen del escritorio.
+                _migrate_legacy_backup(lnk_str)
                 found.append({
                     "path": lnk_str,
                     "browser": _browser_friendly_name(exe_name),
@@ -181,11 +241,18 @@ def add_cdp_flag(lnk_path: str) -> tuple[bool, str]:
     """Añade --remote-debugging-port=9222 al Arguments del .lnk.
 
     Si el flag ya está, no hace nada (idempotente).
-    Hace backup automático en `<lnk>.bak` la primera vez (no sobrescribe
-    backups existentes — preservar el "estado original original").
+    Hace backup automático en `%APPDATA%\\Ashley\\data\\browser_lnk_backups\\`
+    la primera vez (no sobrescribe backups existentes — preserva el
+    "estado original original").
+
+    v0.19.6 — Antes los .bak se quedaban tirados en el escritorio del user
+    junto a sus .lnk originales. Ahora van todos a la carpeta de Ashley.
 
     Returns (ok, mensaje legible).
     """
+    # Migrar .bak legacy del escritorio si existe
+    _migrate_legacy_backup(lnk_path)
+
     info = _read_lnk_via_ps(lnk_path)
     if not info:
         return False, f"No pude leer el shortcut: {Path(lnk_path).name}"
@@ -195,10 +262,10 @@ def add_cdp_flag(lnk_path: str) -> tuple[bool, str]:
         return True, f"{Path(lnk_path).name}: ya tenía el flag, sin cambios"
 
     # Backup (solo la primera vez — preserve el "antes de Ashley")
-    bak_path = lnk_path + ".bak"
+    bak_path = _backup_path_for(lnk_path)
     try:
-        if not os.path.exists(bak_path):
-            shutil.copy2(lnk_path, bak_path)
+        if not bak_path.exists():
+            shutil.copy2(lnk_path, str(bak_path))
     except Exception as e:
         return False, f"No pude hacer backup: {e}"
 
@@ -212,13 +279,20 @@ def add_cdp_flag(lnk_path: str) -> tuple[bool, str]:
 def remove_cdp_flag(lnk_path: str) -> tuple[bool, str]:
     """Quita --remote-debugging-port=9222 del Arguments del .lnk.
 
-    Si el .lnk.bak existe, lo restauramos (más seguro que un replace
+    Si el .bak existe, lo restauramos (más seguro que un replace
     parcial). Si no, hacemos string replacement.
+
+    v0.19.6 — busca el .bak en la carpeta nueva (data dir) primero, luego
+    en la legacy location (al lado del .lnk original) por compatibilidad
+    con instalaciones de versiones anteriores.
     """
-    bak_path = lnk_path + ".bak"
-    if os.path.exists(bak_path):
+    # Migrar .bak legacy del escritorio si existe (también en este path)
+    _migrate_legacy_backup(lnk_path)
+
+    bak_path = _backup_path_for(lnk_path)
+    if bak_path.exists():
         try:
-            shutil.copy2(bak_path, lnk_path)
+            shutil.copy2(str(bak_path), lnk_path)
             return True, f"{Path(lnk_path).name}: restaurado desde backup"
         except Exception as e:
             return False, f"No pude restaurar backup: {e}"

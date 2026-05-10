@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.19.5",
+  "version": "0.19.6",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -127,16 +127,19 @@
       "icon": "build-resources/icon.ico"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Ashley",
       "runAfterFinish": true,
       "installerIcon": "build-resources/icon.ico",
       "uninstallerIcon": "build-resources/icon.ico",
+      "installerHeaderIcon": "build-resources/icon.ico",
       "uninstallDisplayName": "Ashley",
+      "deleteAppDataOnUninstall": false,
       "artifactName": "Ashley-Setup-${version}.${ext}",
       "include": "build-resources/installer.nsh"
     }
