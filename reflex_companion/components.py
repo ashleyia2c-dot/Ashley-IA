@@ -621,14 +621,21 @@ def license_gate() -> rx.Component:
                         placeholder=State.t["license_placeholder"],
                         id="license_key",
                         name="license_key",
-                        font_family="'JetBrains Mono', 'Consolas', monospace",
-                        bg="rgba(255,255,255,0.04)",
-                        color="white",
-                        border="1px solid rgba(255,255,255,0.12)",
+                        # v0.19.10 — fix: la key se veía ilegible.
+                        # Antes: font_size=11px + letter_spacing=0.5px + JetBrains Mono
+                        # (que no carga en Electron sin internet) → rendering mezclaba
+                        # los caracteres haciéndolos imposibles de leer al pegar.
+                        # Ahora: 16px + letra-spacing más generoso + Consolas como
+                        # primary (siempre disponible en Windows) + color brillante.
+                        font_family="'Consolas', 'Courier New', monospace",
+                        bg="rgba(255,255,255,0.06)",
+                        color="#fff5e6",
+                        border="1px solid rgba(255,255,255,0.18)",
                         border_radius="10px",
-                        padding="14px 12px",
-                        font_size="11px",
-                        letter_spacing="0.5px",
+                        padding="16px 14px",
+                        font_size="16px",
+                        letter_spacing="1.5px",
+                        font_weight="500",
                         width="100%",
                         text_align="center",
                         auto_focus=True,
@@ -636,8 +643,13 @@ def license_gate() -> rx.Component:
                             "border": "1px solid rgba(255,154,238,0.55)",
                             "box_shadow": "0 0 14px rgba(255,154,238,0.2)",
                             "outline": "none",
+                            "bg": "rgba(255,255,255,0.08)",
                         },
-                        _placeholder={"color": "#555"},
+                        _placeholder={
+                            "color": "#666",
+                            "letter_spacing": "1px",
+                            "font_size": "14px",
+                        },
                     ),
                     rx.cond(
                         State.license_error != "",
