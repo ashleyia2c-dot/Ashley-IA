@@ -60,7 +60,8 @@ class TestNormalizeLang:
         assert normalize_lang("FR") == "fr"
 
     def test_unsupported_language_returns_default(self):
-        assert normalize_lang("de") == "en"
+        # v0.18.6 — "de" se añadió al SUPPORTED. Usamos un código inexistente.
+        assert normalize_lang("xx") == "en"
 
     def test_none_returns_default(self):
         assert normalize_lang(None) == "en"
@@ -75,7 +76,24 @@ class TestNormalizeLang:
         assert normalize_lang("english") == "en"
 
     def test_long_unsupported(self):
+        # "german" → "ge" (truncado), "ge" no está en SUPPORTED → default
         assert normalize_lang("german") == "en"
+
+    def test_japanese_lowercase(self):
+        # v0.18.6 — nuevos idiomas
+        assert normalize_lang("ja") == "ja"
+
+    def test_german_lowercase(self):
+        assert normalize_lang("de") == "de"
+
+    def test_russian_lowercase(self):
+        assert normalize_lang("ru") == "ru"
+
+    def test_korean_lowercase(self):
+        assert normalize_lang("ko") == "ko"
+
+    def test_japanese_uppercase(self):
+        assert normalize_lang("JA") == "ja"
 
     def test_whitespace_around_valid(self):
         assert normalize_lang("  es  ") == "es"
@@ -118,7 +136,8 @@ class TestUi:
             )
 
     def test_unsupported_falls_back_to_en(self):
-        result = ui("de")
+        # v0.18.6 — "de" se añadió al SUPPORTED. Usamos un código inexistente.
+        result = ui("xx")
         assert result == ui("en")
 
     def test_contains_expected_keys(self):
@@ -163,7 +182,8 @@ class TestActDesc:
         assert len(result) > 0
 
     def test_unsupported_falls_back_to_en(self):
-        assert act_desc("de") == act_desc("en")
+        # v0.18.6 — "de" se añadió al SUPPORTED. Usamos un código inexistente.
+        assert act_desc("xx") == act_desc("en")
 
     def test_contains_action_types(self):
         en = act_desc("en")
@@ -244,7 +264,8 @@ class TestTimeCtx:
         assert len(time_ctx("fr")) > 0
 
     def test_unsupported_falls_back_to_en(self):
-        assert time_ctx("ja") == time_ctx("en")
+        # v0.18.6 — "ja" se añadió al SUPPORTED. Usamos un código inexistente.
+        assert time_ctx("xx") == time_ctx("en")
 
     def test_contains_time_of_day_parts(self):
         en = time_ctx("en")
@@ -298,9 +319,10 @@ class TestLanguagePersistence:
         assert load_language() == "fr"
 
     def test_save_unsupported_defaults_to_en(self, tmp_path, monkeypatch):
+        # v0.18.6 — "de" se añadió al SUPPORTED. Usamos un código inexistente.
         lang_file = str(tmp_path / "language.json")
         monkeypatch.setattr(i18n, "LANG_FILE", lang_file)
-        save_language("de")  # alemán no soportado
+        save_language("xx")  # idioma inexistente
         assert load_language() == "en"
 
     def test_load_missing_file_returns_default(self, tmp_path, monkeypatch):

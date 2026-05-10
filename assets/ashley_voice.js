@@ -463,14 +463,77 @@
     },
 
     // ─── TTS — limpieza de texto ────────────────────────────
+    // v0.18.3 — eliminar también roleplay entre COMILLAS (recta/curly/single/
+    // guillemets) y guiones bajos. Ashley usa comillas para describir
+    // acciones físicas ("se ríe suave", "levanta una ceja") que no se deben
+    // vocalizar — son stage directions, no diálogo.
+    //
+    // v0.18.4 — IMPORTANTE: el flujo principal ya NO pasa por aquí porque
+    // _extractSpeechText (abajo) extrae texto del DOM excluyendo <em>/<i>
+    // (ahí van *roleplay* y _roleplay_ tras pasar por rx.markdown). Este
+    // limpiador sigue activo como red de seguridad para:
+    //   - Llamadas testSpeak() con texto crudo
+    //   - Comillas que markdown NO procesa: "..." "..." '...' «...»
+    //   - Tags [mood:...] / [action:...] que se filtran al backend pero
+    //     pueden colarse en algún edge case
     _cleanForSpeech(text) {
       return (text || '')
         .replace(/\[mood:[^\]]+\]/gi, '')
         .replace(/\[action:[^\]]+\]/gi, '')
+        // Roleplay entre asteriscos *acción* (texto crudo, fallback)
         .replace(/\*[^*\n]{2,120}\*/g, '')
+        // Roleplay entre guiones bajos _acción_ (texto crudo, fallback)
+        .replace(/_[^_\n]{2,120}_/g, '')
+        // Roleplay entre comillas dobles rectas "acción"
+        .replace(/"[^"\n]{2,120}"/g, '')
+        // Roleplay entre comillas dobles curly "acción"
+        .replace(/"[^"\n]{2,120}"/g, '')
+        // Roleplay entre comillas simples curly 'acción'
+        .replace(/'[^'\n]{2,120}'/g, '')
+        // Roleplay entre guillemets españoles «acción»
+        .replace(/«[^»\n]{2,120}»/g, '')
+        // Caracteres markdown sueltos restantes
         .replace(/[*_`~]+/g, '')
+        // Whitespace normalizado
         .replace(/\s+/g, ' ')
         .trim();
+    },
+
+    // v0.18.4 — Extrae texto vocalizable de un elemento .ashley-msg.
+    //
+    // Por qué existe esto: rx.markdown() convierte *acción* y _acción_ en
+    // <em>acción</em>. Si lees `.textContent` directamente, los marcadores
+    // de asterisco/underscore están ELIMINADOS y el regex `\*...\*` no
+    // matchea nunca → la TTS termina vocalizando la acción de roleplay.
+    //
+    // Solución: walk del DOM saltando <em>/<i> (italic = roleplay narrativo
+    // en markdown). Quotes literales se preservan en texto y se filtran
+    // luego con el regex de _cleanForSpeech.
+    _extractSpeechText(rootEl) {
+      if (!rootEl) return '';
+      const SKIP_TAGS = new Set(['EM', 'I']);  // italic = roleplay
+      const parts = [];
+      const walk = (node) => {
+        if (!node) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          parts.push(node.nodeValue || '');
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (SKIP_TAGS.has(node.tagName)) return;  // ← roleplay en italic
+        // Descender hijos
+        for (let i = 0; i < node.childNodes.length; i++) {
+          walk(node.childNodes[i]);
+        }
+        // Añadir un espacio tras bloques para que no se peguen palabras
+        const tag = node.tagName;
+        if (tag === 'P' || tag === 'BR' || tag === 'DIV' || tag === 'LI' ||
+            tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4') {
+          parts.push(' ');
+        }
+      };
+      walk(rootEl);
+      return parts.join('').replace(/\s+/g, ' ').trim();
     },
 
     _pickWebVoice() {
@@ -560,15 +623,20 @@
             audio.playbackRate = speed;
           }, { once: true });
         }
-        // Diagnóstico v0.16.14 — ver qué pasa con play()
+        // v0.18.3 — Notificar al ashley_3d_bridge que un audio TTS empieza.
+        // El bridge escucha 'ashley:ttsStart' y wirea el audio al Web Audio
+        // API analyser para enviar amplitud al iframe (lipsync REAL).
+        // También dispara talking=true durante toda la reproducción.
+        try {
+          window.dispatchEvent(new CustomEvent('ashley:ttsStart', { detail: { audio } }));
+        } catch {}
+
         const playPromise = audio.play();
         if (playPromise && playPromise.then) {
           playPromise.then(
             () => log('audio.play() RESOLVED — playbackRate=' + speed),
             (e) => {
               warn('audio.play() REJECTED:', (e && e.name) + ': ' + (e && e.message));
-              // Si fue NotAllowedError (autoplay policy), fallback a Web
-              // Speech para que el user al menos escuche algo.
               if (e && e.name === 'NotAllowedError') {
                 warn('Autoplay bloqueado — fallback a Web Speech');
                 this._speakWebSpeech(text);
@@ -580,6 +648,10 @@
           log('audio onended');
           URL.revokeObjectURL(obj);
           if (this.currentAudio === audio) this.currentAudio = null;
+          // v0.18.3 — Notificar fin del TTS (talking=false en el iframe)
+          try {
+            window.dispatchEvent(new CustomEvent('ashley:ttsEnd', { detail: { audio } }));
+          } catch {}
         };
       } catch (e) {
         err('TTS fetch error:', e);
@@ -678,7 +750,7 @@
         // mensaje de Ashley. Detectamos por contenido textual del último.
         const latestEl = msgs.length ? msgs[msgs.length - 1] : null;
         this._lastAshleyText = latestEl
-          ? (latestEl.textContent || '').trim()
+          ? this._extractSpeechText(latestEl)
           : '';
         this._bootstrapped = true;
         log('TTS observer bootstrapped after 3s with', msgs.length,
@@ -706,7 +778,11 @@
       // El contenido del ÚLTIMO ashley-msg sí cambia siempre que hay una
       // respuesta nueva (el nuevo mensaje pasa al final).
       const latest = msgs[msgs.length - 1];
-      const text = (latest.textContent || '').trim();
+      // v0.18.4 — extraer texto SALTANDO <em>/<i> (que es donde rx.markdown
+      // mete *roleplay* y _roleplay_). Si usábamos textContent directo, los
+      // asteriscos ya estaban convertidos a tags, los regex no matcheaban,
+      // y la TTS terminaba leyendo las acciones de roleplay.
+      const text = this._extractSpeechText(latest);
       if (!text) return;
       if (text === this._lastAshleyText) return;
 

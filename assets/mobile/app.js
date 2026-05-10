@@ -20,6 +20,79 @@
   // conversaciones aunque el PC esté apagado al reiniciar la app.
   const STORE_CHAT_CACHE    = 'ashley.mobile.chat_cache';
 
+  // ─── Persistencia (Capacitor.Preferences + localStorage) ──────
+  // v0.18.2 — En Android, localStorage del WebView PUEDE limpiarse por el
+  // OS (low-memory, "Clear cache" del settings, updates del APK con la
+  // option android:fullBackupContent). Resultado visible al user:
+  // tiene que escanear el QR cada vez que abre la app — bug reportado.
+  // Solución: escribir TODA la config crítica (server URL, token, LAN
+  // cache) a SharedPreferences via @capacitor/preferences, que SÍ es
+  // verdaderamente persistente. localStorage se mantiene como cache
+  // sync para que el código sync (lecturas en el render path) siga
+  // funcionando sin async/await en todas partes.
+  async function _prefsGet(key) {
+    try {
+      const C = window.Capacitor;
+      if (C && C.Plugins && C.Plugins.Preferences) {
+        const res = await C.Plugins.Preferences.get({ key });
+        return res && typeof res.value === 'string' ? res.value : null;
+      }
+    } catch (e) { console.warn('[prefs] get failed:', e && e.message); }
+    return null;
+  }
+  async function _prefsSet(key, value) {
+    try {
+      const C = window.Capacitor;
+      if (C && C.Plugins && C.Plugins.Preferences) {
+        await C.Plugins.Preferences.set({ key, value: String(value || '') });
+      }
+    } catch (e) { console.warn('[prefs] set failed:', e && e.message); }
+  }
+  async function _prefsRemove(key) {
+    try {
+      const C = window.Capacitor;
+      if (C && C.Plugins && C.Plugins.Preferences) {
+        await C.Plugins.Preferences.remove({ key });
+      }
+    } catch (e) { console.warn('[prefs] remove failed:', e && e.message); }
+  }
+  // Set sync (localStorage) + async (Preferences). Fire-and-forget para no
+  // bloquear UI. Usar para TODA config crítica (URL, token, LAN cache).
+  function _persistedSet(key, value) {
+    try { localStorage.setItem(key, String(value || '')); } catch {}
+    _prefsSet(key, value); // background, no await
+  }
+  function _persistedRemove(key) {
+    try { localStorage.removeItem(key); } catch {}
+    _prefsRemove(key); // background, no await
+  }
+  // Al boot: rehidratar localStorage desde Preferences (si está disponible).
+  // Preferences es la fuente de verdad — si tiene un valor y localStorage
+  // está vacío (limpiado por el OS), copiar Preferences → localStorage.
+  // Si localStorage tiene pero Preferences no (primera vez tras update con
+  // este fix), migrar localStorage → Preferences.
+  async function _restoreFromPreferences() {
+    const keys = [STORE_SERVER_URL, STORE_TOKEN, STORE_LAN_IP, STORE_BACKEND_PORT];
+    for (const key of keys) {
+      const fromPrefs = await _prefsGet(key);
+      const fromLs = (() => { try { return localStorage.getItem(key); } catch { return null; } })();
+      if (fromPrefs && fromPrefs.length > 0) {
+        // Preferences manda — sobrescribir localStorage si difiere
+        if (fromPrefs !== fromLs) {
+          try { localStorage.setItem(key, fromPrefs); } catch {}
+        }
+      } else if (fromLs && fromLs.length > 0) {
+        // Migración inicial: localStorage tiene, Preferences no → guardar
+        await _prefsSet(key, fromLs);
+      }
+    }
+    // Releer en memoria desde el localStorage rehidratado
+    serverUrl = (localStorage.getItem(STORE_SERVER_URL) || '').replace(/\/$/, '');
+    token     = localStorage.getItem(STORE_TOKEN) || '';
+    cachedLanIp = localStorage.getItem(STORE_LAN_IP) || '';
+    cachedBackendPort = parseInt(localStorage.getItem(STORE_BACKEND_PORT) || '17800', 10);
+  }
+
   // ─── State ──────────────────────────────────────────────────────
   let serverUrl = (localStorage.getItem(STORE_SERVER_URL) || '').replace(/\/$/, '');
   let token     = localStorage.getItem(STORE_TOKEN) || '';
@@ -125,13 +198,29 @@
   function isAtBottom() {
     return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
   }
+  // v0.18.2-r3 — Restaurar el foco del input si lo perdió tras una
+  // modificación del DOM o un scroll. En Android WebView, modificar
+  // chatEl.scrollTop o añadir nodos al chat con un input focused PUEDE
+  // causar que el WebView "reset" el foco → IME (teclado) se cierra
+  // → el user se queda mirando como el teclado desaparece justo cuando
+  // Ashley responde. preventScroll:true evita que el re-focus haga scroll
+  // (sino entraríamos en un loop visual con el scrollToBottom).
+  // SOLO restaura si el input ESTABA focused antes — así nunca aparece
+  // de la nada cuando el user no estaba escribiendo.
+  function _restoreFocusIfWas(wasFocused) {
+    if (!wasFocused) return;
+    if (document.activeElement === inputEl) return; // ya OK
+    try { inputEl.focus({ preventScroll: true }); } catch { try { inputEl.focus(); } catch {} }
+  }
   function scrollToBottom() {
     // v0.18.2 — doble RAF para garantizar que el scroll sucede DESPUÉS
     // del paint del teclado/keyboard. Sin esto, en Android el scroll
     // ocurre antes del resize del viewport y queda mal posicionado.
+    const wasFocused = document.activeElement === inputEl;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         chatEl.scrollTop = chatEl.scrollHeight;
+        _restoreFocusIfWas(wasFocused);
       });
     });
   }
@@ -222,18 +311,18 @@
         console.warn('[recovery] URL nueva respondió HTTP', v.status);
         return false;
       }
-      // ✓ funciona — actualizar serverUrl persistente
+      // ✓ funciona — actualizar serverUrl persistente (Prefs + localStorage)
       const cleanUrl = newUrl.replace(/\/$/, '');
       serverUrl = cleanUrl;
-      localStorage.setItem(STORE_SERVER_URL, cleanUrl);
+      _persistedSet(STORE_SERVER_URL, cleanUrl);
       // Refresh lan_ip y port por si cambiaron
       if (data.lan_ip) {
         cachedLanIp = data.lan_ip;
-        localStorage.setItem(STORE_LAN_IP, data.lan_ip);
+        _persistedSet(STORE_LAN_IP, data.lan_ip);
       }
       if (data.port) {
         cachedBackendPort = data.port;
-        localStorage.setItem(STORE_BACKEND_PORT, String(data.port));
+        _persistedSet(STORE_BACKEND_PORT, String(data.port));
       }
       console.log('[recovery] ✓ URL actualizada a', cleanUrl);
       return true;
@@ -568,6 +657,11 @@
   }
 
   function appendMessage(msg) {
+    // v0.18.2-r3 — Capturar foco ANTES de cualquier mutación del DOM.
+    // Si el user estaba escribiendo y Ashley responde por polling, evitar
+    // que el WebView Android pierda el foco del input al añadir nodos.
+    const _wasInputFocused = document.activeElement === inputEl;
+
     // Clear empty state if present
     const emptyEl = chatEl.querySelector('.empty-chat');
     if (emptyEl) emptyEl.remove();
@@ -675,9 +769,16 @@
 
     row.appendChild(bubble);
     chatEl.appendChild(row);
+
+    // v0.18.2-r3 — Restaurar foco si el WebView Android lo perdió al
+    // añadir el nodo. Sin esto, el teclado se cierra cuando Ashley
+    // responde mientras el user estaba escribiendo. preventScroll:true
+    // evita que esto cause scroll/parpadeo extra.
+    _restoreFocusIfWas(_wasInputFocused);
   }
 
   function showTypingIndicator() {
+    const wasFocused = document.activeElement === inputEl;
     removeTypingIndicator();
     const row = document.createElement('div');
     row.id = 'typing-indicator';
@@ -688,10 +789,13 @@
     row.appendChild(dots);
     chatEl.appendChild(row);
     scrollToBottom();
+    _restoreFocusIfWas(wasFocused);
   }
   function removeTypingIndicator() {
+    const wasFocused = document.activeElement === inputEl;
     const t = document.getElementById('typing-indicator');
     if (t) t.remove();
+    _restoreFocusIfWas(wasFocused);
   }
 
   function renderMemories(facts) {
@@ -1091,7 +1195,12 @@
     } finally {
       isSending = false;
       sendBtn.disabled = false;
-      inputEl.focus();
+      // v0.18.2 — NO re-focus aquí. El input nunca pierde el foco gracias
+      // al mousedown.preventDefault() del sendBtn (ver listener al final del
+      // archivo). Si llamamos inputEl.focus() cuando el input YA está
+      // focused, Android oculta y re-muestra el teclado → "parpadeo" visible
+      // que el user reportó. Si por algún edge-case el foco se perdió, el
+      // user puede tocar el input — UX normal en móvil.
     }
   }
 
@@ -1385,18 +1494,18 @@
       );
       return false;
     }
-    // ✓ Conexión OK — AHORA persistir todo (server URL + token + LAN cache)
+    // ✓ Conexión OK — AHORA persistir todo (Prefs + localStorage)
     serverUrl = s;
     token = t;
-    localStorage.setItem(STORE_SERVER_URL, serverUrl);
-    localStorage.setItem(STORE_TOKEN, token);
+    _persistedSet(STORE_SERVER_URL, serverUrl);
+    _persistedSet(STORE_TOKEN, token);
     if (newLanIp) {
       cachedLanIp = newLanIp;
-      localStorage.setItem(STORE_LAN_IP, newLanIp);
+      _persistedSet(STORE_LAN_IP, newLanIp);
     }
     if (newPort) {
       cachedBackendPort = newPort;
-      localStorage.setItem(STORE_BACKEND_PORT, String(newPort));
+      _persistedSet(STORE_BACKEND_PORT, String(newPort));
     }
     setScannerStatus('✓ Conectado.', 'ok');
     await new Promise(r => setTimeout(r, 600));
@@ -1444,9 +1553,9 @@
       setupConnectBtn.disabled = false;
       return;
     }
-    // Save and proceed
-    localStorage.setItem(STORE_SERVER_URL, serverUrl);
-    localStorage.setItem(STORE_TOKEN, token);
+    // Save and proceed (Prefs + localStorage)
+    _persistedSet(STORE_SERVER_URL, serverUrl);
+    _persistedSet(STORE_TOKEN, token);
     setSetupStatus('Conectado.', 'ok');
     setupConnectBtn.disabled = false;
     await tryConnect();
@@ -1509,17 +1618,21 @@
     if (!newServer || !newToken) return;
     serverUrl = newServer;
     token = newToken;
-    localStorage.setItem(STORE_SERVER_URL, serverUrl);
-    localStorage.setItem(STORE_TOKEN, token);
+    _persistedSet(STORE_SERVER_URL, serverUrl);
+    _persistedSet(STORE_TOKEN, token);
     settingsPanel.hidden = true;
     stopPolling();
     await tryConnect();
   });
   settingsDisconnectBtn.addEventListener('click', () => {
     if (!confirm('¿Desconectar y borrar la configuración guardada?')) return;
-    localStorage.removeItem(STORE_SERVER_URL);
-    localStorage.removeItem(STORE_TOKEN);
-    serverUrl = ''; token = ''; lastTimestamp = '';
+    _persistedRemove(STORE_SERVER_URL);
+    _persistedRemove(STORE_TOKEN);
+    // v0.18.2 — limpiar también el cache LAN para que la app NO intente
+    // auto-recovery a un PC del que el user explícitamente se desconectó.
+    _persistedRemove(STORE_LAN_IP);
+    _persistedRemove(STORE_BACKEND_PORT);
+    serverUrl = ''; token = ''; cachedLanIp = ''; lastTimestamp = '';
     stopPolling();
     settingsPanel.hidden = true;
     showScreen('setup');
@@ -1662,6 +1775,18 @@
   });
 
   // ─── Composer events ───────────────────────────────────────────
+  // v0.18.2 — Prevenir que el sendBtn ROBE el foco al input cuando el user
+  // toca el botón. Sin esto, el flow es:
+  //   1. user toca sendBtn → focus se mueve al botón → input pierde focus
+  //   2. Android cierra el IME (teclado en pantalla)
+  //   3. handleSend completa → re-focus input → IME reabre
+  // Resultado visible: "parpadeo" del teclado al enviar.
+  // mousedown.preventDefault() bloquea SOLO el cambio de foco, NO el click.
+  // pointerdown cubre touch + mouse en navegadores modernos; mousedown sirve
+  // como fallback para WebViews antiguos. NUNCA preventDefault del click —
+  // eso rompería handleSend.
+  sendBtn.addEventListener('mousedown',  (e) => e.preventDefault());
+  sendBtn.addEventListener('pointerdown', (e) => e.preventDefault());
   sendBtn.addEventListener('click', handleSend);
   inputEl.addEventListener('keydown', (e) => {
     // Enter sends, Shift+Enter newline (only on real keyboards, not phone)
@@ -1736,5 +1861,16 @@
   }
 
   // ─── Init ──────────────────────────────────────────────────────
-  tryConnect();
+  // v0.18.2 — Antes de tryConnect(), rehidratar desde Capacitor.Preferences
+  // si existe. Si el OS limpió localStorage entre arranques (low-memory,
+  // updates del APK, "clear cache" del settings), la config crítica viene
+  // de SharedPreferences y el user NO tiene que re-escanear el QR.
+  (async function _bootInit() {
+    try {
+      await _restoreFromPreferences();
+    } catch (e) {
+      console.warn('[boot] restore preferences failed:', e && e.message);
+    }
+    await tryConnect();
+  })();
 })();

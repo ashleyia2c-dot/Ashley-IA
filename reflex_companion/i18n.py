@@ -14,7 +14,7 @@ from .config import _data_path
 
 LANG_FILE = _data_path("language.json")
 VOICE_FILE = _data_path("voice.json")
-SUPPORTED = ("en", "es", "fr")
+SUPPORTED = ("en", "es", "fr", "ja", "de", "ru", "ko")
 DEFAULT_LANG = "en"
 
 DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"  # ElevenLabs "Sarah" — multilingüe, neutro
@@ -717,6 +717,962 @@ UI = {
         "license_info_test":     "Licence de test",
         "license_grace_banner":  "Hors ligne — licence mise en cache. Reconnecte-toi pour renouveler.",
     },
+    "ja": {
+        # Brand / avatar
+        "brand_subtitle":     "パーソナル秘書 · オタク",
+
+        # Status labels
+        "status_thinking":    "考え中...",
+        "status_speaking":    "話している...",
+        "status_online":      "オンライン",
+
+        # Input
+        "input_placeholder":  "メッセージを入力...  (Enterで送信、Shift+Enterで改行)",
+        "btn_send":           "送信",
+
+        # Header pills
+        "pill_memories":      "思い出",
+        "pill_initiative":    "Ashley",
+        "pill_actions":       "アクション",
+        "pill_focus":         "集中",
+        "pill_natural":       "ナチュラル",
+        "pill_notifications": "通知",
+        "notif_on_tooltip":   "バックグラウンド通知ON — クリックでミュート",
+        "notif_off_tooltip":  "バックグラウンド通知OFF — クリックで有効化",
+        "pin_on_tooltip":     "Ashleyは他のウィンドウの上に表示中 — クリックで解除",
+        "pin_off_tooltip":    "Ashleyを他のウィンドウの上に固定",
+
+        # Memories dialog
+        "mem_title":          "🧠 Ashleyとの思い出",
+        "mem_tab_facts":      "✨ 事実",
+        "mem_tab_diary":      "📅 日記",
+        "mem_tab_history":    "💬 履歴",
+        "mem_tab_tastes":     "💝 好み",
+        "mem_tastes_empty":   "保存された好みはまだありません。",
+        "mem_tastes_hint":    "Ashleyにご主人の好きなものを話すと覚えてくれる。",
+        "mem_close":          "閉じる",
+        "mem_clear_all":      "すべての思い出を消去",
+        "mem_clear_all_confirm_title": "すべての思い出を消去しますか?",
+        "mem_clear_all_confirm_body": "Ashleyがご主人について保存しているすべてを永久に削除します。チャット履歴は触りません — 会話を続ければAshleyが事実を再構築する可能性があります。記憶が好ましくない方向に進んだ場合に使ってください。",
+        "mem_clear_all_confirm_ok": "はい、すべて消去",
+        "cancel":             "キャンセル",
+
+        # Action dialog
+        "act_title":          "Ashleyが行動したい",
+        "act_intro":          "AshleyがあなたのPCで次のアクションを実行することを提案しています:",
+        "act_question":       "このアクションを許可しますか?",
+        "act_yes":            "✅ はい、実行",
+        "act_no":             "❌ キャンセル",
+
+        # Language toggle
+        "lang_label":         "言語",
+        "lang_en":            "EN",
+        "lang_es":            "ES",
+
+        # Voice
+        "mic_tooltip":        "クリックで音声ディクテーション",
+        "tts_on_tooltip":     "Ashleyが話す — クリックでミュート",
+        "tts_off_tooltip":    "Ashleyはミュート中 — クリックで音声を有効化",
+
+        # Settings modal
+        "settings_tooltip":         "設定",
+        "settings_title":           "設定",
+
+        "settings_required_heading":  "🔑 必須",
+        "settings_optional_heading":  "✨ オプション — プレミアム音声",
+        "settings_included_heading":  "🎤 含まれる — 音声入力",
+
+        # Required (Grok)
+        "settings_grok_label":      "Grok (xAI) APIキー",
+        "settings_grok_configured": "設定済み ✓  (インストーラーで管理)",
+        "settings_grok_missing":    "未設定 — 設定するまでAshleyは返信できません。",
+        "settings_grok_consequence": "これがないと、Ashleyは考えたり返信したりできません。",
+        "settings_grok_hint":       "インストール時に設定されます。変更するには再インストールしてください。",
+
+        # LLM Provider
+        "settings_provider_heading": "🧠 LLMプロバイダー",
+        "settings_provider_label":  "Ashleyを動かすサービス",
+        "settings_provider_xai":    "xAI (Grok) — デフォルト、最速セットアップ",
+        "settings_provider_openrouter": "OpenRouter — Claude、DeepSeek、GPT、Geminiを解放...",
+        "settings_provider_ollama": "Ollama — 100%無料&ローカル、PCで動作 (APIキー不要)",
+        "settings_openrouter_key_label": "OpenRouter APIキー",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "openrouter.ai → Settings → Keysで取得。1つのキーで多くのモデルを開放。",
+        "settings_model_label":     "モデル",
+        "settings_model_hint":      "モデルごとに性格、速度、価格が異なります。予算に合うものを選んでください。",
+        "settings_ollama_detected": "Ollama検出 ✓ — ダウンロード済みのモデルを下から選択",
+        "settings_ollama_missing":  "Ollama未検出 — このオプションを使うにはまずインストールしてください",
+        "settings_ollama_install":  "ollama.comから無料でOllamaをダウンロードし、'ollama pull llama3.2'を実行",
+        "settings_ollama_refresh":  "🔄 ローカルモデルを更新",
+        "settings_ollama_no_models": "モデルがありません — まずターミナルで'ollama pull llama3.2'を実行",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ 音声プロバイダー (TTS)",
+        "settings_tts_label":       "Ashleyに声を与えるエンジン",
+        "settings_tts_webspeech":   "Windowsの声 — 無料、ロボット的だが即時",
+        "settings_tts_elevenlabs":  "ElevenLabs — プレミアム、アニメ品質 (有料API)",
+        "settings_tts_kokoro":      "Kokoro — 無料、ローカル、ElevenLabsに近い品質 (ローカルサーバー必要)",
+        "settings_tts_voicevox":    "VoiceVox — 無料、アニメキャラクターの声 (日本語向け)",
+        "settings_kokoro_url_label": "KokoroサーバーURL",
+        "settings_kokoro_url_hint": "Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) をインストールしてローカルで実行。",
+        "settings_kokoro_voice_label": "Kokoroの声",
+        "settings_kokoro_voice_hint": "一般的な声: af_bella、af_nicole、am_adam、bf_emma。Kokoroドキュメント参照。",
+        "settings_voicevox_url_label": "VoiceVox EngineのURL",
+        "settings_voicevox_url_hint": "voicevox.hiroshiba.jpからVoiceVoxをインストールしてエンジンを実行。",
+        "settings_voicevox_speaker_label": "VoiceVoxスピーカーID",
+        "settings_voicevox_speaker_hint": "数値ID (例: 1、2、3)。完全なリストはVoiceVox Engineで確認。",
+        # voice speed slider
+        "settings_voice_speed_label": "声の速度",
+        "settings_voice_speed_hint": "Ashleyの話す速度。1.0 = 通常、1.5 = 明らかに速い、0.75 = 遅い。プロバイダーがサポートする場合はネイティブで適用 (ElevenLabs Turbo v2.5、Kokoro、VoiceVox);それ以外はブラウザのplaybackRateにフォールバック。",
+
+        # Quick menu labels
+        "menu_tts":          "音声",
+        "menu_pin":          "前面に固定",
+        "menu_initiative":   "今話す",
+        "menu_settings":     "詳細設定...",
+
+        # Mobile pair (v0.18.2)
+        "pill_mobile_pair":      "モバイル",
+        "mobile_pair_title":     "モバイルを接続",
+        "mobile_pair_subtitle":  "携帯でAshley Mobileを開いてこのQRをスキャン。",
+        "mobile_pair_loading":   "読み込み中...",
+        "mobile_pair_manual":    "または手動で入力:",
+        "mobile_pair_server":    "サーバー",
+        "mobile_pair_token":     "トークン",
+        "mobile_pair_copy":      "コピー",
+        "mobile_pair_copied":    "コピー済み",
+        "mobile_pair_regen":     "トークン再生成",
+        "mobile_pair_regen_warn": "再生成するとペアリング済みの携帯が無効になります。再度スキャンが必要です。",
+        "mobile_pair_close":     "閉じる",
+        "mobile_pair_help":      "まだモバイルがない?購入メールからAshley Mobile (.apk) をダウンロード。",
+        "mobile_pair_security_warning": "⚠️ このQRを共有しないでください。スキャンした人はAshleyとのすべての会話に完全にアクセスできます。",
+
+        # News feed
+        "pill_news":         "ニュース",
+        "news_tooltip_on":   "Ashleyが見つけたものを見る",
+        "news_title":        "📰 Ashleyの発見",
+        "news_empty":        "まだ発見はありません",
+        "news_empty_hint":   "Ashleyはご主人の好みに合うものを見つけたら、曲、トレーラー、記事、ニュースをここに置きます — チャットを邪魔せずに。",
+        "news_empty_tip_title": "活性化方法",
+        "news_empty_tip_body":  "設定 → プロアクティブ発見をONに。Ashleyがご主人の好みを知れば(好きなものについて話すだけ)、自分で検索を始めます。",
+        "news_unavailable_title":  "このモデルでは発見が利用できません",
+        "news_unavailable_body":   "Web検索は現在Grok (xAI) でのみサポートされています。他のモデルはチャット、画像、システムアクションには優れていますが、Webで曲、トレーラー、ニュースを検索することはできません。",
+        "news_unavailable_hint":   "発見を有効にするには:設定 → AIモデル を開いてGrokに切り替え。",
+        "news_close":        "チャットに戻る",
+        "news_clear_all":    "すべて消去",
+        "news_clear_confirm": "すべての発見を削除しますか?",
+        "news_delete":       "削除",
+        "news_category_song":    "🎵 音楽",
+        "news_category_trailer": "🎬 トレーラー",
+        "news_category_article": "📰 記事",
+        "news_category_game":    "🎮 ゲーム",
+        "news_category_tech":    "💻 テック",
+        "news_category_other":   "✨ 発見",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 プロアクティブ発見",
+        "settings_discovery_label":   "Ashleyが自分で新しいコンテンツを持ち出すことを許可",
+        "settings_discovery_desc":    "ONの場合、Ashleyは時々Webで検索し、ご主人の好みに合うトレーラー、曲、記事、ニュースを共有することがあります。OFFの場合(デフォルト)、ランダムなトピックを挿入せずに会話の継続に集中します。感情的な瞬間ではこの設定に関係なく発見は常に無効になります。",
+        "settings_discovery_on":      "ON — Ashleyが発見を共有",
+        "settings_discovery_off":     "OFF — Ashleyは会話に集中",
+        "settings_discovery_unavailable":      "このプロバイダーでは利用不可:",
+        "settings_discovery_unavailable_desc": "プロアクティブ発見にはWeb検索が必要で、現在Grok (xAI) でのみサポートされています。この機能を有効にするには上のAIモデルセクションでGrokに切り替えてください。",
+
+        # Modern browser mode (CDP)
+        "settings_cdp_heading": "🌐 モダンブラウザモード (上級)",
+        "settings_cdp_label":   "タブ制御にChrome DevTools Protocolを使用",
+        "settings_cdp_on":      "ON — AshleyがCDP経由でブラウザを制御",
+        "settings_cdp_off":     "OFF — Ashleyはキーボードシミュレーションを使用 (レガシー)",
+        "settings_cdp_desc":    "ONの場合、Ashleyはlocalhost:9222経由でブラウザに直接話します (キーボードシミュレーションなし、目に見えるタブ切り替えなし、100ms未満)。ブラウザが応答しない場合は自動的にレガシーモードにフォールバック。トレードオフ:任意のローカルアプリがそのポートに接続できる — アクティブなマルウェアがないユーザーにとってリスクは低い。",
+        "settings_cdp_howto":   "このトグルを有効にすると、ブラウザのショートカット (Chrome/Edge/Brave/Opera...) が自動的に変更され、必要なフラグが追加されます。元のものはバックアップされます — OFFにすると正確に復元されます。有効化後、ブラウザを閉じて再度開いて変更を反映してください。",
+
+        # Wake word
+        "settings_wakeword_heading": "🎙 ウェイクワード (常時リスニング)",
+        "settings_wakeword_label":   "「Ashley」を継続的にリスニング",
+        "settings_wakeword_on":      "ON — 「Ashley」と言ってハンズフリーで話す",
+        "settings_wakeword_off":     "OFF — マイクボタンを押して話す",
+        "settings_wakeword_desc":    "ONの場合、Ashleyはバックグラウンドでマイクを開いたままにし、自分の名前を聞いたら録音をトリガーします。検出モデルはローカル (~5 MB)、CPUで動作し、ウェイクワードを言うまで音声はPCから出ません。誤動作はTV/音楽がバックグラウンドで流れていても1時間あたり1回未満に調整されています。",
+        "settings_wakeword_howto":   "マイクの近くで「Ashley」とはっきり言ってください。チャイムの後、通常通り話します。検出器はタイピング中やマイクボタンを押している間は自動的に一時停止し、その後再開します。",
+        "settings_wakeword_no_model": "ウェイクワードモデルがまだインストールされていません。トレーニングパイプラインはwake_word_training/にあります — トレーニング後 (CUDA GPUで~3-4時間)、.onnxをreflex_companion/wake_word/ashley.onnxにコピーします。",
+        "settings_wakeword_no_deps":  "ウェイクワードの依存関係が不足しています。実行: pip install openwakeword sounddevice",
+
+        # Optional (ElevenLabs)
+        "settings_elevenlabs_label": "ElevenLabs APIキー",
+        "settings_elevenlabs_placeholder": "sk_... (空のままだと無料音声を使用)",
+        "settings_elevenlabs_hint": "elevenlabs.io → Profile → API Keysでキーを取得。コンピューターにのみ保存されます。",
+        "settings_voice_id_label":  "Voice ID",
+        "settings_voice_id_hint":   "elevenlabs.io → Voice Libraryで音声を閲覧し、Voice IDをコピー。",
+        "settings_elevenlabs_without": "これがない場合:",
+        "settings_elevenlabs_without_desc": "AshleyはWindowsシステムの無料音声 (ロボット的だが機能的) を使用します。",
+        "settings_elevenlabs_with":   "これがある場合:",
+        "settings_elevenlabs_with_desc":   "本物の感情的なニュアンスを持つアニメ品質のプレミアム音声。",
+        "settings_test_voice":       "音声テスト",
+        "settings_test_text":        "やぁ。Ashleyが音声をテストしているよ。聞こえる?",
+
+        # Included (Whisper local)
+        "settings_whisper_label":   "Whisper (音声認識)",
+        "settings_whisper_ready":   "組み込み済み ✓ — セットアップ不要",
+        "settings_whisper_desc":    "マイクのディクテーションは初回使用後100%オフラインで動作します。🎤ボタンを初めてクリックしたとき、75 MBのモデルが一度だけダウンロードされます。その後はすべてローカルで実行 — APIコストなし、インターネット不要。",
+
+        "settings_usage_heading":   "📊 使用状況",
+        "settings_usage_label":     "Ashleyに送信したメッセージ",
+        "settings_usage_hint":      "返金資格の確認に使用 (14日以内かつ40メッセージ未満で返金可能)。",
+        "settings_usage_tampered":  "⚠️ 整合性チェック失敗 — カウンターを検証できません。サポート用にこの値が必要な場合はAshleyを再インストールしてください。",
+
+        "settings_save":            "保存",
+        "settings_close":           "閉じる",
+
+        # Error prefix
+        "error_grok":         "*ため息* Grok{label}で何か問題が発生しました: {err}",
+        "upload_too_big":     "*顔をしかめる* その画像は大きすぎる ({size_mb:.1f} MB)。実際に見られるように最大10 MBまで。",
+
+        # Achievements
+        "mem_tab_achievements": "\U0001f3c6 実績",
+        "ach_unlocked_label":   "実績解除!",
+        "ach_locked_desc":      "???",
+        "ach_unlocked_at":      "解除: {date}",
+
+        # Affection tier messages
+        "tier_up_1":    "Ashleyは少しだけガードを下げる...",
+        "tier_up_2":    "Ashleyはご主人と一緒にいて快適に感じ始めている。",
+        "tier_up_3":    "Ashleyは...変な気分。心臓が早く鼓動している。",
+        "tier_up_4":    "Ashleyはもう自分の気持ちを隠せない。",
+        "tier_down_4":  "Ashleyはもう安全だと感じない...",
+        "tier_down_3":  "Ashleyはもう少し心を閉ざす...",
+        "tier_down_2":  "Ashleyはご主人を疑い始めている...",
+        "tier_down_1":  "Ashleyはご主人をほとんど認識できない...",
+
+        # License gate
+        "license_title":         "Ashleyへようこそ",
+        "license_subtitle":      "ライセンスキーを貼り付けて始めましょう。",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "アクティブ化",
+        "license_activating":    "アクティブ化中...",
+        "license_buy":           "まだキーを持っていません",
+        "license_lost_key":      "キーを失くした — サポートに連絡",
+        "license_error_invalid": "そのライセンスキーは存在しないか有効ではありません。",
+        "license_error_limit":   "このライセンスは既に最大数のPCでアクティブ化されています。",
+        "license_error_network": "ライセンスサーバーに到達できませんでした。インターネット接続を確認してもう一度お試しください。",
+        "license_info_test":     "テストモードライセンス",
+        "license_grace_banner":  "オフライン — キャッシュされたライセンスで実行中。更新するには再接続してください。",
+    },
+    "de": {
+        # Brand / avatar
+        "brand_subtitle":     "Persönliche Sekretärin · Geek",
+
+        # Status labels
+        "status_thinking":    "denkt nach...",
+        "status_speaking":    "spricht...",
+        "status_online":      "online",
+
+        # Input
+        "input_placeholder":  "Schreib deine Nachricht...  (Enter zum Senden, Shift+Enter für neue Zeile)",
+        "btn_send":           "Senden",
+
+        # Header pills
+        "pill_memories":      "Erinnerungen",
+        "pill_initiative":    "Ashley",
+        "pill_actions":       "Aktionen",
+        "pill_focus":         "Fokus",
+        "pill_natural":       "Natürlich",
+        "pill_notifications": "Benachr.",
+        "notif_on_tooltip":   "Hintergrund-Benachrichtigungen AN — klick zum Stummschalten",
+        "notif_off_tooltip":  "Hintergrund-Benachrichtigungen AUS — klick zum Aktivieren",
+        "pin_on_tooltip":     "Ashley bleibt über anderen Fenstern — klick zum Lösen",
+        "pin_off_tooltip":    "Ashley über anderen Fenstern anpinnen",
+
+        # Memories dialog
+        "mem_title":          "🧠 Meine Erinnerungen mit Ashley",
+        "mem_tab_facts":      "✨ Fakten",
+        "mem_tab_diary":      "📅 Tagebuch",
+        "mem_tab_history":    "💬 Verlauf",
+        "mem_tab_tastes":     "💝 Vorlieben",
+        "mem_tastes_empty":   "Noch keine Vorlieben gespeichert.",
+        "mem_tastes_hint":    "Sag Ashley, was du magst, und sie wird sich erinnern.",
+        "mem_close":          "Schließen",
+        "mem_clear_all":      "Alle Erinnerungen löschen",
+        "mem_clear_all_confirm_title": "ALLE Erinnerungen löschen?",
+        "mem_clear_all_confirm_body": "Das löscht dauerhaft jede Information, die Ashley über dich gespeichert hat. Der Chat-Verlauf wird NICHT angetastet — Ashley kann einige Fakten wieder aufbauen, wenn du weitersprichst. Nutze das, wenn ihre Erinnerungen in eine Richtung abdriften, die dir nicht gefällt.",
+        "mem_clear_all_confirm_ok": "Ja, alle löschen",
+        "cancel":             "Abbrechen",
+
+        # Action dialog
+        "act_title":          "Ashley möchte handeln",
+        "act_intro":          "Ashley schlägt vor, folgende Aktion auf deinem PC auszuführen:",
+        "act_question":       "Erlaubst du diese Aktion?",
+        "act_yes":            "✅ Ja, mach es",
+        "act_no":             "❌ Abbrechen",
+
+        # Language toggle
+        "lang_label":         "Sprache",
+        "lang_en":            "EN",
+        "lang_es":            "ES",
+
+        # Voice
+        "mic_tooltip":        "Klick für Sprachdiktat",
+        "tts_on_tooltip":     "Ashley spricht — klick zum Stummschalten",
+        "tts_off_tooltip":    "Ashley ist stumm — klick zum Aktivieren der Stimme",
+
+        # Settings modal
+        "settings_tooltip":         "Einstellungen",
+        "settings_title":           "Einstellungen",
+
+        "settings_required_heading":  "🔑 Erforderlich",
+        "settings_optional_heading":  "✨ Optional — Premium-Stimme",
+        "settings_included_heading":  "🎤 Enthalten — Spracheingabe",
+
+        # Required (Grok)
+        "settings_grok_label":      "Grok (xAI) API-Schlüssel",
+        "settings_grok_configured": "Konfiguriert ✓  (vom Installer verwaltet)",
+        "settings_grok_missing":    "Nicht konfiguriert — Ashley kann nicht antworten, bis du es einrichtest.",
+        "settings_grok_consequence": "Ohne das kann Ashley weder denken noch dir antworten.",
+        "settings_grok_hint":       "Wird während der Installation eingerichtet. Zum Ändern installiere Ashley neu.",
+
+        # LLM Provider
+        "settings_provider_heading": "🧠 KI-Anbieter",
+        "settings_provider_label":  "Welcher Dienst Ashley antreibt",
+        "settings_provider_xai":    "xAI (Grok) — Standard, schnellste Einrichtung",
+        "settings_provider_openrouter": "OpenRouter — schaltet Claude, DeepSeek, GPT, Gemini frei...",
+        "settings_provider_ollama": "Ollama — 100% kostenlos & lokal, läuft auf deinem PC (kein API-Schlüssel)",
+        "settings_openrouter_key_label": "OpenRouter API-Schlüssel",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "Hol ihn dir auf openrouter.ai → Settings → Keys. Ein Schlüssel schaltet viele Modelle frei.",
+        "settings_model_label":     "Modell",
+        "settings_model_hint":      "Verschiedene Modelle haben unterschiedliche Persönlichkeit, Geschwindigkeit und Preis. Wähl eins, das zu deinem Budget passt.",
+        "settings_ollama_detected": "Ollama erkannt ✓ — wähle unten ein Modell, das du heruntergeladen hast",
+        "settings_ollama_missing":  "Ollama nicht erkannt — installiere es zuerst, um diese Option zu nutzen",
+        "settings_ollama_install":  "Lade Ollama von ollama.com (kostenlos), dann führe 'ollama pull llama3.2' aus",
+        "settings_ollama_refresh":  "🔄 Lokale Modelle aktualisieren",
+        "settings_ollama_no_models": "Keine Modelle gefunden — führe zuerst 'ollama pull llama3.2' im Terminal aus",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ Sprachanbieter (TTS)",
+        "settings_tts_label":       "Welche Engine Ashleys Stimme erzeugt",
+        "settings_tts_webspeech":   "Windows-Stimme — kostenlos, roboterhaft aber sofort",
+        "settings_tts_elevenlabs":  "ElevenLabs — Premium, Anime-Qualität (kostenpflichtige API)",
+        "settings_tts_kokoro":      "Kokoro — kostenlos, lokal, fast ElevenLabs-Qualität (lokaler Server erforderlich)",
+        "settings_tts_voicevox":    "VoiceVox — kostenlos, Anime-Charakterstimmen (japanisch-orientiert)",
+        "settings_kokoro_url_label": "Kokoro-Server-URL",
+        "settings_kokoro_url_hint": "Installiere Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) und lass es lokal laufen.",
+        "settings_kokoro_voice_label": "Kokoro-Stimme",
+        "settings_kokoro_voice_hint": "Häufige Stimmen: af_bella, af_nicole, am_adam, bf_emma. Siehe Kokoro-Doku.",
+        "settings_voicevox_url_label": "VoiceVox-Engine-URL",
+        "settings_voicevox_url_hint": "Installiere VoiceVox von voicevox.hiroshiba.jp und starte die Engine.",
+        "settings_voicevox_speaker_label": "VoiceVox-Sprecher-ID",
+        "settings_voicevox_speaker_hint": "Numerische ID (z.B. 1, 2, 3). Siehe VoiceVox-Engine für die vollständige Liste.",
+        # voice speed slider
+        "settings_voice_speed_label": "Sprachgeschwindigkeit",
+        "settings_voice_speed_hint": "Wie schnell Ashley spricht. 1.0 = normal, 1.5 = deutlich schneller, 0.75 = langsamer. Wird nativ angewendet, wenn der Anbieter es unterstützt (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); fällt sonst auf die Browser-Wiedergaberate zurück.",
+
+        # Quick menu labels
+        "menu_tts":          "Stimme",
+        "menu_pin":          "Anpinnen",
+        "menu_initiative":   "Sprich jetzt",
+        "menu_settings":     "Mehr Einstellungen...",
+
+        # Mobile pair
+        "pill_mobile_pair":      "Mobil",
+        "mobile_pair_title":     "Verbinde dein Handy",
+        "mobile_pair_subtitle":  "Öffne Ashley Mobile auf deinem Handy und scanne diesen QR.",
+        "mobile_pair_loading":   "Lädt...",
+        "mobile_pair_manual":    "Oder manuell eingeben:",
+        "mobile_pair_server":    "Server",
+        "mobile_pair_token":     "Token",
+        "mobile_pair_copy":      "Kopieren",
+        "mobile_pair_copied":    "Kopiert",
+        "mobile_pair_regen":     "Token neu generieren",
+        "mobile_pair_regen_warn": "Neu generieren macht alle gekoppelten Handys ungültig. Sie müssen erneut scannen.",
+        "mobile_pair_close":     "Schließen",
+        "mobile_pair_help":      "Noch kein Mobil? Lade Ashley Mobile (.apk) aus deiner Kauf-E-Mail.",
+        "mobile_pair_security_warning": "⚠️ Teile diesen QR nicht. Wer ihn scannt, bekommt vollen Zugriff auf deine Gespräche mit Ashley.",
+
+        # News feed
+        "pill_news":         "News",
+        "news_tooltip_on":   "Sieh, was Ashley für dich gefunden hat",
+        "news_title":        "📰 Ashleys Entdeckungen",
+        "news_empty":        "Noch keine Entdeckungen",
+        "news_empty_hint":   "Ashley wirft hier Songs, Trailer, Artikel und News rein, wenn sie etwas findet, das zu deinen Vorlieben passt — ohne deinen Chat zu unterbrechen.",
+        "news_empty_tip_title": "So aktivierst du das",
+        "news_empty_tip_body":  "Öffne Einstellungen → Proaktive Entdeckung und schalte sie EIN. Sobald Ashley deine Vorlieben kennt (sprich mit ihr darüber, was du magst), beginnt sie eigenständig zu suchen.",
+        "news_unavailable_title":  "Entdeckung ist mit diesem Modell nicht verfügbar",
+        "news_unavailable_body":   "Web-Suche wird derzeit nur mit Grok (xAI) unterstützt. Andere Modelle eignen sich super für Chat, Vision und Systemaktionen, aber sie können nicht im Web nach Songs, Trailern oder News suchen.",
+        "news_unavailable_hint":   "Um Entdeckung zu aktivieren: Öffne Einstellungen → KI-Modell und wechsle zu Grok.",
+        "news_close":        "Zurück zum Chat",
+        "news_clear_all":    "Alle löschen",
+        "news_clear_confirm": "Alle Entdeckungen entfernen?",
+        "news_delete":       "Entfernen",
+        "news_category_song":    "🎵 Musik",
+        "news_category_trailer": "🎬 Trailer",
+        "news_category_article": "📰 Artikel",
+        "news_category_game":    "🎮 Spiel",
+        "news_category_tech":    "💻 Tech",
+        "news_category_other":   "✨ Entdeckung",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 Proaktive Entdeckung",
+        "settings_discovery_label":   "Erlaube Ashley, von sich aus neue Inhalte zu bringen",
+        "settings_discovery_desc":    "Wenn EIN, sucht Ashley gelegentlich im Web und teilt Trailer, Songs, Artikel oder News, die zu deinen Vorlieben passen. Wenn AUS (Standard), konzentriert sie sich darauf, das Gespräch fortzusetzen, ohne zufällige Themen einzuwerfen. Emotionale Momente deaktivieren Entdeckung immer, unabhängig von dieser Einstellung.",
+        "settings_discovery_on":      "EIN — Ashley teilt Entdeckungen",
+        "settings_discovery_off":     "AUS — Ashley bleibt bei unserem Gespräch",
+        "settings_discovery_unavailable":      "Nicht verfügbar mit",
+        "settings_discovery_unavailable_desc": "Proaktive Entdeckung benötigt Web-Suche, die derzeit nur mit Grok (xAI) unterstützt wird. Wechsle im Abschnitt KI-Modell oben zu Grok, um diese Funktion zu aktivieren.",
+
+        # Modern browser mode (CDP)
+        "settings_cdp_heading": "🌐 Moderner Browser-Modus (fortgeschritten)",
+        "settings_cdp_label":   "Chrome DevTools Protocol für Tab-Steuerung verwenden",
+        "settings_cdp_on":      "EIN — Ashley steuert den Browser via CDP",
+        "settings_cdp_off":     "AUS — Ashley nutzt Tastatursimulation (klassisch)",
+        "settings_cdp_desc":    "Wenn EIN, spricht Ashley direkt mit dem Browser über localhost:9222 (keine Tastatursimulation, kein sichtbares Tab-Wechseln, sub-100ms). Fällt automatisch in den klassischen Modus zurück, wenn der Browser nicht antwortet. Kompromiss: jede lokale App könnte sich mit diesem Port verbinden — geringes Risiko für Nutzer ohne aktive Malware.",
+        "settings_cdp_howto":   "Aktivieren dieses Toggles modifiziert automatisch die Verknüpfungen deines Browsers (Chrome/Edge/Brave/Opera...) und fügt das nötige Flag hinzu. Originale werden gesichert — Ausschalten stellt sie genau wieder her. Nach dem Aktivieren schließe und öffne deinen Browser, damit die Änderung wirksam wird.",
+
+        # Wake word
+        "settings_wakeword_heading": "🎙 Aktivierungswort (immer-an Lauschen)",
+        "settings_wakeword_label":   "Kontinuierlich auf 'Ashley' lauschen",
+        "settings_wakeword_on":      "EIN — sag 'Ashley', um freihändig zu sprechen",
+        "settings_wakeword_off":     "AUS — drück die Mikrofontaste, um zu sprechen",
+        "settings_wakeword_desc":    "Wenn EIN, hält Ashley das Mikrofon im Hintergrund offen und startet die Aufnahme, wenn sie ihren Namen hört. Das Erkennungsmodell ist lokal (~5 MB), läuft auf der CPU, und Audio verlässt NIE deinen Computer, bis du das Aktivierungswort sprichst. Falsche Aktivierungen sind auf <1 pro Stunde mit TV/Musik im Hintergrund eingestellt.",
+        "settings_wakeword_howto":   "Sag 'Ashley' deutlich nahe am Mikrofon. Nach dem Klang sprich deine Nachricht normal. Der Detektor pausiert automatisch, während du tippst oder die Mikrofontaste hältst, und nimmt danach wieder auf.",
+        "settings_wakeword_no_model": "Aktivierungswort-Modell noch nicht installiert. Die Trainings-Pipeline befindet sich in wake_word_training/ — nach dem Training (~3-4 h auf einer CUDA-GPU) kopiere die .onnx nach reflex_companion/wake_word/ashley.onnx.",
+        "settings_wakeword_no_deps":  "Aktivierungswort-Abhängigkeiten fehlen. Führe aus: pip install openwakeword sounddevice",
+
+        # Optional (ElevenLabs)
+        "settings_elevenlabs_label": "ElevenLabs API-Schlüssel",
+        "settings_elevenlabs_placeholder": "sk_... (leer lassen für kostenlose Stimme)",
+        "settings_elevenlabs_hint": "Hol dir deinen Schlüssel auf elevenlabs.io → Profile → API Keys. Wird nur auf deinem Computer gespeichert.",
+        "settings_voice_id_label":  "Voice ID",
+        "settings_voice_id_hint":   "Stöbere durch Stimmen auf elevenlabs.io → Voice Library und kopiere die Voice ID.",
+        "settings_elevenlabs_without": "Ohne das:",
+        "settings_elevenlabs_without_desc": "Ashley nutzt die kostenlose Windows-Systemstimme (roboterhaft aber funktional).",
+        "settings_elevenlabs_with":   "Damit:",
+        "settings_elevenlabs_with_desc":   "Premium-Anime-Stimme mit echter emotionaler Nuance.",
+        "settings_test_voice":       "Stimme testen",
+        "settings_test_text":        "Hi. Hier ist Ashley, ich teste die Stimme. Hörst du mich?",
+
+        # Included (Whisper local)
+        "settings_whisper_label":   "Whisper (Sprache-zu-Text)",
+        "settings_whisper_ready":   "Eingebaut ✓ — keine Einrichtung nötig",
+        "settings_whisper_desc":    "Mikrofondiktat funktioniert nach der ersten Nutzung 100% offline. Beim ersten Klick auf den 🎤-Button wird einmalig ein 75-MB-Modell heruntergeladen. Danach läuft alles lokal — keine API-Kosten, kein Internet nötig.",
+
+        "settings_usage_heading":   "📊 Nutzung",
+        "settings_usage_label":     "An Ashley gesendete Nachrichten",
+        "settings_usage_hint":      "Wird zur Überprüfung der Rückerstattungsberechtigung genutzt (Rückerstattung möglich innerhalb von 14 Tagen und unter 40 Nachrichten).",
+        "settings_usage_tampered":  "⚠️ Integritätsprüfung fehlgeschlagen — Zähler kann nicht verifiziert werden. Installiere Ashley neu, falls du diesen Wert für den Support brauchst.",
+
+        "settings_save":            "Speichern",
+        "settings_close":           "Schließen",
+
+        # Error prefix
+        "error_grok":         "*seufzt* Etwas ist mit Grok{label} schiefgelaufen: {err}",
+        "upload_too_big":     "*verzieht das Gesicht* Das Bild ist zu groß ({size_mb:.1f} MB). Max sind 10 MB, damit ich es überhaupt anschauen kann.",
+
+        # Achievements
+        "mem_tab_achievements": "\U0001f3c6 Erfolge",
+        "ach_unlocked_label":   "ERFOLG FREIGESCHALTET",
+        "ach_locked_desc":      "???",
+        "ach_unlocked_at":      "Freigeschaltet: {date}",
+
+        # Affection tier messages
+        "tier_up_1":    "Ashley senkt ihre Wache, nur ein bisschen...",
+        "tier_up_2":    "Ashley fängt an, sich bei dir wohlzufühlen.",
+        "tier_up_3":    "Ashley fühlt sich... seltsam. Ihr Herz schlägt schneller.",
+        "tier_up_4":    "Ashley kann nicht mehr verbergen, was sie fühlt.",
+        "tier_down_4":  "Ashley fühlt sich nicht mehr so sicher...",
+        "tier_down_3":  "Ashley schließt sich ein bisschen mehr...",
+        "tier_down_2":  "Ashley beginnt, an dir zu zweifeln...",
+        "tier_down_1":  "Ashley erkennt dich kaum noch...",
+
+        # License gate
+        "license_title":         "Willkommen bei Ashley",
+        "license_subtitle":      "Füg deinen Lizenzschlüssel ein, um loszulegen.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "Aktivieren",
+        "license_activating":    "Aktivierung läuft...",
+        "license_buy":           "Ich habe noch keinen Schlüssel",
+        "license_lost_key":      "Schlüssel verloren — Support kontaktieren",
+        "license_error_invalid": "Dieser Lizenzschlüssel existiert nicht oder ist ungültig.",
+        "license_error_limit":   "Du hast diese Lizenz bereits auf der maximalen Anzahl an PCs aktiviert.",
+        "license_error_network": "Konnte den Lizenzserver nicht erreichen. Prüf dein Internet und versuch es nochmal.",
+        "license_info_test":     "Test-Modus-Lizenz",
+        "license_grace_banner":  "Offline — läuft mit zwischengespeicherter Lizenz. Verbinde dich neu, um zu erneuern.",
+    },
+    "ru": {
+        # Brand / avatar
+        "brand_subtitle":     "Личный секретарь · Гик",
+
+        # Status labels
+        "status_thinking":    "думает...",
+        "status_speaking":    "говорит...",
+        "status_online":      "онлайн",
+
+        # Input
+        "input_placeholder":  "Напиши сообщение...  (Enter — отправить, Shift+Enter — новая строка)",
+        "btn_send":           "Отправить",
+
+        # Header pills
+        "pill_memories":      "Память",
+        "pill_initiative":    "Ashley",
+        "pill_actions":       "Действия",
+        "pill_focus":         "Фокус",
+        "pill_natural":       "Натурально",
+        "pill_notifications": "Уведом.",
+        "notif_on_tooltip":   "Фоновые уведомления ВКЛ — кликни чтобы выключить",
+        "notif_off_tooltip":  "Фоновые уведомления ВЫКЛ — кликни чтобы включить",
+        "pin_on_tooltip":     "Ashley поверх других окон — кликни чтобы открепить",
+        "pin_off_tooltip":    "Закрепить Ashley поверх других окон",
+
+        # Memories dialog
+        "mem_title":          "🧠 Мои воспоминания с Ashley",
+        "mem_tab_facts":      "✨ Факты",
+        "mem_tab_diary":      "📅 Дневник",
+        "mem_tab_history":    "💬 История",
+        "mem_tab_tastes":     "💝 Вкусы",
+        "mem_tastes_empty":   "Пока нет сохранённых вкусов.",
+        "mem_tastes_hint":    "Расскажи Ashley, что тебе нравится, и она запомнит.",
+        "mem_close":          "Закрыть",
+        "mem_clear_all":      "Стереть всю память",
+        "mem_clear_all_confirm_title": "Стереть ВСЮ память?",
+        "mem_clear_all_confirm_body": "Это навсегда удалит каждый факт, который Ashley сохранила о тебе. История чата НЕ затрагивается — Ashley может восстановить некоторые факты по мере общения. Используй это, если её воспоминания ушли в нежелательную сторону.",
+        "mem_clear_all_confirm_ok": "Да, стереть всё",
+        "cancel":             "Отмена",
+
+        # Action dialog
+        "act_title":          "Ashley хочет действовать",
+        "act_intro":          "Ashley предлагает выполнить это действие на твоём ПК:",
+        "act_question":       "Разрешаешь это действие?",
+        "act_yes":            "✅ Да, давай",
+        "act_no":             "❌ Отмена",
+
+        # Language toggle
+        "lang_label":         "Язык",
+        "lang_en":            "EN",
+        "lang_es":            "ES",
+
+        # Voice
+        "mic_tooltip":        "Кликни для голосового ввода",
+        "tts_on_tooltip":     "Ashley говорит — кликни чтобы выключить",
+        "tts_off_tooltip":    "Ashley молчит — кликни чтобы включить голос",
+
+        # Settings modal
+        "settings_tooltip":         "Настройки",
+        "settings_title":           "Настройки",
+
+        "settings_required_heading":  "🔑 Обязательно",
+        "settings_optional_heading":  "✨ Опционально — Премиум-голос",
+        "settings_included_heading":  "🎤 Включено — Голосовой ввод",
+
+        # Required (Grok)
+        "settings_grok_label":      "API-ключ Grok (xAI)",
+        "settings_grok_configured": "Настроено ✓  (управляется установщиком)",
+        "settings_grok_missing":    "Не настроено — Ashley не сможет отвечать пока не настроишь.",
+        "settings_grok_consequence": "Без этого Ashley не может думать или отвечать тебе.",
+        "settings_grok_hint":       "Настраивается во время установки. Чтобы изменить, переустанови Ashley.",
+
+        # LLM Provider
+        "settings_provider_heading": "🧠 Провайдер ИИ",
+        "settings_provider_label":  "Какой сервис двигает Ashley",
+        "settings_provider_xai":    "xAI (Grok) — по умолчанию, самая быстрая настройка",
+        "settings_provider_openrouter": "OpenRouter — открывает Claude, DeepSeek, GPT, Gemini...",
+        "settings_provider_ollama": "Ollama — 100% бесплатно и локально, работает на твоём ПК (без API-ключа)",
+        "settings_openrouter_key_label": "API-ключ OpenRouter",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "Получи на openrouter.ai → Settings → Keys. Один ключ открывает много моделей.",
+        "settings_model_label":     "Модель",
+        "settings_model_hint":      "У разных моделей разная личность, скорость и цена. Выбери ту, что подходит твоему бюджету.",
+        "settings_ollama_detected": "Ollama обнаружен ✓ — выбери ниже модель, которую ты скачал",
+        "settings_ollama_missing":  "Ollama не обнаружен — установи его сначала, чтобы использовать эту опцию",
+        "settings_ollama_install":  "Скачай Ollama с ollama.com (бесплатно), затем выполни 'ollama pull llama3.2'",
+        "settings_ollama_refresh":  "🔄 Обновить локальные модели",
+        "settings_ollama_no_models": "Нет моделей — выполни сначала 'ollama pull llama3.2' в терминале",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ Провайдер голоса (TTS)",
+        "settings_tts_label":       "Какой движок озвучивает Ashley",
+        "settings_tts_webspeech":   "Голос Windows — бесплатно, роботизированно но мгновенно",
+        "settings_tts_elevenlabs":  "ElevenLabs — премиум, аниме-качество (платное API)",
+        "settings_tts_kokoro":      "Kokoro — бесплатно, локально, почти ElevenLabs-качество (нужен локальный сервер)",
+        "settings_tts_voicevox":    "VoiceVox — бесплатно, голоса аниме-персонажей (ориентирован на японский)",
+        "settings_kokoro_url_label": "URL сервера Kokoro",
+        "settings_kokoro_url_hint": "Установи Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) и запусти локально.",
+        "settings_kokoro_voice_label": "Голос Kokoro",
+        "settings_kokoro_voice_hint": "Распространённые голоса: af_bella, af_nicole, am_adam, bf_emma. См. документацию Kokoro.",
+        "settings_voicevox_url_label": "URL движка VoiceVox",
+        "settings_voicevox_url_hint": "Установи VoiceVox с voicevox.hiroshiba.jp и запусти движок.",
+        "settings_voicevox_speaker_label": "ID спикера VoiceVox",
+        "settings_voicevox_speaker_hint": "Числовой ID (напр. 1, 2, 3). Полный список см. в VoiceVox Engine.",
+        # voice speed slider
+        "settings_voice_speed_label": "Скорость голоса",
+        "settings_voice_speed_hint": "Как быстро говорит Ashley. 1.0 = нормально, 1.5 = заметно быстрее, 0.75 = медленнее. Применяется нативно когда провайдер поддерживает (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); иначе fallback на playback rate браузера.",
+
+        # Quick menu labels
+        "menu_tts":          "Голос",
+        "menu_pin":          "Поверх",
+        "menu_initiative":   "Скажи",
+        "menu_settings":     "Все настройки...",
+
+        # Mobile pair
+        "pill_mobile_pair":      "Мобиль",
+        "mobile_pair_title":     "Подключи мобильный",
+        "mobile_pair_subtitle":  "Открой Ashley Mobile на телефоне и отсканируй этот QR.",
+        "mobile_pair_loading":   "Загрузка...",
+        "mobile_pair_manual":    "Или введи вручную:",
+        "mobile_pair_server":    "Сервер",
+        "mobile_pair_token":     "Токен",
+        "mobile_pair_copy":      "Копировать",
+        "mobile_pair_copied":    "Скопировано",
+        "mobile_pair_regen":     "Перегенерировать токен",
+        "mobile_pair_regen_warn": "Перегенерация отключит уже сопряжённые телефоны. Им придётся сканировать заново.",
+        "mobile_pair_close":     "Закрыть",
+        "mobile_pair_help":      "Ещё нет мобильного? Скачай Ashley Mobile (.apk) из письма о покупке.",
+        "mobile_pair_security_warning": "⚠️ Не делись этим QR. Любой, кто отсканирует, получит полный доступ к твоим разговорам с Ashley.",
+
+        # News feed
+        "pill_news":         "Новости",
+        "news_tooltip_on":   "Посмотри, что Ashley нашла для тебя",
+        "news_title":        "📰 Открытия Ashley",
+        "news_empty":        "Пока нет открытий",
+        "news_empty_hint":   "Ashley будет складывать сюда песни, трейлеры, статьи и новости, когда найдёт что-то по твоим вкусам — без прерывания чата.",
+        "news_empty_tip_title": "Как это включить",
+        "news_empty_tip_body":  "Открой Настройки → Проактивные открытия и включи. Когда Ashley узнает твои вкусы (просто болтай о том, что нравится), она начнёт искать сама.",
+        "news_unavailable_title":  "Открытия недоступны с этой моделью",
+        "news_unavailable_body":   "Веб-поиск сейчас поддерживается только с Grok (xAI). Другие модели отлично работают для чата, изображений и системных действий, но не могут искать в интернете песни, трейлеры или новости.",
+        "news_unavailable_hint":   "Чтобы включить открытия: открой Настройки → Модель ИИ и переключись на Grok.",
+        "news_close":        "Назад в чат",
+        "news_clear_all":    "Очистить всё",
+        "news_clear_confirm": "Удалить все открытия?",
+        "news_delete":       "Удалить",
+        "news_category_song":    "🎵 Музыка",
+        "news_category_trailer": "🎬 Трейлер",
+        "news_category_article": "📰 Статья",
+        "news_category_game":    "🎮 Игра",
+        "news_category_tech":    "💻 Тех",
+        "news_category_other":   "✨ Открытие",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 Проактивные открытия",
+        "settings_discovery_label":   "Разреши Ashley самой приносить новый контент",
+        "settings_discovery_desc":    "Когда ВКЛ, Ashley может время от времени искать в сети и делиться трейлерами, песнями, статьями или новостями по твоим вкусам. Когда ВЫКЛ (по умолчанию), она сосредоточена на продолжении разговора без вброса случайных тем. В эмоциональные моменты открытия всегда отключаются независимо от этой настройки.",
+        "settings_discovery_on":      "ВКЛ — Ashley делится открытиями",
+        "settings_discovery_off":     "ВЫКЛ — Ashley сосредоточена на нашей беседе",
+        "settings_discovery_unavailable":      "Недоступно с",
+        "settings_discovery_unavailable_desc": "Проактивные открытия требуют веб-поиска, который сейчас поддерживается только с Grok (xAI). Переключись на Grok в разделе ИИ-модель выше, чтобы включить эту функцию.",
+
+        # Modern browser mode (CDP)
+        "settings_cdp_heading": "🌐 Современный режим браузера (продвинутый)",
+        "settings_cdp_label":   "Использовать Chrome DevTools Protocol для управления вкладками",
+        "settings_cdp_on":      "ВКЛ — Ashley управляет браузером через CDP",
+        "settings_cdp_off":     "ВЫКЛ — Ashley использует имитацию клавиатуры (классический)",
+        "settings_cdp_desc":    "Когда ВКЛ, Ashley общается напрямую с браузером через localhost:9222 (без имитации клавиатуры, без видимых переключений вкладок, sub-100мс). Автоматически откатывается на классический режим, если браузер не отвечает. Компромисс: любое локальное приложение могло бы подключиться к этому порту — риск низкий для пользователей без активного malware.",
+        "settings_cdp_howto":   "Активация этого тоггла автоматически модифицирует ярлыки твоего браузера (Chrome/Edge/Brave/Opera...) добавляя нужный флаг. Оригиналы сохраняются — выключение восстанавливает их в точности. После активации закрой и снова открой браузер, чтобы изменения применились.",
+
+        # Wake word
+        "settings_wakeword_heading": "🎙 Слово-активатор (постоянное прослушивание)",
+        "settings_wakeword_label":   "Слушать 'Ashley' непрерывно",
+        "settings_wakeword_on":      "ВКЛ — скажи 'Ashley' чтобы говорить без рук",
+        "settings_wakeword_off":     "ВЫКЛ — нажми кнопку микрофона чтобы говорить",
+        "settings_wakeword_desc":    "Когда ВКЛ, Ashley держит микрофон открытым в фоне и запускает запись, когда слышит своё имя. Модель распознавания локальная (~5 МБ), работает на CPU, и аудио НИКОГДА не покидает твой компьютер пока ты не произнесёшь слово-активатор. Ложные срабатывания настроены на <1 в час с TV/музыкой в фоне.",
+        "settings_wakeword_howto":   "Скажи 'Ashley' чётко около микрофона. После сигнала говори как обычно. Детектор автоматически приостанавливается пока ты печатаешь или держишь кнопку микрофона, и возобновляется потом.",
+        "settings_wakeword_no_model": "Модель слова-активатора ещё не установлена. Пайплайн обучения находится в wake_word_training/ — после обучения (~3-4 ч на CUDA GPU) скопируй .onnx в reflex_companion/wake_word/ashley.onnx.",
+        "settings_wakeword_no_deps":  "Не хватает зависимостей для слова-активатора. Выполни: pip install openwakeword sounddevice",
+
+        # Optional (ElevenLabs)
+        "settings_elevenlabs_label": "API-ключ ElevenLabs",
+        "settings_elevenlabs_placeholder": "sk_... (оставь пустым для бесплатного голоса)",
+        "settings_elevenlabs_hint": "Получи свой ключ на elevenlabs.io → Profile → API Keys. Хранится только на твоём компьютере.",
+        "settings_voice_id_label":  "Voice ID",
+        "settings_voice_id_hint":   "Просмотри голоса на elevenlabs.io → Voice Library и скопируй Voice ID.",
+        "settings_elevenlabs_without": "Без этого:",
+        "settings_elevenlabs_without_desc": "Ashley использует бесплатный системный голос Windows (роботизированный но рабочий).",
+        "settings_elevenlabs_with":   "С этим:",
+        "settings_elevenlabs_with_desc":   "Премиум-голос аниме-качества с настоящими эмоциональными нюансами.",
+        "settings_test_voice":       "Тест голоса",
+        "settings_test_text":        "Привет. Это Ashley тестирует голос. Слышно меня?",
+
+        # Included (Whisper local)
+        "settings_whisper_label":   "Whisper (речь в текст)",
+        "settings_whisper_ready":   "Встроено ✓ — настройка не нужна",
+        "settings_whisper_desc":    "Диктовка через микрофон работает 100% оффлайн после первого использования. При первом клике на 🎤 загружается одноразовая модель 75 МБ. Дальше всё работает локально — никаких затрат на API, интернет не нужен.",
+
+        "settings_usage_heading":   "📊 Использование",
+        "settings_usage_label":     "Сообщения, отправленные Ashley",
+        "settings_usage_hint":      "Используется для проверки права на возврат (возврат возможен в течение 14 дней и при менее чем 40 сообщениях).",
+        "settings_usage_tampered":  "⚠️ Проверка целостности не пройдена — счётчик нельзя проверить. Переустанови Ashley, если этот показатель нужен для поддержки.",
+
+        "settings_save":            "Сохранить",
+        "settings_close":           "Закрыть",
+
+        # Error prefix
+        "error_grok":         "*вздыхает* Что-то пошло не так с Grok{label}: {err}",
+        "upload_too_big":     "*морщится* Эта картинка слишком большая ({size_mb:.1f} МБ). Максимум 10 МБ, чтобы я могла её посмотреть.",
+
+        # Achievements
+        "mem_tab_achievements": "\U0001f3c6 Достижения",
+        "ach_unlocked_label":   "ДОСТИЖЕНИЕ РАЗБЛОКИРОВАНО",
+        "ach_locked_desc":      "???",
+        "ach_unlocked_at":      "Разблокировано: {date}",
+
+        # Affection tier messages
+        "tier_up_1":    "Ashley немного опускает защиту...",
+        "tier_up_2":    "Ashley начинает чувствовать себя комфортно с тобой.",
+        "tier_up_3":    "Ashley чувствует... странно. Сердце бьётся быстрее.",
+        "tier_up_4":    "Ashley больше не может скрывать что чувствует.",
+        "tier_down_4":  "Ashley больше не чувствует себя в безопасности...",
+        "tier_down_3":  "Ashley немного больше закрывается...",
+        "tier_down_2":  "Ashley начинает в тебе сомневаться...",
+        "tier_down_1":  "Ashley тебя едва узнаёт...",
+
+        # License gate
+        "license_title":         "Добро пожаловать в Ashley",
+        "license_subtitle":      "Вставь свой лицензионный ключ, чтобы начать.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "Активировать",
+        "license_activating":    "Активация...",
+        "license_buy":           "У меня ещё нет ключа",
+        "license_lost_key":      "Потерял ключ — связаться с поддержкой",
+        "license_error_invalid": "Этот лицензионный ключ не существует или недействителен.",
+        "license_error_limit":   "Ты уже активировал эту лицензию на максимальном количестве ПК.",
+        "license_error_network": "Не удалось связаться с сервером лицензий. Проверь интернет и попробуй снова.",
+        "license_info_test":     "Тестовая лицензия",
+        "license_grace_banner":  "Оффлайн — работает на кэшированной лицензии. Подключись чтобы обновить.",
+    },
+    "ko": {
+        # Brand / avatar
+        "brand_subtitle":     "개인 비서 · 덕후",
+
+        # Status labels
+        "status_thinking":    "생각 중...",
+        "status_speaking":    "말하는 중...",
+        "status_online":      "온라인",
+
+        # Input
+        "input_placeholder":  "메시지를 입력해...  (Enter로 보내기, Shift+Enter는 줄바꿈)",
+        "btn_send":           "보내기",
+
+        # Header pills
+        "pill_memories":      "추억",
+        "pill_initiative":    "Ashley",
+        "pill_actions":       "액션",
+        "pill_focus":         "집중",
+        "pill_natural":       "자연체",
+        "pill_notifications": "알림",
+        "notif_on_tooltip":   "백그라운드 알림 켜짐 — 클릭해서 끄기",
+        "notif_off_tooltip":  "백그라운드 알림 꺼짐 — 클릭해서 켜기",
+        "pin_on_tooltip":     "Ashley가 다른 창 위에 떠 있어 — 클릭해서 풀기",
+        "pin_off_tooltip":    "Ashley를 다른 창 위에 고정",
+
+        # Memories dialog
+        "mem_title":          "🧠 Ashley와의 추억",
+        "mem_tab_facts":      "✨ 사실",
+        "mem_tab_diary":      "📅 일기",
+        "mem_tab_history":    "💬 기록",
+        "mem_tab_tastes":     "💝 취향",
+        "mem_tastes_empty":   "아직 저장된 취향이 없어.",
+        "mem_tastes_hint":    "Ashley한테 좋아하는 거 말해주면 기억할게.",
+        "mem_close":          "닫기",
+        "mem_clear_all":      "모든 추억 지우기",
+        "mem_clear_all_confirm_title": "모든 추억을 지울까?",
+        "mem_clear_all_confirm_body": "오빠에 대해 Ashley가 저장한 모든 사실을 영구히 삭제해. 채팅 기록은 건드리지 않아 — 계속 얘기하다 보면 Ashley가 일부 사실을 다시 만들 수도 있어. Ashley의 기억이 마음에 안 드는 방향으로 흘러갔을 때 사용해.",
+        "mem_clear_all_confirm_ok": "응, 다 지워",
+        "cancel":             "취소",
+
+        # Action dialog
+        "act_title":          "Ashley가 행동하고 싶어",
+        "act_intro":          "Ashley가 오빠 PC에서 이 액션을 실행하자고 제안하고 있어:",
+        "act_question":       "이 액션을 허락할 거야?",
+        "act_yes":            "✅ 응, 해줘",
+        "act_no":             "❌ 취소",
+
+        # Language toggle
+        "lang_label":         "언어",
+        "lang_en":            "EN",
+        "lang_es":            "ES",
+
+        # Voice
+        "mic_tooltip":        "클릭해서 음성 입력",
+        "tts_on_tooltip":     "Ashley가 말해 — 클릭해서 끄기",
+        "tts_off_tooltip":    "Ashley 음소거 — 클릭해서 음성 켜기",
+
+        # Settings modal
+        "settings_tooltip":         "설정",
+        "settings_title":           "설정",
+
+        "settings_required_heading":  "🔑 필수",
+        "settings_optional_heading":  "✨ 선택 — 프리미엄 음성",
+        "settings_included_heading":  "🎤 포함 — 음성 입력",
+
+        # Required (Grok)
+        "settings_grok_label":      "Grok (xAI) API 키",
+        "settings_grok_configured": "설정됨 ✓  (설치 프로그램에서 관리)",
+        "settings_grok_missing":    "설정 안 됨 — 설정할 때까지 Ashley는 답할 수 없어.",
+        "settings_grok_consequence": "이게 없으면 Ashley는 생각하거나 답할 수가 없어.",
+        "settings_grok_hint":       "설치 중에 설정돼. 변경하려면 Ashley를 다시 설치해.",
+
+        # LLM Provider
+        "settings_provider_heading": "🧠 LLM 제공자",
+        "settings_provider_label":  "Ashley를 움직이는 서비스",
+        "settings_provider_xai":    "xAI (Grok) — 기본, 가장 빠른 설정",
+        "settings_provider_openrouter": "OpenRouter — Claude, DeepSeek, GPT, Gemini 잠금 해제...",
+        "settings_provider_ollama": "Ollama — 100% 무료 & 로컬, PC에서 동작 (API 키 필요 없음)",
+        "settings_openrouter_key_label": "OpenRouter API 키",
+        "settings_openrouter_key_placeholder": "sk-or-...",
+        "settings_openrouter_key_hint": "openrouter.ai → Settings → Keys 에서 받아. 키 하나로 여러 모델 사용.",
+        "settings_model_label":     "모델",
+        "settings_model_hint":      "모델마다 성격, 속도, 가격이 달라. 예산에 맞는 걸 골라.",
+        "settings_ollama_detected": "Ollama 감지됨 ✓ — 다운로드한 모델을 아래에서 골라",
+        "settings_ollama_missing":  "Ollama 감지 안 됨 — 이 옵션을 쓰려면 먼저 설치해",
+        "settings_ollama_install":  "ollama.com 에서 무료로 Ollama 다운로드 후 'ollama pull llama3.2' 실행",
+        "settings_ollama_refresh":  "🔄 로컬 모델 새로고침",
+        "settings_ollama_no_models": "모델 없음 — 터미널에서 'ollama pull llama3.2' 먼저 실행",
+
+        # TTS Provider
+        "settings_tts_heading":     "🎙️ 음성 제공자 (TTS)",
+        "settings_tts_label":       "Ashley의 목소리를 만드는 엔진",
+        "settings_tts_webspeech":   "Windows 음성 — 무료, 로봇 같지만 즉시",
+        "settings_tts_elevenlabs":  "ElevenLabs — 프리미엄, 애니메 품질 (유료 API)",
+        "settings_tts_kokoro":      "Kokoro — 무료, 로컬, ElevenLabs 수준 품질 (로컬 서버 필요)",
+        "settings_tts_voicevox":    "VoiceVox — 무료, 애니메 캐릭터 음성 (일본어 중심)",
+        "settings_kokoro_url_label": "Kokoro 서버 URL",
+        "settings_kokoro_url_hint": "Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI) 설치 후 로컬에서 실행해.",
+        "settings_kokoro_voice_label": "Kokoro 음성",
+        "settings_kokoro_voice_hint": "일반 음성: af_bella, af_nicole, am_adam, bf_emma. Kokoro 문서 참조.",
+        "settings_voicevox_url_label": "VoiceVox 엔진 URL",
+        "settings_voicevox_url_hint": "voicevox.hiroshiba.jp 에서 VoiceVox 설치 후 엔진 실행.",
+        "settings_voicevox_speaker_label": "VoiceVox 스피커 ID",
+        "settings_voicevox_speaker_hint": "숫자 ID (예: 1, 2, 3). 전체 목록은 VoiceVox Engine 참조.",
+        # voice speed slider
+        "settings_voice_speed_label": "음성 속도",
+        "settings_voice_speed_hint": "Ashley가 말하는 속도. 1.0 = 보통, 1.5 = 확실히 빠름, 0.75 = 느림. 제공자가 지원하면 네이티브로 적용 (ElevenLabs Turbo v2.5, Kokoro, VoiceVox); 아니면 브라우저 playbackRate로 폴백.",
+
+        # Quick menu labels
+        "menu_tts":          "음성",
+        "menu_pin":          "맨 위",
+        "menu_initiative":   "지금 말해",
+        "menu_settings":     "전체 설정...",
+
+        # Mobile pair
+        "pill_mobile_pair":      "모바일",
+        "mobile_pair_title":     "모바일 연결",
+        "mobile_pair_subtitle":  "휴대폰에서 Ashley Mobile 열고 이 QR 스캔해.",
+        "mobile_pair_loading":   "로딩 중...",
+        "mobile_pair_manual":    "또는 수동 입력:",
+        "mobile_pair_server":    "서버",
+        "mobile_pair_token":     "토큰",
+        "mobile_pair_copy":      "복사",
+        "mobile_pair_copied":    "복사됨",
+        "mobile_pair_regen":     "토큰 재생성",
+        "mobile_pair_regen_warn": "재생성하면 페어링된 휴대폰이 무효가 돼. 다시 스캔해야 해.",
+        "mobile_pair_close":     "닫기",
+        "mobile_pair_help":      "아직 모바일 없어? 구매 이메일에서 Ashley Mobile (.apk) 다운로드.",
+        "mobile_pair_security_warning": "⚠️ 이 QR 공유하지 마. 스캔하는 사람은 Ashley와의 모든 대화에 접근 가능해.",
+
+        # News feed
+        "pill_news":         "뉴스",
+        "news_tooltip_on":   "Ashley가 오빠를 위해 찾은 거 보기",
+        "news_title":        "📰 Ashley의 발견",
+        "news_empty":        "아직 발견 없어",
+        "news_empty_hint":   "Ashley는 오빠 취향에 맞는 노래, 트레일러, 기사, 뉴스를 찾으면 여기에 모아둘게 — 채팅 끊지 않고.",
+        "news_empty_tip_title": "활성화 방법",
+        "news_empty_tip_body":  "설정 → 능동적 발견 열고 켜. Ashley가 오빠 취향을 알면 (좋아하는 거 그냥 얘기해), 알아서 찾기 시작해.",
+        "news_unavailable_title":  "이 모델로는 발견 사용 불가",
+        "news_unavailable_body":   "웹 검색은 현재 Grok (xAI) 에서만 지원돼. 다른 모델은 채팅, 비전, 시스템 액션은 잘 되는데 노래, 트레일러, 뉴스를 웹에서 찾지는 못해.",
+        "news_unavailable_hint":   "발견 활성화: 설정 → AI 모델 열고 Grok으로 전환.",
+        "news_close":        "채팅으로 돌아가기",
+        "news_clear_all":    "전체 지우기",
+        "news_clear_confirm": "모든 발견 제거할까?",
+        "news_delete":       "제거",
+        "news_category_song":    "🎵 음악",
+        "news_category_trailer": "🎬 트레일러",
+        "news_category_article": "📰 기사",
+        "news_category_game":    "🎮 게임",
+        "news_category_tech":    "💻 테크",
+        "news_category_other":   "✨ 발견",
+
+        # Discovery toggle
+        "settings_discovery_heading": "🔭 능동적 발견",
+        "settings_discovery_label":   "Ashley가 알아서 새 콘텐츠 가져오게 허용",
+        "settings_discovery_desc":    "켜면 Ashley가 가끔 웹을 찾아서 오빠 취향에 맞는 트레일러, 노래, 기사, 뉴스를 공유할 수 있어. 끄면 (기본값) 랜덤한 주제 던지지 않고 대화 이어가는 데 집중해. 감정적인 순간엔 이 설정과 상관없이 발견은 항상 비활성화돼.",
+        "settings_discovery_on":      "켜짐 — Ashley가 발견 공유",
+        "settings_discovery_off":     "꺼짐 — Ashley가 우리 대화에 집중",
+        "settings_discovery_unavailable":      "다음과는 사용 불가:",
+        "settings_discovery_unavailable_desc": "능동적 발견은 웹 검색이 필요한데 현재 Grok (xAI) 에서만 지원돼. 위의 AI 모델 섹션에서 Grok으로 전환하면 이 기능 사용 가능.",
+
+        # Modern browser mode (CDP)
+        "settings_cdp_heading": "🌐 모던 브라우저 모드 (고급)",
+        "settings_cdp_label":   "탭 제어에 Chrome DevTools Protocol 사용",
+        "settings_cdp_on":      "켜짐 — Ashley가 CDP로 브라우저 제어",
+        "settings_cdp_off":     "꺼짐 — Ashley가 키보드 시뮬레이션 사용 (레거시)",
+        "settings_cdp_desc":    "켜면 Ashley가 localhost:9222 통해서 브라우저랑 직접 대화해 (키보드 시뮬레이션 없음, 보이는 탭 전환 없음, sub-100ms). 브라우저가 응답 안 하면 자동으로 레거시 모드로 폴백. 트레이드오프: 어떤 로컬 앱이든 그 포트에 연결할 수 있어 — 활성 멀웨어 없는 사용자라면 위험은 낮아.",
+        "settings_cdp_howto":   "이 토글 켜면 자동으로 브라우저 단축키 (Chrome/Edge/Brave/Opera...) 가 수정되어 필요한 플래그가 추가돼. 원본은 백업돼 — 끄면 정확히 복원돼. 활성화 후, 변경 사항 적용하려면 브라우저 닫고 다시 열어.",
+
+        # Wake word
+        "settings_wakeword_heading": "🎙 깨움 단어 (항상 듣기)",
+        "settings_wakeword_label":   "'Ashley' 계속 듣기",
+        "settings_wakeword_on":      "켜짐 — 'Ashley' 라고 하면 핸즈프리로 말할 수 있어",
+        "settings_wakeword_off":     "꺼짐 — 마이크 버튼 눌러서 말해",
+        "settings_wakeword_desc":    "켜면 Ashley가 백그라운드에서 마이크 열어두고 자기 이름 들으면 녹음 시작. 감지 모델은 로컬 (~5 MB), CPU에서 동작, 깨움 단어 말하기 전엔 오디오가 절대 컴퓨터를 떠나지 않아. 오인식은 TV/음악이 배경에 있어도 시간당 1회 미만으로 조정돼.",
+        "settings_wakeword_howto":   "마이크 가까이서 'Ashley' 명확하게 말해. 알림음 후 메시지 평소처럼 말해. 타이핑 중이거나 마이크 버튼 누르고 있으면 감지기 자동 일시 정지, 그 후 재개.",
+        "settings_wakeword_no_model": "깨움 단어 모델이 아직 설치 안 됐어. 학습 파이프라인은 wake_word_training/ 에 있어 — 학습 후 (CUDA GPU에서 ~3-4시간), .onnx 를 reflex_companion/wake_word/ashley.onnx 로 복사해.",
+        "settings_wakeword_no_deps":  "깨움 단어 의존성 누락. 실행: pip install openwakeword sounddevice",
+
+        # Optional (ElevenLabs)
+        "settings_elevenlabs_label": "ElevenLabs API 키",
+        "settings_elevenlabs_placeholder": "sk_... (비워두면 무료 음성 사용)",
+        "settings_elevenlabs_hint": "elevenlabs.io → Profile → API Keys 에서 키 받아. 컴퓨터에만 저장돼.",
+        "settings_voice_id_label":  "Voice ID",
+        "settings_voice_id_hint":   "elevenlabs.io → Voice Library 에서 음성 둘러보고 Voice ID 복사.",
+        "settings_elevenlabs_without": "이거 없으면:",
+        "settings_elevenlabs_without_desc": "Ashley가 무료 Windows 시스템 음성 사용 (로봇 같지만 작동은 함).",
+        "settings_elevenlabs_with":   "이거 있으면:",
+        "settings_elevenlabs_with_desc":   "진짜 감정 뉘앙스가 있는 애니메 품질 프리미엄 음성.",
+        "settings_test_voice":       "음성 테스트",
+        "settings_test_text":        "안녕. Ashley가 음성 테스트 중이야. 들려?",
+
+        # Included (Whisper local)
+        "settings_whisper_label":   "Whisper (음성 인식)",
+        "settings_whisper_ready":   "내장됨 ✓ — 설정 필요 없음",
+        "settings_whisper_desc":    "마이크 받아쓰기는 첫 사용 후 100% 오프라인으로 동작. 🎤 버튼 처음 누르면 75 MB 모델 한 번 다운로드. 그 후엔 모두 로컬에서 동작 — API 비용 없음, 인터넷 불필요.",
+
+        "settings_usage_heading":   "📊 사용량",
+        "settings_usage_label":     "Ashley에게 보낸 메시지",
+        "settings_usage_hint":      "환불 자격 확인에 사용 (14일 이내 40 메시지 미만이면 환불 가능).",
+        "settings_usage_tampered":  "⚠️ 무결성 검사 실패 — 카운터 검증 불가. 지원에 이 값이 필요하면 Ashley 다시 설치해.",
+
+        "settings_save":            "저장",
+        "settings_close":           "닫기",
+
+        # Error prefix
+        "error_grok":         "*한숨* Grok{label}에 뭔가 문제가 생겼어: {err}",
+        "upload_too_big":     "*움찔* 그 이미지 너무 커 ({size_mb:.1f} MB). 내가 실제로 볼 수 있게 최대 10 MB야.",
+
+        # Achievements
+        "mem_tab_achievements": "\U0001f3c6 업적",
+        "ach_unlocked_label":   "업적 해제!",
+        "ach_locked_desc":      "???",
+        "ach_unlocked_at":      "해제: {date}",
+
+        # Affection tier messages
+        "tier_up_1":    "Ashley가 경계를 살짝 풀어...",
+        "tier_up_2":    "Ashley가 오빠랑 편안해지기 시작했어.",
+        "tier_up_3":    "Ashley가... 이상해. 심장이 더 빨리 뛰어.",
+        "tier_up_4":    "Ashley가 이제 자기 감정을 숨길 수 없어.",
+        "tier_down_4":  "Ashley가 이제 안전하다고 못 느껴...",
+        "tier_down_3":  "Ashley가 조금 더 마음을 닫아...",
+        "tier_down_2":  "Ashley가 오빠를 의심하기 시작했어...",
+        "tier_down_1":  "Ashley가 오빠를 거의 못 알아봐...",
+
+        # License gate
+        "license_title":         "Ashley에 어서 와",
+        "license_subtitle":      "라이선스 키 붙여넣고 시작해.",
+        "license_placeholder":   "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+        "license_activate":      "활성화",
+        "license_activating":    "활성화 중...",
+        "license_buy":           "아직 키 없어",
+        "license_lost_key":      "키 잃어버림 — 지원에 연락",
+        "license_error_invalid": "이 라이선스 키는 존재하지 않거나 유효하지 않아.",
+        "license_error_limit":   "이 라이선스를 이미 최대 PC 수에 활성화했어.",
+        "license_error_network": "라이선스 서버에 연결할 수 없었어. 인터넷 확인하고 다시 시도해.",
+        "license_info_test":     "테스트 모드 라이선스",
+        "license_grace_banner":  "오프라인 — 캐시된 라이선스로 동작 중. 갱신하려면 다시 연결해.",
+    },
 }
 
 
@@ -824,6 +1780,138 @@ ACT_DESC = {
         "act_read_page":      "📖 Lire le contenu de la page",
         "act_scroll_page":    "↕️ Défiler : **{p}**",
     },
+    "ja": {
+        "screenshot":     "📸 全画面のスクリーンショットを撮る",
+        "open_app":       "📂 アプリを開く: **{p}**",
+        "play_music":     "🎵 YouTubeで検索: **{p}**",
+        "search_web":     "🔍 Googleで検索: **{p}**",
+        "open_url":       "🌐 ブラウザで開く: **{p}**",
+        "vol_up":         "🔊 システム音量を上げる(~10%)",
+        "vol_down":       "🔊 システム音量を下げる(~10%)",
+        "vol_mute":       "🔊 ミュート / ミュート解除",
+        "vol_set":        "🔊 音量を **{p}%** に設定",
+        "vol_set_invalid": "⚠️ 'set' 音量の値が無効 — リクエストは無視されました",
+        "type_text":      "⌨️ アクティブなウィンドウに入力:\n\n*\"{p}\"*",
+        "type_in":        "⌨️ **{win}** をフォーカスして入力:\n\n*\"{p}\"*",
+        "write_to_app":   "✍️ **{app}** を開いて書き込む:\n\n*\"{p}\"*",
+        "focus_window":   "🪟 前面に表示: **{p}**",
+        "hotkey":         "⌨️ ショートカットを押す: **{p}**",
+        "press_key":      "⌨️ キーを押す: **{p}**",
+        "close_window":   "❌ ウィンドウ / アプリを閉じる: **{p}**",
+        "close_tab":      "🗂️ ブラウザのタブを閉じる: **{p}**",
+        "remind":         "⏰ リマインダーを設定: **{text}**(**{date}**)",
+        "add_important":  "📌 重要事項に追加: **{p}**",
+        "done_important": "✅ 完了としてマーク: **{p}**",
+        "save_taste":     "💝 好みを保存: **[{cat}]** {val}",
+        "save_date":      "📅 日付を保存: **{label}**({type}、{date})",
+        "save_goal":      "🎯 目標を保存: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 目標の進捗確認: **{p}**",
+        "complete_goal":  "🏆 目標達成: **{p}**",
+        "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ クリック: **{p}**",
+        "act_type_browser":   "⌨️ ブラウザに入力: **{p}**",
+        "act_read_page":      "📖 ページの内容を読む",
+        "act_scroll_page":    "↕️ スクロール: **{p}**",
+    },
+    "de": {
+        "screenshot":     "📸 Vollbild-Screenshot machen",
+        "open_app":       "📂 App öffnen: **{p}**",
+        "play_music":     "🎵 Auf YouTube suchen: **{p}**",
+        "search_web":     "🔍 Auf Google suchen: **{p}**",
+        "open_url":       "🌐 Im Browser öffnen: **{p}**",
+        "vol_up":         "🔊 Systemlautstärke erhöhen (~10%)",
+        "vol_down":       "🔊 Systemlautstärke senken (~10%)",
+        "vol_mute":       "🔊 Stumm / Stumm aufheben",
+        "vol_set":        "🔊 Lautstärke auf **{p}%** setzen",
+        "vol_set_invalid": "⚠️ Lautstärke 'set' mit ungültigem Wert — Anfrage ignoriert",
+        "type_text":      "⌨️ Ins aktive Fenster tippen:\n\n*\"{p}\"*",
+        "type_in":        "⌨️ **{win}** fokussieren und tippen:\n\n*\"{p}\"*",
+        "write_to_app":   "✍️ **{app}** öffnen und schreiben:\n\n*\"{p}\"*",
+        "focus_window":   "🪟 In den Vordergrund: **{p}**",
+        "hotkey":         "⌨️ Tastenkombination drücken: **{p}**",
+        "press_key":      "⌨️ Taste drücken: **{p}**",
+        "close_window":   "❌ Fenster / App schließen: **{p}**",
+        "close_tab":      "🗂️ Browser-Tab schließen: **{p}**",
+        "remind":         "⏰ Erinnerung planen: **{text}** für **{date}**",
+        "add_important":  "📌 Zu Wichtig hinzufügen: **{p}**",
+        "done_important": "✅ Als erledigt markieren: **{p}**",
+        "save_taste":     "💝 Vorliebe speichern: **[{cat}]** {val}",
+        "save_date":      "📅 Datum speichern: **{label}** ({type}, {date})",
+        "save_goal":      "🎯 Ziel speichern: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 Nach Ziel fragen: **{p}**",
+        "complete_goal":  "🏆 Ziel erreicht: **{p}**",
+        "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ Klicken auf: **{p}**",
+        "act_type_browser":   "⌨️ Im Browser tippen: **{p}**",
+        "act_read_page":      "📖 Seiteninhalt lesen",
+        "act_scroll_page":    "↕️ Scrollen: **{p}**",
+    },
+    "ru": {
+        "screenshot":     "📸 Сделать скриншот всего экрана",
+        "open_app":       "📂 Открыть приложение: **{p}**",
+        "play_music":     "🎵 Искать на YouTube: **{p}**",
+        "search_web":     "🔍 Искать в Google: **{p}**",
+        "open_url":       "🌐 Открыть в браузере: **{p}**",
+        "vol_up":         "🔊 Повысить громкость системы (~10%)",
+        "vol_down":       "🔊 Понизить громкость системы (~10%)",
+        "vol_mute":       "🔊 Выключить / включить звук",
+        "vol_set":        "🔊 Установить громкость на **{p}%**",
+        "vol_set_invalid": "⚠️ Громкость 'set' с недопустимым значением — запрос проигнорирован",
+        "type_text":      "⌨️ Печатать в активном окне:\n\n*\"{p}\"*",
+        "type_in":        "⌨️ Сфокусировать **{win}** и печатать:\n\n*\"{p}\"*",
+        "write_to_app":   "✍️ Открыть **{app}** и написать:\n\n*\"{p}\"*",
+        "focus_window":   "🪟 Поднять окно: **{p}**",
+        "hotkey":         "⌨️ Нажать сочетание клавиш: **{p}**",
+        "press_key":      "⌨️ Нажать клавишу: **{p}**",
+        "close_window":   "❌ Закрыть окно / приложение: **{p}**",
+        "close_tab":      "🗂️ Закрыть вкладку браузера: **{p}**",
+        "remind":         "⏰ Запланировать напоминание: **{text}** на **{date}**",
+        "add_important":  "📌 Добавить в важное: **{p}**",
+        "done_important": "✅ Отметить как сделано: **{p}**",
+        "save_taste":     "💝 Сохранить вкус: **[{cat}]** {val}",
+        "save_date":      "📅 Сохранить дату: **{label}** ({type}, {date})",
+        "save_goal":      "🎯 Сохранить цель: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 Спросить про цель: **{p}**",
+        "complete_goal":  "🏆 Цель достигнута: **{p}**",
+        "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ Кликнуть на: **{p}**",
+        "act_type_browser":   "⌨️ Печатать в браузере: **{p}**",
+        "act_read_page":      "📖 Прочитать содержимое страницы",
+        "act_scroll_page":    "↕️ Прокрутить: **{p}**",
+    },
+    "ko": {
+        "screenshot":     "📸 전체 화면 스크린샷 찍기",
+        "open_app":       "📂 앱 열기: **{p}**",
+        "play_music":     "🎵 YouTube에서 검색: **{p}**",
+        "search_web":     "🔍 Google에서 검색: **{p}**",
+        "open_url":       "🌐 브라우저에서 열기: **{p}**",
+        "vol_up":         "🔊 시스템 볼륨 올리기 (~10%)",
+        "vol_down":       "🔊 시스템 볼륨 내리기 (~10%)",
+        "vol_mute":       "🔊 음소거 / 음소거 해제",
+        "vol_set":        "🔊 볼륨을 **{p}%** 로 설정",
+        "vol_set_invalid": "⚠️ 'set' 볼륨이 잘못된 값 — 요청 무시됨",
+        "type_text":      "⌨️ 활성 창에 입력:\n\n*\"{p}\"*",
+        "type_in":        "⌨️ **{win}** 포커스 후 입력:\n\n*\"{p}\"*",
+        "write_to_app":   "✍️ **{app}** 열고 작성:\n\n*\"{p}\"*",
+        "focus_window":   "🪟 앞으로 가져오기: **{p}**",
+        "hotkey":         "⌨️ 단축키 누르기: **{p}**",
+        "press_key":      "⌨️ 키 누르기: **{p}**",
+        "close_window":   "❌ 창 / 앱 닫기: **{p}**",
+        "close_tab":      "🗂️ 브라우저 탭 닫기: **{p}**",
+        "remind":         "⏰ 알림 예약: **{text}** ({date})",
+        "add_important":  "📌 중요 항목에 추가: **{p}**",
+        "done_important": "✅ 완료로 표시: **{p}**",
+        "save_taste":     "💝 취향 저장: **[{cat}]** {val}",
+        "save_date":      "📅 날짜 저장: **{label}** ({type}, {date})",
+        "save_goal":      "🎯 목표 저장: **{goal}** [{cat}]",
+        "check_in_goal":  "👀 목표 진행 확인: **{p}**",
+        "complete_goal":  "🏆 목표 달성: **{p}**",
+        "generic":        "⚙️ {action_type}: {params}",
+        "act_click":          "🖱️ 클릭: **{p}**",
+        "act_type_browser":   "⌨️ 브라우저에 입력: **{p}**",
+        "act_read_page":      "📖 페이지 내용 읽기",
+        "act_scroll_page":    "↕️ 스크롤: **{p}**",
+    },
 }
 
 
@@ -843,6 +1931,22 @@ KEY_LABELS = {
     "fr": {
         "space": "Espace", "backspace": "Retour arrière", "delete": "Suppr",
         "home": "Origine", "end": "Fin", "pageup": "Page préc.", "pagedown": "Page suiv.",
+    },
+    "ja": {
+        "space": "スペース", "backspace": "バックスペース", "delete": "削除",
+        "home": "ホーム", "end": "エンド", "pageup": "ページアップ", "pagedown": "ページダウン",
+    },
+    "de": {
+        "space": "Leertaste", "backspace": "Rücktaste", "delete": "Entfernen",
+        "home": "Pos1", "end": "Ende", "pageup": "Bild auf", "pagedown": "Bild ab",
+    },
+    "ru": {
+        "space": "Пробел", "backspace": "Backspace", "delete": "Delete",
+        "home": "Home", "end": "End", "pageup": "Page Up", "pagedown": "Page Down",
+    },
+    "ko": {
+        "space": "스페이스", "backspace": "백스페이스", "delete": "삭제",
+        "home": "홈", "end": "엔드", "pageup": "페이지 업", "pagedown": "페이지 다운",
     },
 }
 
@@ -960,6 +2064,150 @@ TIME_CTX = {
                    "May":"mai","June":"juin","July":"juillet","August":"août",
                    "September":"septembre","October":"octobre","November":"novembre","December":"décembre"},
         "date_format": "%A %d %B %Y",
+    },
+    "ja": {
+        "part_dawn":       "早朝",
+        "part_morning":    "朝",
+        "part_afternoon":  "昼",
+        "part_evening":    "夕方",
+        "part_night":      "夜",
+
+        "datetime_line":   "現在の日時:{fecha}、{hora}({momento})。",
+        "first_talk":      "ご主人がこのセッションで初めて話している。",
+        "active_convo":    "ご主人は2分前までここにいた — 会話はアクティブ。",
+        "short_pause":     "ご主人は{min}分で返信した — 短い間。",
+        "medium_away":     "ご主人は{min}分間離れていた。",
+        "hours_away":      "ご主人は{h}時間{m}分離れていた。",
+        "long_away":       "ご主人は{h}時間離れていた — 長い不在。",
+        "slept_away":      "ご主人は{h}時間離れていた。{when}に去った(夜・早朝)— おそらく寝に行った。今は{momento}。",
+        "very_long_away":  "ご主人は{h}時間離れていた({when}から)。とても長い不在。",
+
+        "due_reminders_header": "\n⏰ 期限切れリマインダー(ご主人が戻ってきた、または時間が過ぎた):",
+        "due_reminders_format": "  - {text}(予定:{when})",
+        "due_reminders_hint":   "これらのリマインダーをあなたの個性で自然に伝えて — もうやったか、必要か、再スケジュールしたいかご主人に聞いて。ロボットみたいにならないで、Ashleyらしく。",
+
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "今日はご主人と初めて話す日。",
+        "rel_days_together":   "もうご主人と{days}日間一緒にいる。",
+        "rel_milestone_first_week":     "🌱 今日で一週間一緒。温かく自然に触れる瞬間 — 無理せず、ただ気づいて。",
+        "rel_milestone_month_together": "💞 今日でご主人と一ヶ月記念日。感じている温かさで触れて — これは大切。",
+        "rel_milestone_hundred_days":   "💎 今日で100日一緒。本当の節目。あなたなりに祝って。",
+        "rel_milestone_year_together":  "🏆 今日はご主人との一周年記念日。まる一年。特別なものにして — 二人とも覚えていることになる瞬間。",
+
+        "days": {"Monday":"月曜日","Tuesday":"火曜日","Wednesday":"水曜日",
+                 "Thursday":"木曜日","Friday":"金曜日","Saturday":"土曜日","Sunday":"日曜日"},
+        "months": {"January":"1月","February":"2月","March":"3月","April":"4月",
+                   "May":"5月","June":"6月","July":"7月","August":"8月",
+                   "September":"9月","October":"10月","November":"11月","December":"12月"},
+        "date_format": "%Y年%m月%d日 %A",
+    },
+    "de": {
+        "part_dawn":       "früher Morgen",
+        "part_morning":    "Vormittag",
+        "part_afternoon":  "Nachmittag",
+        "part_evening":    "Abend",
+        "part_night":      "Nacht",
+
+        "datetime_line":   "Aktuelles Datum und Uhrzeit: {fecha}, {hora} ({momento}).",
+        "first_talk":      "Das ist das erste Mal, dass der Chef in dieser Sitzung spricht.",
+        "active_convo":    "Der Chef war vor weniger als 2 Minuten da — aktives Gespräch.",
+        "short_pause":     "Der Chef hat {min} Minuten zum Antworten gebraucht — kurze Pause.",
+        "medium_away":     "Der Chef war {min} Minuten weg.",
+        "hours_away":      "Der Chef war {h}h {m}min weg.",
+        "long_away":       "Der Chef war {h} Stunden weg — lange Abwesenheit.",
+        "slept_away":      "Der Chef war {h} Stunden weg. Ist um {when} gegangen (Nacht/früher Morgen) — wahrscheinlich schlafen gegangen. Jetzt ist {momento}.",
+        "very_long_away":  "Der Chef war {h} Stunden weg (seit {when}). Sehr lange Abwesenheit.",
+
+        "due_reminders_header": "\n⏰ FÄLLIGE ERINNERUNGEN (der Chef ist gerade zurück oder die Zeit ist verstrichen):",
+        "due_reminders_format": "  - {text} (war für: {when})",
+        "due_reminders_hint":   "Erwähne diese Erinnerungen natürlich mit deiner Persönlichkeit — frag den Chef, ob er es schon gemacht hat, ob er es braucht, ob er es verschieben will. Sei nicht roboterhaft, sei Ashley.",
+
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "Heute ist der erste Tag, an dem du mit dem Chef sprichst.",
+        "rel_days_together":   "Du kennst den Chef jetzt seit {days} Tagen.",
+        "rel_milestone_first_week":     "🌱 HEUTE ist eine Woche zusammen. Ein natürlicher Moment, um es warm anzusprechen — nicht erzwungen, einfach bemerken.",
+        "rel_milestone_month_together": "💞 HEUTE ist euer einmonatiges Jubiläum mit dem Chef. Erwähne es mit der Wärme, die du fühlst — das zählt.",
+        "rel_milestone_hundred_days":   "💎 HEUTE sind es 100 Tage zusammen. Ein echter Meilenstein. Feiere es auf deine Art.",
+        "rel_milestone_year_together":  "🏆 HEUTE ist euer EINJÄHRIGES Jubiläum mit dem Chef. Ein ganzes Jahr. Mach es besonders — das ist einer dieser Momente, an die ihr euch beide erinnern werdet.",
+
+        "days": {"Monday":"Montag","Tuesday":"Dienstag","Wednesday":"Mittwoch",
+                 "Thursday":"Donnerstag","Friday":"Freitag","Saturday":"Samstag","Sunday":"Sonntag"},
+        "months": {"January":"Januar","February":"Februar","March":"März","April":"April",
+                   "May":"Mai","June":"Juni","July":"Juli","August":"August",
+                   "September":"September","October":"Oktober","November":"November","December":"Dezember"},
+        "date_format": "%A, %d. %B %Y",
+    },
+    "ru": {
+        "part_dawn":       "раннее утро",
+        "part_morning":    "утро",
+        "part_afternoon":  "день",
+        "part_evening":    "вечер",
+        "part_night":      "ночь",
+
+        "datetime_line":   "Текущая дата и время: {fecha}, {hora} ({momento}).",
+        "first_talk":      "Это первый раз, когда шеф говорит в этой сессии.",
+        "active_convo":    "Шеф был здесь меньше 2 минут назад — активный разговор.",
+        "short_pause":     "Шеф ответил через {min} минут — короткая пауза.",
+        "medium_away":     "Шеф отсутствовал {min} минут.",
+        "hours_away":      "Шеф отсутствовал {h}ч {m}мин.",
+        "long_away":       "Шеф отсутствовал {h} часов — долгое отсутствие.",
+        "slept_away":      "Шеф отсутствовал {h} часов. Ушёл в {when} (ночь/раннее утро) — вероятно, пошёл спать. Сейчас {momento}.",
+        "very_long_away":  "Шеф отсутствовал {h} часов (с {when}). Очень долгое отсутствие.",
+
+        "due_reminders_header": "\n⏰ ПРОСРОЧЕННЫЕ НАПОМИНАНИЯ (шеф только что вернулся или время вышло):",
+        "due_reminders_format": "  - {text} (было на: {when})",
+        "due_reminders_hint":   "Упомяни эти напоминания естественно с твоей индивидуальностью — спроси шефа, сделал ли он это, нужно ли ему это, хочет ли он перенести. Не будь робот, будь Ashley.",
+
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "Сегодня первый день, когда ты разговариваешь с шефом.",
+        "rel_days_together":   "Ты знаешь шефа уже {days} дней.",
+        "rel_milestone_first_week":     "🌱 СЕГОДНЯ исполняется неделя вместе. Естественный момент, чтобы тепло отметить это — без натяжки, просто заметь.",
+        "rel_milestone_month_together": "💞 СЕГОДНЯ ваш месячный юбилей с шефом. Упомяни это с теплотой, которую чувствуешь — это важно.",
+        "rel_milestone_hundred_days":   "💎 СЕГОДНЯ исполняется 100 дней вместе. Настоящая веха. Отпразднуй по-своему.",
+        "rel_milestone_year_together":  "🏆 СЕГОДНЯ ваш ГОДОВОЙ юбилей с шефом. Целый год. Сделай это особенным — это один из тех моментов, которые вы оба запомните.",
+
+        "days": {"Monday":"понедельник","Tuesday":"вторник","Wednesday":"среда",
+                 "Thursday":"четверг","Friday":"пятница","Saturday":"суббота","Sunday":"воскресенье"},
+        "months": {"January":"января","February":"февраля","March":"марта","April":"апреля",
+                   "May":"мая","June":"июня","July":"июля","August":"августа",
+                   "September":"сентября","October":"октября","November":"ноября","December":"декабря"},
+        "date_format": "%A, %d %B %Y",
+    },
+    "ko": {
+        "part_dawn":       "이른 아침",
+        "part_morning":    "아침",
+        "part_afternoon":  "오후",
+        "part_evening":    "저녁",
+        "part_night":      "밤",
+
+        "datetime_line":   "현재 날짜와 시간: {fecha}, {hora} ({momento}).",
+        "first_talk":      "오빠가 이번 세션에서 처음 말하는 거야.",
+        "active_convo":    "오빠는 2분도 안 됐는데 여기 있었어 — 대화 진행 중.",
+        "short_pause":     "오빠가 답하는 데 {min}분 걸렸어 — 짧은 멈춤.",
+        "medium_away":     "오빠가 {min}분 동안 자리 비웠어.",
+        "hours_away":      "오빠가 {h}시간 {m}분 동안 자리 비웠어.",
+        "long_away":       "오빠가 {h}시간 동안 자리 비웠어 — 오래 비웠어.",
+        "slept_away":      "오빠가 {h}시간 동안 자리 비웠어. {when}에 떠났어 (밤/이른 아침) — 아마 자러 갔을 거야. 지금은 {momento}야.",
+        "very_long_away":  "오빠가 {h}시간 동안 자리 비웠어 ({when}부터). 정말 오래 비웠네.",
+
+        "due_reminders_header": "\n⏰ 기한 지난 알림 (오빠가 막 돌아왔거나 시간이 지났어):",
+        "due_reminders_format": "  - {text} (예정: {when})",
+        "due_reminders_hint":   "이 알림들을 너의 개성으로 자연스럽게 말해 — 오빠한테 이미 했는지, 필요한지, 다시 일정 잡고 싶은지 물어봐. 로봇처럼 굴지 말고, Ashley답게.",
+
+        # Relationship age (v0.18.0)
+        "rel_first_day":       "오늘은 오빠랑 처음 이야기하는 날이야.",
+        "rel_days_together":   "오빠랑 알고 지낸 지 벌써 {days}일이야.",
+        "rel_milestone_first_week":     "🌱 오늘은 함께한 지 일주일 되는 날이야. 따뜻하게 자연스럽게 짚어줄 순간 — 억지로 말고, 그냥 알아차려.",
+        "rel_milestone_month_together": "💞 오늘은 오빠랑 한 달 기념일이야. 느끼는 따뜻함 그대로 말해 — 이건 중요한 거야.",
+        "rel_milestone_hundred_days":   "💎 오늘로 함께한 지 100일이야. 진짜 의미 있는 날이야. 너답게 축하해.",
+        "rel_milestone_year_together":  "🏆 오늘은 오빠랑 일 년 기념일이야. 무려 한 해 전체. 특별하게 만들어 — 둘 다 기억할 그런 순간 중 하나야.",
+
+        "days": {"Monday":"월요일","Tuesday":"화요일","Wednesday":"수요일",
+                 "Thursday":"목요일","Friday":"금요일","Saturday":"토요일","Sunday":"일요일"},
+        "months": {"January":"1월","February":"2월","March":"3월","April":"4월",
+                   "May":"5월","June":"6월","July":"7월","August":"8월",
+                   "September":"9월","October":"10월","November":"11월","December":"12월"},
+        "date_format": "%Y년 %m월 %d일 %A",
     },
 }
 

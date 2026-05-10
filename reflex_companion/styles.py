@@ -696,12 +696,32 @@ def global_styles():
      (no toma toda la altura del panel) y en 3D quede full vertical.
      Toggle en .ashley-portrait-panel.mode-2d / .mode-3d. */
 
-  /* Default (3D): la imagen llena el panel vertical entero */
+  /* Default (3D): la imagen llena el panel vertical entero
+     v0.18.3 — En modo 3D la imagen se OCULTA y aparece el iframe del widget */
   .ashley-portrait-panel.mode-3d .ashley-mood-image {{
+    display: none;
+  }}
+
+  /* v0.18.3 — MOUNT POINT del widget 3D (iframe creado por bridge JS) ──
+     El bridge ashley_3d_bridge.js inserta un <iframe> dentro de este
+     div al cargar la página. Visible solo en mode-3d, ocupa el panel
+     entero. pointer-events:none en el iframe (configurado por bridge)
+     para que el cursor pase a través hacia los botones del overlay. */
+  .ashley-portrait-panel.mode-3d .ashley-3d-mount {{
     position: absolute;
     inset: 0;
-    background-size: cover;
-    background-position: center top;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+    /* Background gradient que combina con boutique noir — visible mientras
+       el iframe carga el VRM (~2-3 segundos primera vez). */
+    background:
+      radial-gradient(ellipse at center top, rgba(80, 35, 25, 0.55) 0%, transparent 60%),
+      linear-gradient(180deg, #1a0a10 0%, #0a0408 100%);
+  }}
+  .ashley-portrait-panel.mode-2d .ashley-3d-mount {{
+    display: none;
   }}
 
   /* 2D v0.16.3 — imagen cuadrada CENTRADA verticalmente, MÁS grande.

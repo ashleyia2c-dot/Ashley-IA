@@ -685,7 +685,7 @@ async def _mobile_status_endpoint(request):
             payload["model"] = GROK_MODEL
         except Exception:
             pass
-        payload["version"] = "0.18.2"
+        payload["version"] = "0.19.0"
     return _with_cors(_StarletteJSON(payload))
 
 
@@ -1118,7 +1118,7 @@ async def _mobile_sync_prompts_endpoint(request):
             languages[lang] = {"error": str(_e)}
 
     payload = {
-        "version": "0.18.2",
+        "version": "0.19.0",
         "languages": languages,
     }
     return _with_cors(_StarletteJSON(payload))
@@ -1151,7 +1151,7 @@ async def _mobile_sync_state_endpoint(request):
     if not _check_mobile_auth(request):
         return _unauthorized()
 
-    payload: dict = {"version": "0.18.2"}
+    payload: dict = {"version": "0.19.0"}
 
     # Chat history (últimos 50)
     try:

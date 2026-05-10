@@ -846,6 +846,10 @@ def _affection_heart() -> rx.Component:
             State.language,
             ("es", "Cuánto te quiere Ashley"),
             ("fr", "Affection d'Ashley"),
+            ("ja", "ご主人への好感度"),
+            ("de", "Wie gern Ashley dich hat"),
+            ("ru", "Насколько Ashley тебя любит"),
+            ("ko", "오빠를 향한 호감도"),
             "How much Ashley likes you",
         ),
     )
@@ -1097,11 +1101,29 @@ def left_portrait_panel() -> rx.Component:
     """
     State = _get_state()
     return rx.box(
-        # Imagen mood (cambia con el chat)
+        # Imagen mood (cambia con el chat) — visible solo en mode-2d, oculta en mode-3d
         rx.box(
             class_name="ashley-mood-image",
             style={
                 "backgroundImage": "url('" + State.current_image + "')",
+            },
+        ),
+        # ── Mount point para widget 3D ──
+        # Es un div ESTÁTICO sin contenido. El bridge JS (ashley_3d_bridge.js)
+        # crea un <iframe> y lo inserta aquí dinámicamente. Esto evita que
+        # React re-monte el iframe en cada State change (lo que perdería el
+        # contexto WebGL y recargaría el VRM de 47MB).
+        # data-mood → cambia pose en el iframe (tsundere/excited/etc.)
+        # NOTA: ya NO usamos data-talking — la mouth animation viene SOLO
+        # de eventos custom 'ashley:ttsStart'/'ttsEnd' que dispatcha
+        # ashley_voice.js cuando el TTS empieza/termina (audio real).
+        # Antes usábamos State.is_thinking pero eso se activaba mientras
+        # el LLM generaba texto, ANTES del TTS — boca movía sin voz.
+        rx.box(
+            id="ashley-3d-mount",
+            class_name="ashley-3d-mount",
+            custom_attrs={
+                "data-mood": State.mood,
             },
         ),
         # Light rays cenital (cono de luz angelical desde arriba)
@@ -1166,6 +1188,10 @@ def _chat_header_bar() -> rx.Component:
                     State.language,
                     ("es", "Manual de usuario"),
                     ("fr", "Manuel d'utilisateur"),
+                    ("ja", "ユーザーマニュアル"),
+                    ("de", "Benutzerhandbuch"),
+                    ("ru", "Руководство пользователя"),
+                    ("ko", "사용자 매뉴얼"),
                     "User manual",
                 ),
             ),
@@ -1192,12 +1218,20 @@ def _chat_header_bar() -> rx.Component:
                         State.language,
                         ("es", "Voz de Ashley: ACTIVADA (click para silenciar)"),
                         ("fr", "Voix d'Ashley : ACTIVÉE (clic pour couper)"),
+                        ("ja", "Ashleyの声: ON (クリックでミュート)"),
+                        ("de", "Ashleys Stimme: AN (Klick zum Stummschalten)"),
+                        ("ru", "Голос Ashley: ВКЛ (клик чтобы выключить)"),
+                        ("ko", "Ashley 목소리: ON (클릭하면 음소거)"),
                         "Ashley's voice: ON (click to mute)",
                     ),
                     rx.match(
                         State.language,
                         ("es", "Voz de Ashley: silenciada (click para activar)"),
                         ("fr", "Voix d'Ashley : coupée (clic pour activer)"),
+                        ("ja", "Ashleyの声: ミュート (クリックで有効化)"),
+                        ("de", "Ashleys Stimme: stumm (Klick zum Aktivieren)"),
+                        ("ru", "Голос Ashley: выключен (клик чтобы включить)"),
+                        ("ko", "Ashley 목소리: 음소거 (클릭하면 켜짐)"),
                         "Ashley's voice: muted (click to enable)",
                     ),
                 ),
@@ -1223,12 +1257,20 @@ def _chat_header_bar() -> rx.Component:
                         State.language,
                         ("es", "Volver al modo normal"),
                         ("fr", "Retourner au mode normal"),
+                        ("ja", "通常表示に戻る"),
+                        ("de", "Zurück zur Normalansicht"),
+                        ("ru", "Вернуться к обычному виду"),
+                        ("ko", "일반 보기로 돌아가기"),
                         "Back to normal view",
                     ),
                     rx.match(
                         State.language,
                         ("es", "Centrar el chat (focus)"),
                         ("fr", "Centrer le chat (focus)"),
+                        ("ja", "チャットを中央に (フォーカス)"),
+                        ("de", "Chat zentrieren (Fokus)"),
+                        ("ru", "Центрировать чат (фокус)"),
+                        ("ko", "채팅 중앙 정렬 (포커스)"),
                         "Center chat (focus mode)",
                     ),
                 ),

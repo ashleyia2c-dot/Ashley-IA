@@ -105,8 +105,16 @@
         textarea desde v92 (mitigación de spell-jacking, 2022). El IME
         Android trata textarea como TYPE_TEXT_FLAG_MULTI_LINE → no muestra
         predicciones. WhatsApp Web y Telegram Web usan <input> por esto.
-        autocomplete="off" paradójicamente activa MEJORES sugerencias en
-        Gboard porque deja la barra libre (no la reserva para autofill).
+
+        v0.18.2-r2 — autocomplete cambiado de "off" a "on". El user
+        confirmó que en Chrome standalone SÍ aparecen sugerencias de
+        Gboard, pero NO en el WebView de Capacitor → causa: WebView
+        Android traduce autocomplete="off" como IME_FLAG_NO_PERSONALIZED_LEARNING
+        (suprime sugerencias predictivas, no solo el autofill bar).
+        Chrome standalone interpreta autocomplete="off" SOLO para
+        autofill, por eso ahí sí aparecen. Cambiar a "on" resuelve.
+        autocorrect="on" + spellcheck="true" + autocapitalize="sentences"
+        son los señalizadores estándar para activar predictive text.
       -->
       <input
         type="text"
@@ -114,7 +122,7 @@
         placeholder="Escribe un mensaje..."
         autocapitalize="sentences"
         autocorrect="on"
-        autocomplete="off"
+        autocomplete="on"
         spellcheck="true"
         inputmode="text"
         enterkeyhint="send"

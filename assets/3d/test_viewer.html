@@ -1,0 +1,2996 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ashley VRM — Test Viewer</title>
+  <style>
+    :root {
+      --bg: #0a0408;
+      --bg-elev: #1a0f15;
+      --accent: #d4a373;
+      --text: #e8d5c4;
+      --text-dim: #8a7565;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+    }
+    #controls {
+      background: var(--bg-elev);
+      border-right: 1px solid rgba(212, 163, 115, 0.15);
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    #controls h1 {
+      font-size: 16px;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    #controls .sub {
+      color: var(--text-dim);
+      font-size: 11px;
+      margin-bottom: 18px;
+    }
+    #controls h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin: 16px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(212, 163, 115, 0.15);
+    }
+    .slider-row {
+      display: grid;
+      grid-template-columns: 1fr 32px;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .slider-row label {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .slider-row input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .slider-row .val {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 8px 0;
+    }
+    button {
+      background: rgba(212, 163, 115, 0.08);
+      color: var(--text);
+      border: 1px solid rgba(212, 163, 115, 0.25);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    button:hover { background: rgba(212, 163, 115, 0.18); border-color: var(--accent); }
+    button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      font-size: 9px;
+      background: rgba(212, 163, 115, 0.18);
+      border: 1px solid rgba(212, 163, 115, 0.35);
+      border-radius: 3px;
+      font-family: 'Consolas', monospace;
+      color: var(--accent);
+      vertical-align: middle;
+      margin-left: 2px;
+    }
+    #status {
+      margin-top: 12px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--text-dim);
+      min-height: 36px;
+    }
+    #canvas-container {
+      position: relative;
+      background: radial-gradient(ellipse at center, #1a1015 0%, #050208 100%);
+    }
+    #canvas-container canvas { display: block; }
+    #fps {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      color: var(--accent);
+      font-size: 11px;
+      font-family: 'Consolas', monospace;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    #debug {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.85);
+      border: 1px solid rgba(212, 163, 115, 0.3);
+      color: #d4a373;
+      font-size: 11px;
+      font-family: 'Consolas', monospace;
+      padding: 8px 10px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    #debug div { margin-bottom: 2px; }
+    #debug .err { color: #c97373; }
+    #debug .ok { color: #73c97f; }
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 14px;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.166.1",
+      "three/addons/": "https://esm.sh/three@0.166.1/examples/jsm/",
+      "@pixiv/three-vrm": "https://esm.sh/@pixiv/three-vrm@3.1.4?deps=three@0.166.1&external=three",
+      "@pixiv/three-vrm-animation": "https://esm.sh/@pixiv/three-vrm-animation@3.1.4?deps=three@0.166.1,@pixiv/three-vrm@3.1.4&external=three,@pixiv/three-vrm"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<aside id="controls">
+  <h1>Ashley VRM Test</h1>
+  <div class="sub">three-vrm 3.x · drag para rotar · scroll para zoom</div>
+
+  <h2>Vistas</h2>
+  <div class="btn-row">
+    <button data-view="face">👤 Cara <kbd>1</kbd></button>
+    <button data-view="upper">👕 Torso <kbd>2</kbd></button>
+  </div>
+  <div class="btn-row">
+    <button data-view="full">🚶 Cuerpo <kbd>3</kbd></button>
+    <button data-view="auto">📐 Auto-fit <kbd>4</kbd></button>
+  </div>
+  <div style="font-size:10px; color:var(--text-dim); margin:4px 0; line-height:1.4;">
+    Atajos teclado:<br>
+    • <kbd>← → ↑ ↓</kbd> paneo cámara<br>
+    • <kbd>R</kbd> reset vista (auto)<br>
+    • <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> cambiar vista preset<br>
+    • Drag ratón = rotar | scroll = zoom
+  </div>
+
+  <h2>🧪 Bone tester (rellena el notebook)</h2>
+  <select id="bone-select" style="width:100%; padding:6px; background:#1a0f15; color:var(--text); border:1px solid rgba(212,163,115,0.25); border-radius:4px; font-family:inherit; font-size:12px; margin-bottom:6px;">
+    <option value="hips">hips</option>
+    <option value="spine">spine</option>
+    <option value="chest">chest</option>
+    <option value="neck">neck</option>
+    <option value="head">head</option>
+    <option value="rightUpperArm">rightUpperArm</option>
+    <option value="rightLowerArm">rightLowerArm</option>
+    <option value="rightHand">rightHand</option>
+    <option value="leftUpperArm">leftUpperArm</option>
+    <option value="leftLowerArm">leftLowerArm</option>
+    <option value="leftHand">leftHand</option>
+    <option value="rightUpperLeg">rightUpperLeg</option>
+    <option value="rightLowerLeg">rightLowerLeg</option>
+    <option value="rightFoot">rightFoot</option>
+    <option value="leftUpperLeg">leftUpperLeg</option>
+    <option value="leftLowerLeg">leftLowerLeg</option>
+    <option value="leftFoot">leftFoot</option>
+  </select>
+  <select id="bone-angle" style="width:100%; padding:6px; background:#1a0f15; color:var(--text); border:1px solid rgba(212,163,115,0.25); border-radius:4px; font-family:inherit; font-size:12px; margin-bottom:6px;">
+    <option value="60">60° (test grande)</option>
+    <option value="30">30° (medio)</option>
+    <option value="15">15° (sutil)</option>
+    <option value="90">90° (extremo)</option>
+  </select>
+  <div class="btn-row">
+    <button id="cycle-axes">▶ Cycle 6 axes</button>
+    <button id="reset-bone">↺ Reset bone</button>
+  </div>
+  <div class="btn-row">
+    <button id="reset-all" style="background:#c97373; color:#fff; border-color:#c97373;">🚨 RESET TODO</button>
+  </div>
+  <div class="btn-row">
+    <button id="auto-screenshot-one" style="background:#73c97f; color:#fff; border-color:#73c97f;">📸 Hi-res del bone seleccionado</button>
+  </div>
+  <div class="btn-row">
+    <button id="auto-screenshot" style="background:#73a3c9; color:#fff; border-color:#73a3c9;">📸 Hi-res TODOS (17 PNGs)</button>
+  </div>
+  <div class="btn-row">
+    <button data-bone-axis="x+">X+</button>
+    <button data-bone-axis="x-">X-</button>
+  </div>
+  <div class="btn-row">
+    <button data-bone-axis="y+">Y+</button>
+    <button data-bone-axis="y-">Y-</button>
+  </div>
+  <div class="btn-row">
+    <button data-bone-axis="z+">Z+</button>
+    <button data-bone-axis="z-">Z-</button>
+  </div>
+
+  <h2>🎨 Pose Editor (live)</h2>
+  <select id="editor-bone-select" style="width:100%; padding:6px; background:#1a0f15; color:var(--text); border:1px solid rgba(212,163,115,0.25); border-radius:4px; font-family:inherit; font-size:12px; margin-bottom:6px;">
+    <optgroup label="── Torso / cabeza ──">
+      <option value="head">head</option>
+      <option value="neck">neck</option>
+      <option value="chest">chest</option>
+      <option value="spine">spine</option>
+      <option value="hips">hips</option>
+    </optgroup>
+    <optgroup label="── Brazo derecho ──">
+      <option value="rightShoulder">rightShoulder</option>
+      <option value="rightUpperArm">rightUpperArm</option>
+      <option value="rightLowerArm">rightLowerArm</option>
+      <option value="rightHand">rightHand</option>
+    </optgroup>
+    <optgroup label="── Brazo izquierdo ──">
+      <option value="leftShoulder">leftShoulder</option>
+      <option value="leftUpperArm">leftUpperArm</option>
+      <option value="leftLowerArm">leftLowerArm</option>
+      <option value="leftHand">leftHand</option>
+    </optgroup>
+    <optgroup label="── Dedos derechos ──">
+      <option value="rightThumbProximal">rightThumbProximal</option>
+      <option value="rightThumbMetacarpal">rightThumbMetacarpal</option>
+      <option value="rightThumbIntermediate">rightThumbIntermediate</option>
+      <option value="rightThumbDistal">rightThumbDistal</option>
+      <option value="rightIndexProximal">rightIndexProximal</option>
+      <option value="rightIndexIntermediate">rightIndexIntermediate</option>
+      <option value="rightIndexDistal">rightIndexDistal</option>
+      <option value="rightMiddleProximal">rightMiddleProximal</option>
+      <option value="rightMiddleIntermediate">rightMiddleIntermediate</option>
+      <option value="rightMiddleDistal">rightMiddleDistal</option>
+      <option value="rightRingProximal">rightRingProximal</option>
+      <option value="rightRingIntermediate">rightRingIntermediate</option>
+      <option value="rightRingDistal">rightRingDistal</option>
+      <option value="rightLittleProximal">rightLittleProximal</option>
+      <option value="rightLittleIntermediate">rightLittleIntermediate</option>
+      <option value="rightLittleDistal">rightLittleDistal</option>
+    </optgroup>
+    <optgroup label="── Dedos izquierdos ──">
+      <option value="leftThumbProximal">leftThumbProximal</option>
+      <option value="leftThumbMetacarpal">leftThumbMetacarpal</option>
+      <option value="leftThumbIntermediate">leftThumbIntermediate</option>
+      <option value="leftThumbDistal">leftThumbDistal</option>
+      <option value="leftIndexProximal">leftIndexProximal</option>
+      <option value="leftIndexIntermediate">leftIndexIntermediate</option>
+      <option value="leftIndexDistal">leftIndexDistal</option>
+      <option value="leftMiddleProximal">leftMiddleProximal</option>
+      <option value="leftMiddleIntermediate">leftMiddleIntermediate</option>
+      <option value="leftMiddleDistal">leftMiddleDistal</option>
+      <option value="leftRingProximal">leftRingProximal</option>
+      <option value="leftRingIntermediate">leftRingIntermediate</option>
+      <option value="leftRingDistal">leftRingDistal</option>
+      <option value="leftLittleProximal">leftLittleProximal</option>
+      <option value="leftLittleIntermediate">leftLittleIntermediate</option>
+      <option value="leftLittleDistal">leftLittleDistal</option>
+    </optgroup>
+    <optgroup label="── Piernas ──">
+      <option value="rightUpperLeg">rightUpperLeg</option>
+      <option value="rightLowerLeg">rightLowerLeg</option>
+      <option value="rightFoot">rightFoot</option>
+      <option value="leftUpperLeg">leftUpperLeg</option>
+      <option value="leftLowerLeg">leftLowerLeg</option>
+      <option value="leftFoot">leftFoot</option>
+    </optgroup>
+  </select>
+  <div class="btn-row">
+    <button id="check-fingers" style="background:#73a3c9; color:#fff; border-color:#73a3c9; font-size:11px;">🤚 Verificar bones disponibles</button>
+  </div>
+  <div id="editor-sliders"></div>
+  <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(212,163,115,0.15);">
+    <div style="font-size:11px; color:var(--accent); margin-bottom:4px;">Expressions (cara)</div>
+    <div id="editor-expressions"></div>
+  </div>
+  <div class="btn-row">
+    <button id="editor-export">📋 Copiar pose JSON</button>
+    <button id="editor-clear">↺ Reset pose</button>
+  </div>
+  <div style="font-size:10px; color:var(--text-dim); margin:4px 0;">
+    Mueve sliders → ves a Ashley en tiempo real. Cuando quede bien, "Copiar pose JSON" → me lo pegas.
+  </div>
+
+  <h2>Poses</h2>
+  <div style="background:rgba(115, 163, 201, 0.08); border:1px solid rgba(115, 163, 201, 0.25); border-radius:6px; padding:8px; margin-bottom:8px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+      <input type="checkbox" id="anim-enabled" checked style="accent-color:#73a3c9;">
+      <label for="anim-enabled" style="font-size:12px; cursor:pointer; color:var(--text);">🎬 Transiciones suaves</label>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 50px; gap:6px; align-items:center;">
+      <input type="range" id="anim-duration" min="100" max="1500" step="50" value="400" style="accent-color:#73a3c9;">
+      <span id="anim-duration-val" style="font-size:11px; color:var(--text-dim); text-align:right; font-family:monospace;">400ms</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button data-pose="hipsHands">💪 Manos cadera</button>
+    <button data-pose="armsCrossed">🙅 Cruzados</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="wave">👋 Saludo</button>
+    <button data-pose="coolFingers">✌️ Peace</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="thinking">🤔 Pensativa</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="handsClasped">🤲 Manos juntas</button>
+    <button data-pose="surprised">😲 Sorpresa</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="tsundere">🔥 Tsundere</button>
+    <button data-pose="shy">😳 Shy</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="lookAway">🙄 Look away</button>
+    <button data-pose="REST">🧍 Rest pose</button>
+  </div>
+  <div class="btn-row">
+    <button data-pose="curious">🤨 Curious</button>
+    <button data-pose="sad">😢 Sad</button>
+  </div>
+
+  <h2>🎯 VRM Scene Transform (mover/rotar Ashley)</h2>
+  <div style="font-size:10px; color:var(--text-dim); margin-bottom:6px;">
+    Cuando una animación VRMA hace que Ashley quede de lado/flotando, ajusta aquí.
+  </div>
+  <div id="vrm-transform-sliders"></div>
+  <div class="btn-row">
+    <button id="vrm-transform-export">📋 Copiar transform JSON</button>
+    <button id="vrm-transform-reset">↺ Reset transform</button>
+  </div>
+
+  <h2>🎞️ External animations (VRMA / Mixamo FBX)</h2>
+  <div id="anim-dropzone" style="border:2px dashed rgba(115,201,127,0.5); border-radius:6px; padding:14px; text-align:center; font-size:11px; color:var(--text-dim); cursor:pointer; margin-bottom:6px;">
+    📁 Suelta archivos <code>.vrma</code> o <code>.fbx</code> aquí<br>
+    <span style="font-size:10px; opacity:0.7;">(o click para abrir explorador)</span>
+  </div>
+  <input type="file" id="anim-file-input" multiple accept=".vrma,.fbx,.glb" style="display:none;">
+  <div id="anim-list" style="font-size:11px; max-height:140px; overflow-y:auto; margin-bottom:6px;"></div>
+  <div class="btn-row">
+    <button id="anim-stop" style="background:rgba(201,115,115,0.18); border-color:rgba(201,115,115,0.4); color:#d4a0a0; font-size:11px;">⏹ Stop animation</button>
+  </div>
+
+  <h2>🎬 Sequences (gestos animados)</h2>
+  <div class="btn-row">
+    <button data-seq="greetingWave">👋 Saludo + agita</button>
+  </div>
+  <div class="btn-row">
+    <button data-seq="nodYes">✅ Asentir</button>
+    <button data-seq="shakeNo">❌ Negar</button>
+  </div>
+  <div class="btn-row">
+    <button data-seq="laugh">🤣 Reír</button>
+    <button data-seq="surpriseReact">😱 Sorpresa</button>
+  </div>
+  <div class="btn-row">
+    <button data-seq="embarrassedReact">😳 Vergüenza</button>
+    <button data-seq="thinkingMoment">🤔 Piensa</button>
+  </div>
+  <div class="btn-row">
+    <button id="seq-stop" style="background:#c97373; color:#fff; border-color:#c97373;">⏹ Parar sequence</button>
+  </div>
+
+  <h2>Quick test</h2>
+  <div class="btn-row">
+    <button data-test="emotions">▶ Emociones</button>
+    <button data-test="visemes">▶ Visemes</button>
+  </div>
+  <div class="btn-row">
+    <button data-test="eyes">▶ Ojos</button>
+    <button data-test="full">▶ Test full</button>
+  </div>
+  <div class="btn-row">
+    <button data-test="hair">🎀 Test pelo (spring)</button>
+    <button data-test="dance">💃 Mini dance</button>
+  </div>
+  <div class="btn-row">
+    <button data-test="diag">🔍 Diag bones</button>
+    <button data-test="natural">🧍 Pose natural</button>
+  </div>
+  <div class="btn-row">
+    <button data-test="spin">🔄 Spin scene</button>
+    <button data-test="rawbone">🦴 Raw bone</button>
+  </div>
+  <div class="btn-row">
+    <button data-test="armaxes">🧭 Test arm axes</button>
+    <button data-test="forearmaxes">🧭 Test forearm axes</button>
+  </div>
+  <div class="btn-row">
+    <button id="toggle-blink" class="active">👁 Auto blink</button>
+    <button id="toggle-idle" class="active">🌬 Idle</button>
+  </div>
+  <div class="btn-row">
+    <button id="toggle-cursor" class="active">🖱 Eyes follow</button>
+    <button id="reset">↺ Reset</button>
+  </div>
+  <div class="btn-row">
+    <button id="toggle-floor" class="active">🌍 Suelo</button>
+    <button id="toggle-debug">🔧 Debug helpers</button>
+  </div>
+  <div class="btn-row">
+    <button id="toggle-debug-log">📝 Debug log</button>
+  </div>
+
+  <h2 id="emotions-h">Emociones</h2>
+  <div id="emotions-section"></div>
+
+  <h2 id="visemes-h">Visemes (lipsync)</h2>
+  <div id="visemes-section"></div>
+
+  <h2 id="lookat-h">Look At</h2>
+  <div id="lookat-section"></div>
+
+  <h2 id="extra-h">Extra</h2>
+  <div id="extra-section"></div>
+
+  <div id="status">Cargando three-vrm desde CDN...</div>
+</aside>
+
+<div id="canvas-container">
+  <div id="loading">Cargando Ashley...</div>
+  <div id="fps"></div>
+  <div id="debug">debug log: esperando carga...</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+const setStatus = (msg) => { document.getElementById('status').textContent = msg; };
+
+// Debug log on screen (no requiere F12)
+const debugEl = document.getElementById('debug');
+const debugLines = [];
+function dbg(msg, kind) {
+  const t = new Date().toTimeString().slice(0, 8);
+  debugLines.push({ t, msg, kind: kind || '' });
+  if (debugLines.length > 20) debugLines.shift();
+  debugEl.innerHTML = debugLines.map(l =>
+    `<div class="${l.kind}">[${l.t}] ${l.msg}</div>`
+  ).join('');
+  debugEl.scrollTop = debugEl.scrollHeight;
+}
+window.addEventListener('error', (e) => dbg('JS ERROR: ' + (e.message || e.error?.message || e), 'err'));
+window.addEventListener('unhandledrejection', (e) => dbg('PROMISE ERR: ' + (e.reason?.message || e.reason), 'err'));
+dbg('viewer iniciando...', 'ok');
+
+// ─── Setup THREE ────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(
+  // FOV 45 (era 30 telephoto — demasiado estrecho, fácil missframe)
+  45,
+  container.clientWidth / container.clientHeight,
+  0.01, 1000
+);
+camera.position.set(0, 1.4, 2.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.35, 0);
+controls.enableDamping = true;
+controls.minDistance = 0.5;
+controls.maxDistance = 8;
+
+// Luces — para que MToon shader luzca
+const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambient);
+const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+dir.position.set(1, 2, 1.5);
+scene.add(dir);
+const fill = new THREE.DirectionalLight(0xffe8d5, 0.3);
+fill.position.set(-1, 1, -1);
+scene.add(fill);
+
+// Helper grid + disco de "suelo" debajo de Ashley
+const grid = new THREE.GridHelper(4, 16, 0x664428, 0x332218);
+grid.position.y = 0.001; // un pelín arriba para no z-fight con disco
+scene.add(grid);
+
+// Disco circular plano en el suelo — referencia visual de "aquí pisas"
+const floorDisc = new THREE.Mesh(
+  new THREE.CircleGeometry(0.8, 64),
+  new THREE.MeshBasicMaterial({
+    color: 0x1a0f15,
+    transparent: true,
+    opacity: 0.85,
+  })
+);
+floorDisc.rotation.x = -Math.PI / 2;
+floorDisc.position.y = 0;
+scene.add(floorDisc);
+
+// Línea de horizonte sutil (anillo en el borde del disco)
+const ringGeom = new THREE.RingGeometry(0.78, 0.80, 64);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xd4a373, transparent: true, opacity: 0.5 });
+const floorRing = new THREE.Mesh(ringGeom, ringMat);
+floorRing.rotation.x = -Math.PI / 2;
+floorRing.position.y = 0.002;
+scene.add(floorRing);
+
+// ─── Rest pose + library de poses (calibrada para Ashley específicamente) ──
+const PI = Math.PI;
+const REST_POSE = {
+  rightUpperArm: { z: PI * 0.40,  y: -PI * 0.04 },
+  leftUpperArm:  { z: -PI * 0.40, y: PI * 0.04 },
+  rightLowerArm: { y: PI * 0.10 },
+  leftLowerArm:  { y: -PI * 0.10 },
+};
+
+// POSES v2 — calibradas con axis verificados al 100% (ver ASHLEY_RIG_NOTES.md).
+//
+// Recordatorios clave del rig de Ashley:
+// - rightUpperArm: Z+ = baja, X+ = atrás, X- = delante, Y+ = twist
+// - leftUpperArm: Z- = baja (mirror), X+ = delante (! diferente de right)
+// - lowerArm: Y+ = bend forward (right), Y- = forward (left mirror)
+// - head: X+ = chin UP, X- = chin DOWN, Y+ = gira su izq, Z+ = tilt su derecha
+const POSES = {
+  // Manos en cadera (proud / hipsHands)
+  hipsHands: {
+    rightUpperArm: { z: PI * 0.30, y: -PI * 0.15, x: PI * 0.20 },
+    leftUpperArm:  { z: -PI * 0.30, y:  PI * 0.15, x: PI * 0.20 },
+    rightLowerArm: { y: PI * 0.50 },
+    leftLowerArm:  { y: -PI * 0.50 },
+  },
+  // Brazos cruzados (embarrassed / tsundere defensive)
+  armsCrossed: {
+    rightUpperArm: { z: PI * 0.35, x: -PI * 0.12, y: -PI * 0.20 },
+    leftUpperArm:  { z: -PI * 0.35, x: -PI * 0.12, y:  PI * 0.20 },
+    rightLowerArm: { y: PI * 0.70 },
+    leftLowerArm:  { y: -PI * 0.70 },
+  },
+  // Saludo (excited / wave) — pose construida por el user 9-may
+  wave: {
+    rightUpperArm: { x: PI * 0.167, y: -PI * 0.044, z: PI * 0.400 },
+    rightLowerArm: { x: PI * 0.100, y: PI * 0.294 },
+    rightHand:     { x: -PI * 0.222, y: -PI * 0.078, z: PI * 0.044 },
+    leftUpperArm:  { x: -PI * 0.128, y: PI * 0.040, z: -PI * 0.400 },
+    leftLowerArm:  { x: -PI * 0.022, y: -PI * 0.889, z: -PI * 0.056 },
+    leftHand:      { x: -PI * 0.244, y: PI * 0.072, z: PI * 0.394 },
+    head:          { y: -PI * 0.006, z: -PI * 0.056 },
+  },
+  // Pensativa — mano derecha al mentón
+  thinking: {
+    rightUpperArm: { z: PI * 0.10, y: -PI * 0.25, x: -PI * 0.15 },
+    rightLowerArm: { y: PI * 0.90 },
+    leftUpperArm:  { z: -PI * 0.40, y: PI * 0.04 },
+    leftLowerArm:  { y: -PI * 0.10 },
+    head: { z: PI * 0.06, x: -PI * 0.04 },
+  },
+  // Manos juntas (soft / sweet)
+  handsClasped: {
+    rightUpperArm: { z: PI * 0.35, y: -PI * 0.10 },
+    leftUpperArm:  { z: -PI * 0.35, y:  PI * 0.10 },
+    rightLowerArm: { y: PI * 0.55 },
+    leftLowerArm:  { y: -PI * 0.55 },
+  },
+  // Sorpresa (manos cerca de la cara)
+  surprised: {
+    rightUpperArm: { z: PI * 0.20, y: -PI * 0.30, x: -PI * 0.15 },
+    leftUpperArm:  { z: -PI * 0.20, y:  PI * 0.30, x: -PI * 0.15 },
+    rightLowerArm: { y: PI * 0.85 },
+    leftLowerArm:  { y: -PI * 0.85 },
+  },
+  // Peace sign / V sign — pose excited/playful — construida 9-may
+  coolFingers: {
+    head: { x: PI * 0.001, y: PI * 0.002 },
+    rightShoulder: { x: -PI * 0.022, y: PI * 0.028, z: -PI * 0.106 },
+    rightUpperArm: { x: PI * 0.117, y: -PI * 0.017, z: PI * 0.583 },
+    rightLowerArm: { x: PI * 0.100, y: PI * 0.050, z: -PI * 0.117 },
+    rightHand:     { x: -PI * 0.217, y: PI * 0.017, z: -PI * 0.261 },
+    rightThumbMetacarpal:    { x: PI * 0.106, y: -PI * 0.250, z: PI * 0.144 },
+    rightThumbProximal:      { x: -PI * 0.017, y: PI * 0.006, z: -PI * 0.044 },
+    rightThumbDistal:        { x: PI * 0.006, y: -PI * 0.367 },
+    rightIndexProximal:      { x: -PI * 0.144, y: -PI * 0.322, z: PI * 0.206 },
+    rightIndexIntermediate:  { y: -PI * 0.633, z: PI * 0.106 },
+    rightIndexDistal:        { x: PI * 0.006, y: -PI * 0.244, z: -PI * 0.056 },
+    rightMiddleProximal:     { x: -PI * 0.239, y: -PI * 0.294, z: PI * 0.150 },
+    rightMiddleIntermediate: { y: -PI * 0.617, z: PI * 0.067 },
+    rightMiddleDistal:       { x: -PI * 0.006, y: -PI * 0.272, z: -PI * 0.106 },
+    rightRingProximal:       { x: -PI * 0.222, y: -PI * 0.289, z: PI * 0.150 },
+    rightRingIntermediate:   { x: -PI * 0.022, y: -PI * 0.633, z: PI * 0.072 },
+    rightRingDistal:         { x: PI * 0.022, y: -PI * 0.239, z: -PI * 0.056 },
+    rightLittleProximal:     { x: PI * 0.144, z: PI * 0.367 },
+    rightLittleIntermediate: { x: PI * 0.006, y: -PI * 0.050, z: PI * 0.711 },
+    leftShoulder: { x: PI * 0.094 },
+    leftUpperArm:  { x: -PI * 0.033, y: PI * 0.040, z: -PI * 0.372 },
+    leftLowerArm:  { x: -PI * 0.433, z: -PI * 0.811 },
+    leftHand:      { x: PI * 0.272, y: -PI * 0.156, z: PI * 0.267 },
+    leftThumbMetacarpal:     { x: PI * 0.200, y: PI * 0.089, z: -PI * 0.006 },
+    leftThumbProximal:       { x: PI * 0.433, y: PI * 0.417, z: -PI * 0.289 },
+    leftThumbDistal:         { x: -PI * 0.017, y: PI * 0.239, z: -PI * 0.294 },
+    leftIndexProximal:       { x: PI * 0.006, y: PI * 0.033, z: -PI * 0.017 },
+    leftIndexIntermediate:   { x: PI * 0.100, y: -PI * 0.006, z: PI * 0.028 },
+    leftIndexDistal:         { x: PI * 0.100, z: PI * 0.017 },
+    leftMiddleProximal:      { x: PI * 0.056, y: PI * 0.017, z: -PI * 0.056 },
+    leftMiddleIntermediate:  { x: -PI * 0.017, y: -PI * 0.067, z: PI * 0.067 },
+    leftMiddleDistal:        { y: -PI * 0.028, z: PI * 0.050 },
+    leftRingProximal:        { x: -PI * 0.006 },
+    leftRingIntermediate:    { x: PI * 0.044, y: -PI * 0.050, z: -PI * 0.689 },
+    leftRingDistal:          { x: PI * 0.067, y: -PI * 0.194, z: -PI * 0.339 },
+    leftLittleIntermediate:  { z: -PI * 0.689 },
+  },
+  // Tsundere clásica — mano en cadera + hipshot stance — construida 9-may
+  tsundere: {
+    rightShoulder: { x: -PI * 0.022, y: PI * 0.017, z: -PI * 0.128 },
+    rightUpperArm: { x: PI * 0.156, y: -PI * 0.028, z: PI * 0.394 },
+    rightLowerArm: { x: PI * 0.189, y: PI * 0.400, z: PI * 0.128 },
+    rightHand:     { x: PI * 0.033, y: PI * 0.411, z: -PI * 0.200 },
+    rightThumbMetacarpal:    { x: PI * 0.022, y: -PI * 0.156, z: -PI * 0.128 },
+    rightThumbProximal:      { x: PI * 0.050, y: -PI * 0.100, z: PI * 0.228 },
+    rightIndexProximal:      { x: -PI * 0.350, y: -PI * 0.117, z: -PI * 0.033 },
+    rightIndexIntermediate:  { y: -PI * 0.033 },
+    rightMiddleProximal:     { x: PI * 0.017, y: -PI * 0.100, z: PI * 0.194 },
+    rightRingProximal:       { x: -PI * 0.028, y: -PI * 0.128, z: PI * 0.267 },
+    rightRingIntermediate:   { x: PI * 0.006, y: -PI * 0.022, z: PI * 0.033 },
+    rightRingDistal:         { x: PI * 0.189, y: PI * 0.028, z: PI * 0.056 },
+    rightLittleProximal:     { z: PI * 0.367 },
+    leftUpperArm:  { x: PI * 0.100, y: PI * 0.040, z: -PI * 0.372 },
+    leftLowerArm:  { x: -PI * 0.150, y: PI * 0.006, z: -PI * 0.156 },
+    leftHand:      { x: PI * 0.033, y: -PI * 0.056 },
+    leftThumbMetacarpal:     { x: PI * 0.200, y: PI * 0.056, z: -PI * 0.006 },
+    leftThumbProximal:       { x: -PI * 0.144, y: PI * 0.200, z: -PI * 0.078 },
+    leftIndexIntermediate:   { y: PI * 0.067, z: -PI * 0.350 },
+    leftIndexDistal:         { x: PI * 0.017, z: -PI * 0.289 },
+    leftMiddleProximal:      { y: -PI * 0.022, z: PI * 0.006 },
+    leftMiddleIntermediate:  { y: PI * 0.122, z: -PI * 0.394 },
+    leftMiddleDistal:        { z: -PI * 0.361 },
+    leftRingIntermediate:    { z: -PI * 0.350 },
+    leftRingDistal:          { x: -PI * 0.006, z: -PI * 0.372 },
+    leftLittleProximal:      { y: -PI * 0.017 },
+    leftLittleIntermediate:  { z: -PI * 0.439 },
+    leftLittleDistal:        { z: -PI * 0.411 },
+    rightUpperLeg: { x: -PI * 0.006, y: -PI * 0.172, z: -PI * 0.033 },
+    rightLowerLeg: { x: PI * 0.017, y: PI * 0.094, z: -PI * 0.022 },
+    rightFoot:     { x: -PI * 0.006, y: PI * 0.128, z: PI * 0.022 },
+    leftUpperLeg:  { x: -PI * 0.017, y: PI * 0.072, z: PI * 0.078 },
+    leftLowerLeg:  { x: PI * 0.100, z: PI * 0.022 },
+    leftFoot:      { x: PI * 0.006, y: -PI * 0.139, z: PI * 0.006 },
+  },
+  // Tsundere look-away — head Y+ gira a SU izquierda
+  lookAway: {
+    head: { y: PI * 0.20, x: PI * 0.04 },
+    rightUpperArm: { z: PI * 0.40, y: -PI * 0.04 },
+    leftUpperArm:  { z: -PI * 0.40, y:  PI * 0.04 },
+    rightLowerArm: { y: PI * 0.10 },
+    leftLowerArm:  { y: -PI * 0.10 },
+  },
+  // Shy — head X- = chin DOWN
+  shy: {
+    head: { x: -PI * 0.12, z: -PI * 0.04 },
+    rightUpperArm: { z: PI * 0.42, y: PI * 0.05 },
+    leftUpperArm:  { z: -PI * 0.42, y: -PI * 0.05 },
+    rightLowerArm: { y: PI * 0.30 },
+    leftLowerArm:  { y: -PI * 0.30 },
+  },
+  // Curious — head tilt + light turn
+  curious: {
+    head: { z: PI * 0.12, y: -PI * 0.06 },
+    rightUpperArm: { z: PI * 0.40, y: -PI * 0.04 },
+    leftUpperArm:  { z: -PI * 0.40, y:  PI * 0.04 },
+    rightLowerArm: { y: PI * 0.10 },
+    leftLowerArm:  { y: -PI * 0.10 },
+  },
+
+  // ─── Poses simples: solo head + expressions (cuerpo en rest pose) ───
+  // Estas son CONSERVADORAS — solo tocan cara + cabeza, el cuerpo queda en
+  // rest. Predecibles y siempre se ven bien. Para poses con brazos elaborados
+  // (thinking con mano al mentón, etc.) hay que construirlas en el editor.
+
+  // Shy / embarrassed — head abajo + ligero tilt + sorrow
+  shy: {
+    head: { x: -PI * 0.08, z: -PI * 0.03 },  // chin down + tilt sutil
+    expressions: { sorrow: 0.40, relaxed: 0.15, blink: 0.30 },
+  },
+
+  // Surprised — head ligero atrás + cara surprised wide
+  surprised: {
+    head: { x: PI * 0.04 },  // ligero chin up
+    expressions: { surprised: 0.80 },
+  },
+
+  // Thinking — head tilt + cara neutra contemplativa (sin mano al mentón por ahora)
+  thinking: {
+    head: { z: PI * 0.10, x: -PI * 0.04 },  // tilt + leve chin down
+    expressions: { neutral: 0.30, blink: 0.20 },
+  },
+
+  // Soft / handsClasped — head ligero abajo + cara relajada feliz
+  // (Sin las manos juntas físicamente — eso se hace en sequence con manos al pecho)
+  handsClasped: {
+    head: { x: -PI * 0.04, y: PI * 0.02 },
+    expressions: { relaxed: 0.35, happy: 0.25 },
+  },
+
+  // Sad — head MUY abajo + sorrow grande + semi-blink
+  sad: {
+    head: { x: -PI * 0.18 },  // chin down clearly
+    expressions: { sorrow: 0.70, relaxed: 0.20, blink: 0.40 },
+  },
+
+  // ─── Variantes pequeñas para usar en SEQUENCES ────────────────
+
+  // Wave variants — para sequence "greetingWave" (mano agitando)
+  waveLeft: {
+    rightUpperArm: { x: PI * 0.167, y: -PI * 0.044, z: PI * 0.400 },
+    rightLowerArm: { x: PI * 0.100, y: PI * 0.294 },
+    rightHand:     { x: -PI * 0.222, y: -PI * 0.078, z: PI * 0.180 }, // z+ (mano izq)
+    leftUpperArm:  { x: -PI * 0.128, y: PI * 0.040, z: -PI * 0.400 },
+    leftLowerArm:  { x: -PI * 0.022, y: -PI * 0.889, z: -PI * 0.056 },
+    leftHand:      { x: -PI * 0.244, y: PI * 0.072, z: PI * 0.394 },
+    head:          { z: -PI * 0.056 },
+    expressions:   { happy: 0.50 },
+  },
+  waveRight: {
+    rightUpperArm: { x: PI * 0.167, y: -PI * 0.044, z: PI * 0.400 },
+    rightLowerArm: { x: PI * 0.100, y: PI * 0.294 },
+    rightHand:     { x: -PI * 0.222, y: -PI * 0.078, z: -PI * 0.090 }, // z- (mano der)
+    leftUpperArm:  { x: -PI * 0.128, y: PI * 0.040, z: -PI * 0.400 },
+    leftLowerArm:  { x: -PI * 0.022, y: -PI * 0.889, z: -PI * 0.056 },
+    leftHand:      { x: -PI * 0.244, y: PI * 0.072, z: PI * 0.394 },
+    head:          { z: -PI * 0.056 },
+    expressions:   { happy: 0.50 },
+  },
+
+  // Nod variants — sequence asentir "sí" — X- = chin DOWN según notebook
+  nodDown: {
+    head: { x: -PI * 0.10 },  // chin baja
+    expressions: { happy: 0.30 },
+  },
+  nodUp: {
+    head: { x: PI * 0.04 },  // ligero chin up (vuelve casi a neutral)
+    expressions: { happy: 0.30 },
+  },
+
+  // Shake variants — sequence negar "no"
+  shakeLeft: {
+    head: { y: PI * 0.18 },
+    expressions: { sad: 0.20 },
+  },
+  shakeRight: {
+    head: { y: -PI * 0.18 },
+    expressions: { sad: 0.20 },
+  },
+
+  // Laugh variants — sequence reír (head atrás + shoulders shake)
+  // X+ = chin UP (head atrás riendo) según notebook v2
+  laughOpen: {
+    head: { x: PI * 0.10, z: PI * 0.05 },
+    expressions: { happy: 0.85, blink: 0.40, aa: 0.50 },  // boca abierta riendo
+  },
+  laughShake1: {
+    head: { x: PI * 0.08, z: PI * 0.10 },
+    expressions: { happy: 0.85, blink: 0.40, aa: 0.30 },
+  },
+  laughShake2: {
+    head: { x: PI * 0.08, z: -PI * 0.02 },
+    expressions: { happy: 0.85, blink: 0.40, aa: 0.30 },
+  },
+};
+
+// ─── SequencePlayer — encadena poses con timing para hacer "animaciones" ──
+// Usa el PoseAnimator (SLERP entre cada par de poses).
+// Útil para gestos compuestos: wave-shake, laugh, nod, headShake, etc.
+class SequencePlayer {
+  constructor(animator) {
+    this.animator = animator;
+    this.queue = [];
+    this.currentIdx = 0;
+    this.timeoutId = null;
+    this.loop = false;
+    this.onComplete = null;
+  }
+
+  // steps: [{pose: 'wave', duration: 400}, {pose: 'REST', duration: 600}]
+  play(steps, opts = {}) {
+    this.stop();
+    this.queue = steps;
+    this.currentIdx = 0;
+    this.loop = opts.loop || false;
+    this.onComplete = opts.onComplete || null;
+    this._advance();
+  }
+
+  _advance() {
+    if (this.currentIdx >= this.queue.length) {
+      if (this.loop) {
+        this.currentIdx = 0;
+      } else {
+        if (this.onComplete) this.onComplete();
+        return;
+      }
+    }
+    const step = this.queue[this.currentIdx];
+    const poseName = step.pose;
+    const target = (poseName === 'REST') ? {} : (POSES[poseName] || {});
+    const duration = step.duration || 400;
+    this.animator.transitionTo(target, duration);
+    this.currentIdx++;
+    this.timeoutId = setTimeout(() => this._advance(), duration);
+  }
+
+  stop() {
+    if (this.timeoutId) clearTimeout(this.timeoutId);
+    this.timeoutId = null;
+    this.queue = [];
+    this.currentIdx = 0;
+  }
+
+  isPlaying() { return this.timeoutId !== null; }
+}
+
+// ─── SEQUENCES — gestos compuestos listos para disparar ───────
+const SEQUENCES = {
+  // Saludo completo: pose wave → agita 4 veces → vuelta a rest
+  greetingWave: [
+    { pose: 'wave',      duration: 350 },
+    { pose: 'waveLeft',  duration: 200 },
+    { pose: 'waveRight', duration: 200 },
+    { pose: 'waveLeft',  duration: 200 },
+    { pose: 'waveRight', duration: 200 },
+    { pose: 'wave',      duration: 250 },
+    { pose: 'REST',      duration: 500 },
+  ],
+
+  // Asentir "sí" — head down/up 3 veces
+  nodYes: [
+    { pose: 'nodDown', duration: 200 },
+    { pose: 'nodUp',   duration: 200 },
+    { pose: 'nodDown', duration: 200 },
+    { pose: 'nodUp',   duration: 200 },
+    { pose: 'REST',    duration: 300 },
+  ],
+
+  // Negar "no" — head left/right 3 veces
+  shakeNo: [
+    { pose: 'shakeLeft',  duration: 180 },
+    { pose: 'shakeRight', duration: 180 },
+    { pose: 'shakeLeft',  duration: 180 },
+    { pose: 'shakeRight', duration: 180 },
+    { pose: 'REST',       duration: 300 },
+  ],
+
+  // Risa — chin up + shoulders shake
+  laugh: [
+    { pose: 'laughOpen',   duration: 250 },
+    { pose: 'laughShake1', duration: 200 },
+    { pose: 'laughShake2', duration: 200 },
+    { pose: 'laughShake1', duration: 200 },
+    { pose: 'laughShake2', duration: 200 },
+    { pose: 'laughOpen',   duration: 250 },
+    { pose: 'REST',        duration: 500 },
+  ],
+
+  // Sorpresa — SNAP rápido a surprised, hold 1s, vuelve suave
+  surpriseReact: [
+    { pose: 'surprised', duration: 180 },  // SNAP
+    { pose: 'surprised', duration: 1200 }, // HOLD
+    { pose: 'REST',      duration: 600 },
+  ],
+
+  // Vergüenza — slow down to shy + holds + slow back
+  embarrassedReact: [
+    { pose: 'shy',  duration: 600 },
+    { pose: 'shy',  duration: 1500 },
+    { pose: 'REST', duration: 700 },
+  ],
+
+  // Pensar — slow up to thinking, hold long, slow back
+  thinkingMoment: [
+    { pose: 'thinking', duration: 700 },
+    { pose: 'thinking', duration: 2500 },
+    { pose: 'REST',     duration: 600 },
+  ],
+};
+
+function applyRestPose(vrm) {
+  applyPose(vrm, REST_POSE);
+  // Reset también head
+  const head = vrm.humanoid?.getNormalizedBoneNode?.('head');
+  if (head) { head.rotation.x = 0; head.rotation.y = 0; head.rotation.z = 0; }
+  dbg('rest pose aplicada', 'ok');
+}
+// Lista de bones que pueden ser tocados por poses — al cambiar de pose, primero
+// reseteamos TODOS estos a 0 para evitar que rotaciones de la pose anterior se
+// queden colgadas (ej: si pose A toca rightHand pero pose B no, sin este reset
+// la mano se quedaría con la rotación de A).
+const POSEABLE_BONES = [
+  'head', 'neck', 'chest', 'spine', 'hips',
+  // Brazos
+  'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand',
+  'leftShoulder',  'leftUpperArm',  'leftLowerArm',  'leftHand',
+  // Dedos derechos
+  'rightThumbMetacarpal','rightThumbProximal','rightThumbIntermediate','rightThumbDistal',
+  'rightIndexProximal','rightIndexIntermediate','rightIndexDistal',
+  'rightMiddleProximal','rightMiddleIntermediate','rightMiddleDistal',
+  'rightRingProximal','rightRingIntermediate','rightRingDistal',
+  'rightLittleProximal','rightLittleIntermediate','rightLittleDistal',
+  // Dedos izquierdos
+  'leftThumbMetacarpal','leftThumbProximal','leftThumbIntermediate','leftThumbDistal',
+  'leftIndexProximal','leftIndexIntermediate','leftIndexDistal',
+  'leftMiddleProximal','leftMiddleIntermediate','leftMiddleDistal',
+  'leftRingProximal','leftRingIntermediate','leftRingDistal',
+  'leftLittleProximal','leftLittleIntermediate','leftLittleDistal',
+  // Piernas
+  'rightUpperLeg','rightLowerLeg','rightFoot','rightToes',
+  'leftUpperLeg','leftLowerLeg','leftFoot','leftToes',
+];
+
+// ─── Mixamo → VRM bone name mapping (para retargeting de FBX) ─────
+// Estos son los nombres canónicos. Mixamo a veces exporta con prefijo
+// "mixamorig:" (con dos puntos) y a veces "mixamorig" (sin), manejamos los 2.
+const MIXAMO_TO_VRM_HUMAN = {
+  'mixamorigHips': 'hips',
+  'mixamorigSpine': 'spine',
+  'mixamorigSpine1': 'chest',
+  'mixamorigSpine2': 'upperChest',
+  'mixamorigNeck': 'neck',
+  'mixamorigHead': 'head',
+  'mixamorigLeftShoulder': 'leftShoulder',
+  'mixamorigLeftArm': 'leftUpperArm',
+  'mixamorigLeftForeArm': 'leftLowerArm',
+  'mixamorigLeftHand': 'leftHand',
+  'mixamorigRightShoulder': 'rightShoulder',
+  'mixamorigRightArm': 'rightUpperArm',
+  'mixamorigRightForeArm': 'rightLowerArm',
+  'mixamorigRightHand': 'rightHand',
+  'mixamorigLeftUpLeg': 'leftUpperLeg',
+  'mixamorigLeftLeg': 'leftLowerLeg',
+  'mixamorigLeftFoot': 'leftFoot',
+  'mixamorigLeftToeBase': 'leftToes',
+  'mixamorigRightUpLeg': 'rightUpperLeg',
+  'mixamorigRightLeg': 'rightLowerLeg',
+  'mixamorigRightFoot': 'rightFoot',
+  'mixamorigRightToeBase': 'rightToes',
+  // Dedos derechos
+  'mixamorigRightHandThumb1': 'rightThumbMetacarpal',
+  'mixamorigRightHandThumb2': 'rightThumbProximal',
+  'mixamorigRightHandThumb3': 'rightThumbDistal',
+  'mixamorigRightHandIndex1': 'rightIndexProximal',
+  'mixamorigRightHandIndex2': 'rightIndexIntermediate',
+  'mixamorigRightHandIndex3': 'rightIndexDistal',
+  'mixamorigRightHandMiddle1': 'rightMiddleProximal',
+  'mixamorigRightHandMiddle2': 'rightMiddleIntermediate',
+  'mixamorigRightHandMiddle3': 'rightMiddleDistal',
+  'mixamorigRightHandRing1': 'rightRingProximal',
+  'mixamorigRightHandRing2': 'rightRingIntermediate',
+  'mixamorigRightHandRing3': 'rightRingDistal',
+  'mixamorigRightHandPinky1': 'rightLittleProximal',
+  'mixamorigRightHandPinky2': 'rightLittleIntermediate',
+  'mixamorigRightHandPinky3': 'rightLittleDistal',
+  // Dedos izquierdos
+  'mixamorigLeftHandThumb1': 'leftThumbMetacarpal',
+  'mixamorigLeftHandThumb2': 'leftThumbProximal',
+  'mixamorigLeftHandThumb3': 'leftThumbDistal',
+  'mixamorigLeftHandIndex1': 'leftIndexProximal',
+  'mixamorigLeftHandIndex2': 'leftIndexIntermediate',
+  'mixamorigLeftHandIndex3': 'leftIndexDistal',
+  'mixamorigLeftHandMiddle1': 'leftMiddleProximal',
+  'mixamorigLeftHandMiddle2': 'leftMiddleIntermediate',
+  'mixamorigLeftHandMiddle3': 'leftMiddleDistal',
+  'mixamorigLeftHandRing1': 'leftRingProximal',
+  'mixamorigLeftHandRing2': 'leftRingIntermediate',
+  'mixamorigLeftHandRing3': 'leftRingDistal',
+  'mixamorigLeftHandPinky1': 'leftLittleProximal',
+  'mixamorigLeftHandPinky2': 'leftLittleIntermediate',
+  'mixamorigLeftHandPinky3': 'leftLittleDistal',
+};
+
+// ─── AnimationLibrary — carga + reproduce VRMA y FBX (Mixamo) ──────
+class AnimationLibrary {
+  constructor(vrm) {
+    this.vrm = vrm;
+    this.mixer = new THREE.AnimationMixer(vrm.scene);
+    this.clips = {};        // { name: AnimationClip }
+    this.currentAction = null;
+    this.currentName = null;
+  }
+
+  // Carga un .vrma (formato VRM Animation, drop-in para VRM)
+  async loadVRMA(file, displayName) {
+    const loader = new GLTFLoader();
+    loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+    const url = URL.createObjectURL(file);
+    try {
+      const gltf = await loader.loadAsync(url);
+      const vrmAnim = gltf.userData.vrmAnimations?.[0];
+      if (!vrmAnim) throw new Error('Sin animaciones VRM en el archivo');
+      const clip = createVRMAnimationClip(vrmAnim, this.vrm);
+      // Normalizar: strip position tracks (sin float/walking) + capturar rotation
+      // Y inicial del hip para auto-orientar al play (no quede de lado).
+      this._normalizeClip(clip, displayName);
+      this.clips[displayName] = clip;
+      return { name: displayName, duration: clip.duration, tracks: clip.tracks.length };
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  // Normaliza un clip: elimina position tracks (anti-flotar) y captura
+  // la Y inicial del hip rotation para auto-orientar el modelo al play.
+  _normalizeClip(clip, displayName) {
+    const hipsBone = this.vrm.humanoid?.getNormalizedBoneNode?.('hips');
+    const hipsName = hipsBone?.name;
+    const filteredTracks = [];
+    let hipInitialY = 0;
+    for (const track of clip.tracks) {
+      // Detectar si es position track del hip — lo eliminamos para evitar floating
+      if (track.name.endsWith('.position')) {
+        // Skip ALL position tracks (in-place animation, sin walking)
+        continue;
+      }
+      // Si es la rotación del hips, capturar Y inicial para auto-orient
+      if (hipsName && track.name === `${hipsName}.quaternion` && track.values.length >= 4) {
+        const q = new THREE.Quaternion(track.values[0], track.values[1], track.values[2], track.values[3]);
+        const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+        hipInitialY = e.y;
+      }
+      filteredTracks.push(track);
+    }
+    clip.tracks = filteredTracks;
+    // Guardar el offset Y para aplicarlo al scene al play
+    if (!this._clipOffsets) this._clipOffsets = {};
+    this._clipOffsets[displayName] = { sceneRotationY: -hipInitialY };
+  }
+
+  // Carga un .fbx (Mixamo) con retargeting profesional via SkeletonUtils.
+  // Necesita "With Skin" en el download de Mixamo para que el FBX tenga
+  // SkinnedMesh (lo necesitamos como referencia source). El mesh del bot
+  // de Mixamo se descarta — solo usamos su skeleton para retargetear.
+  async loadFBX(file, displayName) {
+    const loader = new FBXLoader();
+    const url = URL.createObjectURL(file);
+    try {
+      const fbx = await loader.loadAsync(url);
+      if (!fbx.animations || fbx.animations.length === 0) {
+        throw new Error('FBX sin animaciones');
+      }
+      // Buscar SkinnedMesh source en el FBX
+      let sourceSkinnedMesh = null;
+      fbx.traverse(o => {
+        if (o.isSkinnedMesh && !sourceSkinnedMesh) sourceSkinnedMesh = o;
+      });
+      if (!sourceSkinnedMesh) {
+        throw new Error('FBX sin SkinnedMesh — descárgalo de Mixamo con "With Skin" (no "Without Skin")');
+      }
+      // Buscar SkinnedMesh target en el VRM
+      let targetSkinnedMesh = null;
+      this.vrm.scene.traverse(o => {
+        if (o.isSkinnedMesh && !targetSkinnedMesh) targetSkinnedMesh = o;
+      });
+      if (!targetSkinnedMesh) throw new Error('VRM sin SkinnedMesh (raro)');
+
+      // Construir mapping ITERANDO los bones reales del FBX (no asumiendo
+      // prefijo). Mixamo a veces exporta "mixamorig:Hips" con colon, a veces
+      // "mixamorigHips" sin colon. Hacemos match por sufijo.
+      const sourceBones = sourceSkinnedMesh.skeleton.bones;
+      console.log(`[fbx] source skeleton: ${sourceBones.length} bones`);
+      console.log('[fbx] first few bone names:', sourceBones.slice(0, 5).map(b => b.name));
+
+      const nameMap = {};
+      for (const sourceBone of sourceBones) {
+        // Normalizar nombre del bone source (quitar colon)
+        const normalized = sourceBone.name.replace(/^mixamorig:/, 'mixamorig');
+        const humanoidName = MIXAMO_TO_VRM_HUMAN[normalized];
+        if (!humanoidName) continue;
+        const vrmBone = this.vrm.humanoid?.getNormalizedBoneNode?.(humanoidName);
+        if (!vrmBone) continue;
+        // El KEY del map debe ser el nombre EXACTO del bone source (con colon si lo tiene)
+        nameMap[sourceBone.name] = vrmBone.name;
+      }
+      console.log(`[fbx] nameMap entries: ${Object.keys(nameMap).length}`);
+      if (Object.keys(nameMap).length < 5) {
+        console.warn('[fbx] muy pocos bones mapeados — revisar nombres de bones source:');
+        sourceBones.forEach(b => console.warn(`  ${b.name}`));
+        throw new Error(`Solo ${Object.keys(nameMap).length} bones matchean — ver console para nombres`);
+      }
+
+      // Retargeting MANUAL con rest pose offset.
+      // Math: para cada frame, newQuat = tgtRest * (srcRest⁻¹ * srcAnimQuat)
+      // Esto traslada la rotación del bone source (en su frame de rest) al
+      // frame de rest del target. Frame 0 → newQuat = tgtRest (correcto).
+      const sourceClip = fbx.animations[0];
+      const newTracks = [];
+      const srcQuat = new THREE.Quaternion();
+      const tmpQuat = new THREE.Quaternion();
+
+      for (const track of sourceClip.tracks) {
+        if (!track.name.endsWith('.quaternion')) continue;
+        const sourceBoneName = track.name.replace('.quaternion', '');
+        const targetBoneName = nameMap[sourceBoneName];
+        if (!targetBoneName) continue;
+
+        const sourceBone = sourceBones.find(b => b.name === sourceBoneName);
+        const targetBone = targetSkinnedMesh.skeleton.bones.find(b => b.name === targetBoneName)
+                        || (() => {
+                            // Fallback: buscar por traverse en vrm.scene
+                            let found = null;
+                            this.vrm.scene.traverse(o => { if (o.name === targetBoneName) found = o; });
+                            return found;
+                          })();
+        if (!sourceBone || !targetBone) continue;
+
+        // Capturar rest quaternions (estado actual antes de aplicar la animación)
+        const srcRest = sourceBone.quaternion.clone();
+        const srcRestInv = srcRest.clone().invert();
+        const tgtRest = targetBone.quaternion.clone();
+
+        // Iterar valores y retargetear
+        const values = track.values;
+        const newValues = new Float32Array(values.length);
+        for (let i = 0; i < values.length; i += 4) {
+          srcQuat.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
+          tmpQuat.copy(srcRestInv).multiply(srcQuat);  // delta desde src rest
+          tmpQuat.premultiply(tgtRest);                  // tgtRest * delta
+          newValues[i] = tmpQuat.x;
+          newValues[i + 1] = tmpQuat.y;
+          newValues[i + 2] = tmpQuat.z;
+          newValues[i + 3] = tmpQuat.w;
+        }
+        newTracks.push(new THREE.QuaternionKeyframeTrack(
+          `${targetBoneName}.quaternion`,
+          track.times,
+          newValues
+        ));
+      }
+      console.log(`[retarget] manual: ${newTracks.length} tracks generados de ${sourceClip.tracks.length} originales`);
+      const retargeted = new THREE.AnimationClip(
+        sourceClip.name || displayName,
+        sourceClip.duration,
+        newTracks
+      );
+
+      this.clips[displayName] = retargeted;
+      return { name: displayName, duration: retargeted.duration, tracks: retargeted.tracks.length };
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  list() { return Object.keys(this.clips); }
+
+  play(name, opts = {}) {
+    const clip = this.clips[name];
+    if (!clip) return false;
+    if (this.currentAction) this.currentAction.fadeOut(opts.fadeOut || 0.3);
+    const action = this.mixer.clipAction(clip);
+    action.reset().fadeIn(opts.fadeIn || 0.3);
+    if (opts.loop === false) {
+      action.setLoop(THREE.LoopOnce);
+      action.clampWhenFinished = true;
+    } else {
+      action.setLoop(THREE.LoopRepeat);
+    }
+    action.timeScale = opts.speed || 1;
+    action.play();
+    this.currentAction = action;
+    this.currentName = name;
+    return true;
+  }
+
+  stop() {
+    if (this.currentAction) {
+      this.currentAction.fadeOut(0.3);
+      const arm = this;
+      setTimeout(() => {
+        if (arm.currentAction) {
+          arm.currentAction.stop();
+          arm.currentAction = null;
+          arm.currentName = null;
+        }
+        // Reset scene rotation cuando se para una animación externa
+        if (arm.vrm && arm.vrm.scene) arm.vrm.scene.rotation.y = 0;
+      }, 350);
+    }
+  }
+
+  isPlaying() { return this.currentAction !== null; }
+
+  update(delta) { this.mixer.update(delta); }
+
+  remove(name) {
+    if (this.currentName === name) this.stop();
+    delete this.clips[name];
+  }
+}
+
+let animationLibrary = null;
+
+// ─── PoseAnimator — transiciones SLERP suaves entre poses ──────
+//
+// Para cada bone, captura el quaternion actual como "start", calcula
+// el "target" desde rest+pose, y cada frame interpola con slerp + easing.
+// Las expressions interpolan linealmente (basta para emociones).
+class PoseAnimator {
+  constructor(vrm, restPose, poseableBones) {
+    this.vrm = vrm;
+    this.restPose = restPose;
+    this.poseableBones = poseableBones;
+    this.transition = null;
+  }
+  get(name) { return this.vrm.humanoid?.getNormalizedBoneNode?.(name); }
+
+  // easing: easeInOutQuad (arranca lento, acelera, frena al final)
+  static easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+  // easing alternativo: easeOutCubic (snap inicial, frena suave)
+  static easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  transitionTo(targetPose, durationMs = 400, opts = {}) {
+    const easing = opts.easing || PoseAnimator.easeInOutQuad;
+    // 1. Snapshot del estado actual de TODOS los bones (start point)
+    const startBones = {};
+    for (const boneName of this.poseableBones) {
+      const node = this.get(boneName);
+      if (node) startBones[boneName] = node.quaternion.clone();
+    }
+    // 2. Snapshot de las expressions actuales
+    const startExprs = {};
+    const exprMgr = this.vrm.expressionManager;
+    if (exprMgr) {
+      for (const expr of exprMgr.expressions) {
+        const name = expr.expressionName || expr.name;
+        if (name) startExprs[name] = exprMgr.getValue(name) || 0;
+      }
+    }
+    // 3. Calcular targets: rest_pose como base + overrides de la pose
+    const targetBones = {};
+    for (const boneName of this.poseableBones) {
+      let rot = { x: 0, y: 0, z: 0 };
+      // Rest pose value como base (si lo define)
+      if (this.restPose[boneName]) {
+        const r = this.restPose[boneName];
+        rot = { x: r.x || 0, y: r.y || 0, z: r.z || 0 };
+      }
+      // Override con la pose
+      if (targetPose[boneName]) {
+        const p = targetPose[boneName];
+        rot = { x: p.x || 0, y: p.y || 0, z: p.z || 0 };
+      }
+      const euler = new THREE.Euler(rot.x, rot.y, rot.z);
+      targetBones[boneName] = new THREE.Quaternion().setFromEuler(euler);
+    }
+    // 4. Targets de expressions (todas a 0 + las que define la pose)
+    const targetExprs = {};
+    if (exprMgr) {
+      for (const expr of exprMgr.expressions) {
+        const name = expr.expressionName || expr.name;
+        if (name) targetExprs[name] = 0;
+      }
+      if (targetPose.expressions) {
+        for (const [name, val] of Object.entries(targetPose.expressions)) {
+          targetExprs[name] = val;
+        }
+      }
+    }
+    this.transition = {
+      startTime: performance.now(),
+      duration: durationMs,
+      startBones, targetBones,
+      startExprs, targetExprs,
+      easing,
+    };
+  }
+
+  update() {
+    if (!this.transition) return false;  // false = no estoy animando
+    const tr = this.transition;
+    const elapsed = performance.now() - tr.startTime;
+    const t = Math.min(elapsed / tr.duration, 1);
+    const eased = tr.easing(t);
+    // Interpolar bones con SLERP en quaternion (correcto en sphere de rotaciones)
+    const tmp = new THREE.Quaternion();
+    for (const boneName of this.poseableBones) {
+      const node = this.get(boneName);
+      if (!node) continue;
+      const start = tr.startBones[boneName];
+      const target = tr.targetBones[boneName];
+      if (!start || !target) continue;
+      tmp.copy(start).slerp(target, eased);
+      node.quaternion.copy(tmp);
+    }
+    // Interpolar expressions linearly (suficiente para 0-1)
+    const exprMgr = this.vrm.expressionManager;
+    if (exprMgr) {
+      for (const [name, targetVal] of Object.entries(tr.targetExprs)) {
+        const startVal = tr.startExprs[name] || 0;
+        const value = startVal + (targetVal - startVal) * eased;
+        exprMgr.setValue(name, value);
+      }
+    }
+    if (t >= 1) {
+      this.transition = null;
+      return false;
+    }
+    return true; // sigo animando
+  }
+
+  isAnimating() { return this.transition !== null; }
+}
+
+let poseAnimator = null;
+let sequencePlayer = null;
+let animationsEnabled = true;
+let animationDurationMs = 400;
+
+// Base rotations onto which idle adds DELTAS (no overwrite).
+// Se recaptura cada vez que termina una transición de pose, así idle
+// nunca pisa los valores que la pose define para spine/chest/hips/head/neck.
+const idleBase = {
+  spine: { x: 0, y: 0, z: 0 },
+  chest: { x: 0, y: 0, z: 0 },
+  hips:  { x: 0, y: 0, z: 0 },
+  head:  { x: 0, y: 0, z: 0 },
+  neck:  { x: 0, y: 0, z: 0 },
+};
+function captureIdleBase() {
+  if (!currentVrm) return;
+  for (const boneName of Object.keys(idleBase)) {
+    const node = currentVrm.humanoid?.getNormalizedBoneNode?.(boneName);
+    if (node) {
+      idleBase[boneName].x = node.rotation.x;
+      idleBase[boneName].y = node.rotation.y;
+      idleBase[boneName].z = node.rotation.z;
+    }
+  }
+}
+
+function applyPose(vrm, pose, opts = {}) {
+  // opts.overrideExpressions: true (default) → aplica las expressions del pose
+  //                           false → deja las expressions actuales (mood reactivo runtime)
+  const overrideExpr = opts.overrideExpressions !== false;
+  const get = (name) => vrm.humanoid?.getNormalizedBoneNode?.(name);
+
+  // 1. Reset TODOS los bones poseable a 0
+  for (const bone of POSEABLE_BONES) {
+    const node = get(bone);
+    if (node) { node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0; }
+  }
+  // 2. Aplicar rest pose como base
+  for (const [bone, rot] of Object.entries(REST_POSE)) {
+    const node = get(bone);
+    if (!node) continue;
+    node.rotation.x = rot.x || 0;
+    node.rotation.y = rot.y || 0;
+    node.rotation.z = rot.z || 0;
+  }
+  // 3. Aplicar overrides bones de la pose (skip 'expressions' que no es bone)
+  for (const [bone, rot] of Object.entries(pose)) {
+    if (bone === 'expressions') continue;
+    const node = get(bone);
+    if (!node) continue;
+    node.rotation.x = rot.x || 0;
+    node.rotation.y = rot.y || 0;
+    node.rotation.z = rot.z || 0;
+  }
+  // 4. Aplicar expressions de la pose (si las tiene Y override está activo)
+  if (overrideExpr) {
+    const exprMgr = vrm.expressionManager;
+    if (exprMgr) {
+      // Reset todas a 0 primero (para borrar emoción de pose anterior)
+      for (const expr of exprMgr.expressions) {
+        const n = expr.expressionName || expr.name;
+        if (n) exprMgr.setValue(n, 0);
+      }
+      // Aplicar las nuevas si la pose las define
+      if (pose.expressions) {
+        for (const [name, val] of Object.entries(pose.expressions)) {
+          exprMgr.setValue(name, val);
+        }
+      }
+    }
+  }
+}
+
+// ─── View presets ───────────────────────────────────────────
+// Calcula distancia a la cámara matemáticamente desde FOV + tamaño del bbox
+// para que la "altura visible" del modelo sea aprox 'visibleHeight' del bbox.
+// Garantiza que SIEMPRE se vea lo que esperamos, sin depender de hardcoded values.
+function distanceFor(visibleHeight, marginFactor = 1.15) {
+  const fovRad = camera.fov * Math.PI / 180;
+  const halfHeight = visibleHeight / 2;
+  const distVertical = halfHeight / Math.tan(fovRad / 2);
+  // También considerar aspect ratio horizontal
+  const halfWidth = halfHeight; // asumir modelo cuadrado, ajustable
+  const distHorizontal = halfWidth / (Math.tan(fovRad / 2) * camera.aspect);
+  return Math.max(distVertical, distHorizontal) * marginFactor;
+}
+
+function setView(vrm, mode, headPos, size, center) {
+  const h = size.y; // altura total del modelo
+  let target, dist, vh;
+
+  switch (mode) {
+    case 'face':
+      // Solo cabeza — visible height ~ 25cm o 15% del modelo (lo que sea más)
+      vh = Math.max(0.25, h * 0.18);
+      target = new THREE.Vector3(headPos.x, headPos.y, headPos.z);
+      break;
+    case 'upper':
+      // Torso (cabeza + pecho) — visible height ~ 50% del modelo
+      vh = h * 0.55;
+      target = new THREE.Vector3(center.x, (headPos.y + center.y) / 2, center.z);
+      break;
+    case 'full':
+      // Cuerpo entero
+      vh = h * 1.05;
+      target = new THREE.Vector3(center.x, center.y, center.z);
+      break;
+    case 'auto':
+    default:
+      // Fit MUY holgado — cuerpo entero con aire arriba/abajo
+      vh = h * 1.8;
+      target = new THREE.Vector3(center.x, center.y, center.z);
+      break;
+  }
+  dist = distanceFor(vh);
+  const position = new THREE.Vector3(target.x, target.y, target.z + dist);
+  controls.target.copy(target);
+  camera.position.copy(position);
+  controls.update();
+  console.log(`[setView] mode=${mode} target=(${target.x.toFixed(2)},${target.y.toFixed(2)},${target.z.toFixed(2)}) dist=${dist.toFixed(2)} vh=${vh.toFixed(2)}`);
+}
+
+// ─── Load VRM ───────────────────────────────────────────────
+const loader = new GLTFLoader();
+loader.register((parser) => new VRMLoaderPlugin(parser));
+
+let currentVrm = null;
+let cursorTarget = new THREE.Object3D();
+cursorTarget.position.set(0, 1.4, 5);
+scene.add(cursorTarget);
+
+setStatus('Descargando ashley.vrm (~46MB)...');
+
+const loadingEl = document.getElementById('loading');
+
+// Función helper para mostrar errores GRANDES en pantalla (no solo console)
+function showError(stage, err) {
+  console.error(`[${stage}]`, err);
+  const msg = (err && err.message) ? err.message : String(err);
+  loadingEl.style.display = 'flex';
+  loadingEl.style.color = '#c97373';
+  loadingEl.style.padding = '20px';
+  loadingEl.style.flexDirection = 'column';
+  loadingEl.innerHTML = `
+    <div style="font-size:14px; margin-bottom:8px;">✗ Falló en: ${stage}</div>
+    <div style="font-size:12px; color:#8a7565; max-width:400px; text-align:center;">${msg}</div>
+    <div style="font-size:10px; color:#666; margin-top:12px;">Ver consola (F12) para stack trace completo</div>
+  `;
+  setStatus('✗ ' + stage + ': ' + msg);
+}
+
+dbg('iniciando GLTFLoader.load(./ashley.vrm)...');
+loader.load(
+  './ashley.vrm',
+  (gltf) => {
+    dbg('GLTF cargado OK', 'ok');
+    try {
+      console.log('[load] gltf received, userData:', gltf.userData);
+      const vrm = gltf.userData.vrm;
+      if (!vrm) {
+        dbg('VRM extraction FALLÓ — userData.vrm es null', 'err');
+        showError('VRM extraction', 'gltf.userData.vrm is null — el archivo no es un VRM válido o la versión de three-vrm no lo reconoce');
+        return;
+      }
+      dbg('VRM extraído OK', 'ok');
+      console.log('[load] vrm object:', vrm);
+      console.log('[load] vrm.scene:', vrm.scene);
+      console.log('[load] vrm.humanoid:', vrm.humanoid);
+      console.log('[load] vrm.expressionManager:', vrm.expressionManager);
+      console.log('[load] vrm.lookAt:', vrm.lookAt);
+
+      // Optimizaciones opcionales
+      try { VRMUtils.removeUnnecessaryVertices && VRMUtils.removeUnnecessaryVertices(gltf.scene); } catch (e) { console.warn('skip removeUnnecessaryVertices:', e.message); }
+      try { VRMUtils.combineSkeletons && VRMUtils.combineSkeletons(gltf.scene); } catch (e) { console.warn('skip combineSkeletons:', e.message); }
+
+      scene.add(vrm.scene);
+      currentVrm = vrm;
+      loadingEl.style.display = 'none';
+      setStatus('✓ VRM cargado en escena');
+
+      // Look-at target
+      if (vrm.lookAt) {
+        try { vrm.lookAt.target = cursorTarget; } catch (e) { console.warn('lookAt.target falló:', e); }
+      }
+
+      // ── AUTO-SCALE: si el modelo es enorme (>3m) escalarlo a 1.6m humano
+      // Bee modeló a escala normal pero el rigging de Emiko quedó exportado
+      // a 3.5x. Como solo nos interesa la apariencia, lo normalizamos a tamaño
+      // humano para que la cámara y el LookAt funcionen con sentido.
+      let preBox = new THREE.Box3().setFromObject(vrm.scene);
+      const preH = preBox.getSize(new THREE.Vector3()).y;
+      if (preH > 3) {
+        const targetH = 1.6;
+        const scale = targetH / preH;
+        vrm.scene.scale.setScalar(scale);
+        dbg(`auto-scale: ${preH.toFixed(2)}m → ${targetH}m (factor ${scale.toFixed(3)})`, 'ok');
+      }
+
+      // BBox + cabeza (RECALCULAR tras el scale)
+      const box = new THREE.Box3().setFromObject(vrm.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      let headPos = new THREE.Vector3(center.x, box.max.y * 0.92, center.z);
+      try {
+        // three-vrm 3.x: getNormalizedBoneNode o getNormalizedBoneNode según versión
+        const headBone = vrm.humanoid?.getNormalizedBoneNode?.('head') ||
+                         vrm.humanoid?.getNormalizedBoneNode?.('head') ||
+                         vrm.humanoid?.humanBones?.head?.node;
+        if (headBone) headBone.getWorldPosition(headPos);
+      } catch (e) { console.warn('head bone lookup falló:', e); }
+
+      console.log('[VRM] BBox size:', size.x.toFixed(2), size.y.toFixed(2), size.z.toFixed(2));
+      console.log('[VRM] BBox min/max:', box.min, box.max);
+      console.log('[VRM] Head world pos:', headPos.x.toFixed(2), headPos.y.toFixed(2), headPos.z.toFixed(2));
+      setStatus(`✓ Modelo ${size.y.toFixed(2)}m alto, head Y=${headPos.y.toFixed(2)}`);
+      dbg(`bbox ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} | y range [${box.min.y.toFixed(2)}, ${box.max.y.toFixed(2)}]`, 'ok');
+      dbg(`head world (${headPos.x.toFixed(2)}, ${headPos.y.toFixed(2)}, ${headPos.z.toFixed(2)})`, 'ok');
+
+      // Helpers de debug ocultables (toggle con botón "🔧 Debug")
+      const bboxHelper = new THREE.Box3Helper(box, 0xff3333);
+      bboxHelper.visible = false;
+      scene.add(bboxHelper);
+      const headMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true })
+      );
+      headMarker.position.copy(headPos);
+      headMarker.visible = false;
+      scene.add(headMarker);
+      window._debugToggle = () => {
+        bboxHelper.visible = !bboxHelper.visible;
+        headMarker.visible = !headMarker.visible;
+      };
+      // Toggle separado solo para el suelo (más útil)
+      window._floorToggle = () => {
+        grid.visible = !grid.visible;
+        floorDisc.visible = !floorDisc.visible;
+        floorRing.visible = !floorRing.visible;
+      };
+
+      // ── REST POSE de Ashley (calibrada empíricamente con este modelo) ──
+      // Upper arm: Z+ baja el brazo, Y abre/cierra (sign opuesto en cada lado)
+      // Lower arm: Y+ es el bend forward (carrying angle humano)
+      // Estos valores son la base sobre la que aplicar idle + reacciones de mood.
+      try { applyRestPose(vrm); } catch (e) { dbg('rest pose falló: ' + e.message, 'err'); }
+
+      // Vista default = AUTO (cuerpo entero, garantizado que SE VE)
+      try { setView(vrm, 'auto', headPos, size, center); } catch (e) { console.warn('setView falló:', e); }
+
+      // Botones de vista
+      document.querySelectorAll('[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          try {
+            const b = new THREE.Box3().setFromObject(vrm.scene);
+            const s = b.getSize(new THREE.Vector3());
+            const c = b.getCenter(new THREE.Vector3());
+            const hp = new THREE.Vector3(c.x, b.max.y * 0.92, c.z);
+            const headBone = vrm.humanoid?.getNormalizedBoneNode?.('head') ||
+                             vrm.humanoid?.getNormalizedBoneNode?.('head');
+            if (headBone) headBone.getWorldPosition(hp);
+            setView(vrm, btn.dataset.view, hp, s, c);
+          } catch (e) { console.error('view button falló:', e); }
+        });
+      });
+
+      try { buildExpressionUI(vrm); } catch (e) { console.warn('buildExpressionUI falló:', e); }
+      try { buildLookAtUI(vrm); } catch (e) { console.warn('buildLookAtUI falló:', e); }
+      // Sliders de expressions del pose editor (a este punto el VRM ya está listo)
+      try { buildExpressionSliders(vrm); } catch (e) { console.warn('buildExpressionSliders falló:', e); }
+      // Inicializar PoseAnimator + SequencePlayer + AnimationLibrary
+      poseAnimator = new PoseAnimator(vrm, REST_POSE, POSEABLE_BONES);
+      sequencePlayer = new SequencePlayer(poseAnimator);
+      animationLibrary = new AnimationLibrary(vrm);
+      captureIdleBase();
+      dbg('PoseAnimator + SequencePlayer + AnimationLibrary OK', 'ok');
+    } catch (e) {
+      showError('post-load processing', e);
+    }
+  },
+  (xhr) => {
+    if (xhr.lengthComputable) {
+      const pct = (xhr.loaded / xhr.total) * 100;
+      setStatus(`Descargando ashley.vrm: ${pct.toFixed(0)}% (${(xhr.loaded / 1024 / 1024).toFixed(1)} MB)`);
+    } else {
+      setStatus(`Descargando: ${(xhr.loaded / 1024 / 1024).toFixed(1)} MB...`);
+    }
+  },
+  (err) => {
+    dbg('GLTFLoader ERROR: ' + (err?.message || err), 'err');
+    showError('GLTFLoader.load', err);
+  }
+);
+
+// ─── UI builder for expressions ─────────────────────────────
+function buildExpressionUI(vrm) {
+  const exprMgr = vrm.expressionManager;
+  if (!exprMgr) return;
+
+  const VISEMES = ['aa', 'ih', 'ou', 'ee', 'oh'];
+  const EMOTIONS = ['happy', 'sad', 'angry', 'surprised', 'neutral', 'relaxed'];
+  const LOOKAT = ['lookUp', 'lookDown', 'lookLeft', 'lookRight'];
+  const SKIP = ['blink', 'blinkLeft', 'blinkRight']; // Blink lo manejamos auto
+
+  const sections = {
+    visemes: document.getElementById('visemes-section'),
+    emotions: document.getElementById('emotions-section'),
+    lookat: document.getElementById('lookat-section'),
+    extra: document.getElementById('extra-section'),
+  };
+
+  for (const expr of exprMgr.expressions) {
+    const name = expr.expressionName || expr.name;
+    if (!name) continue;
+
+    let target;
+    if (VISEMES.includes(name)) target = sections.visemes;
+    else if (EMOTIONS.includes(name)) target = sections.emotions;
+    else if (LOOKAT.includes(name)) target = sections.lookat;
+    else if (!SKIP.includes(name)) target = sections.extra;
+    else continue;
+
+    const row = document.createElement('div');
+    row.className = 'slider-row';
+    const label = document.createElement('label');
+    label.textContent = name;
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = 0; slider.max = 1; slider.step = 0.01; slider.value = 0;
+    slider.dataset.expr = name;
+    const val = document.createElement('span');
+    val.className = 'val';
+    val.textContent = '0.00';
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      val.textContent = v.toFixed(2);
+      exprMgr.setValue(name, v);
+    });
+    row.appendChild(label); row.appendChild(slider);
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(row);
+    const valRow = document.createElement('div');
+    valRow.style.fontSize = '10px';
+    valRow.style.color = 'var(--text-dim)';
+    valRow.style.textAlign = 'right';
+    valRow.appendChild(val);
+    target.appendChild(row);
+    target.appendChild(valRow);
+  }
+}
+
+function buildLookAtUI(vrm) {
+  // ya construido en expressions, solo añadir info
+  const info = document.createElement('div');
+  info.style.fontSize = '10px';
+  info.style.color = 'var(--text-dim)';
+  info.style.marginTop = '6px';
+  info.textContent = vrm.lookAt
+    ? `✓ LookAt activo (type: ${vrm.lookAt.applier?.type || 'bone'}). Mueve el cursor sobre el modelo.`
+    : '✗ Sin LookAt configurado';
+  document.getElementById('lookat-section').appendChild(info);
+}
+
+// ─── Cursor → eye tracking ──────────────────────────────────
+let cursorTrackingEnabled = true;
+container.addEventListener('mousemove', (e) => {
+  if (!cursorTrackingEnabled || !currentVrm) return;
+  const rect = container.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  cursorTarget.position.set(x * 2, 1.4 + y * 0.5, 1.5);
+});
+
+document.getElementById('toggle-cursor').addEventListener('click', (e) => {
+  cursorTrackingEnabled = !cursorTrackingEnabled;
+  e.target.classList.toggle('active', cursorTrackingEnabled);
+  if (!cursorTrackingEnabled) cursorTarget.position.set(0, 1.4, 5);
+});
+
+// ─── Auto blink ─────────────────────────────────────────────
+let blinkEnabled = true;
+let blinkTimer = 0;
+let blinkPhase = 0; // 0=open, 1=closing, 2=closed, 3=opening
+let nextBlinkAt = 2 + Math.random() * 4;
+
+document.getElementById('toggle-blink').addEventListener('click', (e) => {
+  blinkEnabled = !blinkEnabled;
+  e.target.classList.toggle('active', blinkEnabled);
+  if (!blinkEnabled && currentVrm) {
+    currentVrm.expressionManager?.setValue('blink', 0);
+  }
+});
+
+// ─── Idle breathing + sway ──────────────────────────────────
+let idleEnabled = true;
+let testRunning = false; // true mientras corre un test → pausa idle
+document.getElementById('toggle-idle').addEventListener('click', (e) => {
+  idleEnabled = !idleEnabled;
+  e.target.classList.toggle('active', idleEnabled);
+});
+
+// ─── Reset ──────────────────────────────────────────────────
+document.getElementById('reset').addEventListener('click', () => {
+  if (!currentVrm) return;
+  const exprMgr = currentVrm.expressionManager;
+  for (const expr of exprMgr.expressions) {
+    const name = expr.expressionName || expr.name;
+    if (name) exprMgr.setValue(name, 0);
+  }
+  document.querySelectorAll('input[type="range"]').forEach(s => {
+    s.value = 0;
+    s.nextSibling && (s.nextSibling.textContent = '0.00');
+  });
+});
+
+// ─── Test sequences ─────────────────────────────────────────
+async function runTest(name) {
+  if (!currentVrm) return;
+  testRunning = true;
+  try {
+    await _runTestInner(name);
+  } finally {
+    testRunning = false;
+  }
+}
+async function _runTestInner(name) {
+  const exprMgr = currentVrm.expressionManager;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  const clearAll = () => {
+    for (const expr of exprMgr.expressions) {
+      const n = expr.expressionName || expr.name;
+      if (n && !['blink', 'blinkLeft', 'blinkRight'].includes(n)) {
+        exprMgr.setValue(n, 0);
+      }
+    }
+  };
+
+  const animate = async (expr, peak = 1, hold = 800, fade = 300) => {
+    setStatus(`Test: ${expr}`);
+    // Fade in
+    const steps = 10;
+    for (let i = 0; i <= steps; i++) {
+      exprMgr.setValue(expr, (i / steps) * peak);
+      await sleep(15);
+    }
+    await sleep(hold);
+    for (let i = steps; i >= 0; i--) {
+      exprMgr.setValue(expr, (i / steps) * peak);
+      await sleep(15);
+    }
+  };
+
+  if (name === 'emotions') {
+    for (const e of ['happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral']) {
+      clearAll();
+      await animate(e, 1, 600, 250);
+    }
+  } else if (name === 'visemes') {
+    setStatus('Test: visemes (simulando "hola")');
+    for (const v of ['oh', 'oh', 'aa', 'aa']) {
+      exprMgr.setValue(v, 1);
+      await sleep(200);
+      exprMgr.setValue(v, 0);
+      await sleep(50);
+    }
+    setStatus('Test: visemes (simulando "ashley")');
+    for (const v of ['aa', 'ee', 'aa', 'ih']) {
+      exprMgr.setValue(v, 1);
+      await sleep(200);
+      exprMgr.setValue(v, 0);
+      await sleep(50);
+    }
+  } else if (name === 'eyes') {
+    cursorTrackingEnabled = false;
+    document.getElementById('toggle-cursor').classList.remove('active');
+    setStatus('Test: eyes 4 directions');
+    for (const dir of ['lookUp', 'lookRight', 'lookDown', 'lookLeft']) {
+      exprMgr.setValue(dir, 1);
+      await sleep(700);
+      exprMgr.setValue(dir, 0);
+      await sleep(150);
+    }
+  } else if (name === 'full') {
+    await _runTestInner('emotions');
+    await _runTestInner('visemes');
+    await _runTestInner('eyes');
+  } else if (name === 'hair') {
+    // Sacudir cabeza para activar spring bones del pelo
+    setStatus('Test: pelo (spring bones)');
+    const head = currentVrm.humanoid?.getNormalizedBoneNode?.('head') ||
+                 currentVrm.humanoid?.getNormalizedBoneNode?.('head');
+    if (!head) { setStatus('✗ No head bone'); return; }
+    const baseY = head.rotation.y;
+    const baseX = head.rotation.x;
+    // Movimiento brusco izquierda-derecha-arriba-abajo
+    const moves = [
+      [0.6, 0], [-0.6, 0], [0.6, 0], [-0.6, 0],
+      [0, 0.4], [0, -0.4], [0, 0.4], [0, -0.4],
+      [0, 0],
+    ];
+    for (const [ry, rx] of moves) {
+      head.rotation.y = baseY + ry;
+      head.rotation.x = baseX + rx;
+      await sleep(180);
+    }
+    setStatus('Test: pelo OK — el pelo sigue con inercia');
+  } else if (name === 'diag') {
+    // Diagnóstico: lista TODOS los bones del humanoid + intenta rotación grande del head
+    setStatus('Diag: probando bones uno por uno...');
+    document.getElementById('debug').style.display = 'block'; // forzar visible
+    const BONES = ['hips','spine','chest','upperChest','neck','head',
+                   'leftUpperArm','rightUpperArm','leftLowerArm','rightLowerArm',
+                   'leftHand','rightHand'];
+    for (const b of BONES) {
+      const node = currentVrm.humanoid?.getNormalizedBoneNode?.(b);
+      const exists = !!node;
+      const rawExists = !!currentVrm.humanoid?.getRawBoneNode?.(b);
+      dbg(`bone "${b}": normalized=${exists ? 'OK' : 'NULL'}, raw=${rawExists ? 'OK' : 'NULL'}`,
+          exists ? 'ok' : 'err');
+    }
+    // Intentar rotación EXTREMA del brazo derecho (90° down) — debería verse INMEDIATO
+    const rArm = currentVrm.humanoid?.getNormalizedBoneNode?.('rightUpperArm');
+    if (rArm) {
+      dbg('rotando rightUpperArm 90° (¿se mueve el brazo derecho?)', 'ok');
+      rArm.rotation.z = -Math.PI / 2; // 90° abajo desde T-pose
+      await sleep(2500);
+      dbg('reset rightUpperArm', 'ok');
+      rArm.rotation.z = 0;
+    }
+  } else if (name === 'spin') {
+    // Rotar el OBJETO entero (no bones individuales) — siempre funciona si el render funciona
+    setStatus('Test: rotando vrm.scene 360°');
+    const t0 = performance.now();
+    while (performance.now() - t0 < 3000) {
+      currentVrm.scene.rotation.y = ((performance.now() - t0) / 3000) * Math.PI * 2;
+      await sleep(16);
+    }
+    currentVrm.scene.rotation.y = 0;
+    setStatus('Spin OK — si viste rotar a Ashley el render funciona perfecto');
+  } else if (name === 'rawbone') {
+    // Modificar RAW bone (no normalized) + forzar autoUpdate
+    setStatus('Test: raw bone (rightUpperArm 90°)');
+    const rArmRaw = currentVrm.humanoid?.getRawBoneNode?.('rightUpperArm');
+    dbg(`autoUpdateHumanBones = ${currentVrm.humanoid?.autoUpdateHumanBones}`, 'ok');
+    if (rArmRaw) {
+      // Disable auto-update para que NO sobrescriba mi raw modification
+      const wasAuto = currentVrm.humanoid.autoUpdateHumanBones;
+      currentVrm.humanoid.autoUpdateHumanBones = false;
+      rArmRaw.rotation.z = -Math.PI / 2;
+      dbg('raw bone modificado + autoUpdate=false', 'ok');
+      await sleep(2500);
+      rArmRaw.rotation.z = 0;
+      currentVrm.humanoid.autoUpdateHumanBones = wasAuto;
+      dbg('reset', 'ok');
+    } else {
+      dbg('rightUpperArm raw bone NULL', 'err');
+    }
+  } else if (name === 'armaxes') {
+    // Cicla las 6 direcciones del rightUpperArm para identificar cuál es "abajo"
+    setStatus('Test arm axes — observa el brazo derecho');
+    document.getElementById('debug').style.display = 'block';
+    const rArm = currentVrm.humanoid?.getNormalizedBoneNode?.('rightUpperArm');
+    if (!rArm) { dbg('rightUpperArm NULL', 'err'); return; }
+    const tests = [
+      { axis: 'x', sign: +1, label: 'X positivo (+90°)' },
+      { axis: 'x', sign: -1, label: 'X negativo (-90°)' },
+      { axis: 'y', sign: +1, label: 'Y positivo (+90°)' },
+      { axis: 'y', sign: -1, label: 'Y negativo (-90°)' },
+      { axis: 'z', sign: +1, label: 'Z positivo (+90°)' },
+      { axis: 'z', sign: -1, label: 'Z negativo (-90°)' },
+    ];
+    for (const { axis, sign, label } of tests) {
+      // Reset todos
+      rArm.rotation.x = 0; rArm.rotation.y = 0; rArm.rotation.z = 0;
+      // Aplicar uno
+      rArm.rotation[axis] = sign * Math.PI / 2;
+      dbg(`probando: ${label} → mira el brazo derecho`, 'ok');
+      setStatus(`${label} — ¿cómo se mueve el brazo?`);
+      await sleep(2000);
+    }
+    rArm.rotation.x = 0; rArm.rotation.y = 0; rArm.rotation.z = 0;
+    dbg('test arm axes completo — dime cuál era "hacia abajo al lado"', 'ok');
+    setStatus('✓ Test completo. Dime cuál es "abajo natural"');
+  } else if (name === 'forearmaxes') {
+    // Aplica primero pose natural, luego cicla axes del forearm
+    setStatus('Test forearm axes — observa el antebrazo derecho');
+    document.getElementById('debug').style.display = 'block';
+    const rArm = currentVrm.humanoid?.getNormalizedBoneNode?.('rightUpperArm');
+    const rLower = currentVrm.humanoid?.getNormalizedBoneNode?.('rightLowerArm');
+    if (!rLower) { dbg('rightLowerArm NULL', 'err'); return; }
+    // Aplicar pose natural en el upper para que el forearm esté en posición vertical
+    if (rArm) {
+      rArm.rotation.z = Math.PI * 0.40;
+      rArm.rotation.y = -Math.PI * 0.04;
+    }
+    await sleep(500); // dejar que vrm.update aplique
+    const tests = [
+      { axis: 'x', sign: +1, label: 'X positivo (codo flexiona delante?)' },
+      { axis: 'x', sign: -1, label: 'X negativo (codo flexiona atrás?)' },
+      { axis: 'y', sign: +1, label: 'Y positivo (twist mano)' },
+      { axis: 'y', sign: -1, label: 'Y negativo (twist mano)' },
+      { axis: 'z', sign: +1, label: 'Z positivo' },
+      { axis: 'z', sign: -1, label: 'Z negativo' },
+    ];
+    for (const { axis, sign, label } of tests) {
+      rLower.rotation.x = 0; rLower.rotation.y = 0; rLower.rotation.z = 0;
+      rLower.rotation[axis] = sign * Math.PI / 3; // 60° (no 90 — clipearía con upperarm)
+      dbg(`probando lower: ${label}`, 'ok');
+      setStatus(`Lower: ${label} — ¿qué hace el antebrazo?`);
+      await sleep(2000);
+    }
+    rLower.rotation.x = 0; rLower.rotation.y = 0; rLower.rotation.z = 0;
+    dbg('test forearm completo — dime cuál es "codo flexiona delante natural"', 'ok');
+    setStatus('✓ Test completo. Dime cuál era el bend natural');
+  } else if (name === 'natural') {
+    applyRestPose(currentVrm);
+    setStatus('Rest pose aplicada');
+  } else if (name === 'dance') {
+    // Mini "baile": rotar hips + spine + cabeza en patrones
+    setStatus('Test: mini dance');
+    const hips = currentVrm.humanoid?.getNormalizedBoneNode?.('hips');
+    const spine = currentVrm.humanoid?.getNormalizedBoneNode?.('spine');
+    const head = currentVrm.humanoid?.getNormalizedBoneNode?.('head');
+    if (!hips || !spine || !head) { setStatus('✗ Faltan bones'); return; }
+    const t0 = performance.now();
+    const dur = 4500;
+    while (performance.now() - t0 < dur) {
+      const t = (performance.now() - t0) / 1000;
+      hips.rotation.y = Math.sin(t * 2) * 0.3;
+      hips.position.y = Math.sin(t * 4) * 0.05; // bouncing
+      spine.rotation.z = Math.sin(t * 3) * 0.15;
+      head.rotation.y = -Math.sin(t * 2) * 0.4;
+      head.rotation.z = Math.sin(t * 2.5) * 0.1;
+      await sleep(16);
+    }
+    // Reset suave
+    hips.rotation.y = 0; hips.position.y = 0;
+    spine.rotation.z = 0;
+    head.rotation.y = 0; head.rotation.z = 0;
+    setStatus('✓ Dance test completo');
+  }
+  setStatus('✓ Test completo');
+}
+document.querySelectorAll('[data-test]').forEach(b => {
+  b.addEventListener('click', () => runTest(b.dataset.test));
+});
+
+// ─── Bone Tester (sistemático para llenar el notebook) ──────
+function getBoneNode(name) {
+  return currentVrm?.humanoid?.getNormalizedBoneNode?.(name) ||
+         currentVrm?.humanoid?.getRawBoneNode?.(name);
+}
+function applyBoneRotation(boneName, axis, sign, degrees) {
+  const node = getBoneNode(boneName);
+  if (!node) { dbg(`bone ${boneName} no encontrado`, 'err'); return; }
+  // Reset el bone primero
+  node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+  const rad = sign * (degrees * Math.PI / 180);
+  node.rotation[axis] = rad;
+  return node;
+}
+
+// Botones individuales X+ / X- / Y+ / Y- / Z+ / Z-
+document.querySelectorAll('[data-bone-axis]').forEach(b => {
+  b.addEventListener('click', () => {
+    if (!currentVrm) return;
+    const boneName = document.getElementById('bone-select').value;
+    const angle = parseInt(document.getElementById('bone-angle').value, 10);
+    const [axis, signStr] = b.dataset.boneAxis.split('');
+    const sign = signStr === '+' ? 1 : -1;
+    applyBoneRotation(boneName, axis, sign, angle);
+    setStatus(`${boneName} ${axis.toUpperCase()}${signStr}${angle}° → ¿qué hace?`);
+    dbg(`test: ${boneName}.rotation.${axis} = ${signStr}${angle}°`, 'ok');
+  });
+});
+
+// Cycle 6 axes con pausas
+document.getElementById('cycle-axes').addEventListener('click', async () => {
+  if (!currentVrm) return;
+  const boneName = document.getElementById('bone-select').value;
+  const angle = parseInt(document.getElementById('bone-angle').value, 10);
+  document.getElementById('debug').style.display = 'block';
+  dbg(`▶ cycling ${boneName} (${angle}° por axis, 2.5s c/u)`, 'ok');
+  testRunning = true;
+  try {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const tests = [
+      ['x', +1], ['x', -1],
+      ['y', +1], ['y', -1],
+      ['z', +1], ['z', -1],
+    ];
+    for (const [axis, sign] of tests) {
+      const signStr = sign > 0 ? '+' : '-';
+      applyBoneRotation(boneName, axis, sign, angle);
+      const label = `${boneName}.rotation.${axis} = ${signStr}${angle}°`;
+      setStatus(label);
+      dbg(`  → ${label}`, 'ok');
+      await sleep(2500);
+    }
+    // Reset al final
+    const node = getBoneNode(boneName);
+    if (node) { node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0; }
+    dbg(`✓ ${boneName} cycle completo. Anota qué viste de cada axis.`, 'ok');
+    setStatus(`✓ Cycle completo de ${boneName}`);
+  } finally {
+    testRunning = false;
+  }
+});
+
+document.getElementById('reset-bone').addEventListener('click', () => {
+  if (!currentVrm) return;
+  const boneName = document.getElementById('bone-select').value;
+  const node = getBoneNode(boneName);
+  if (node) {
+    node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+    setStatus(`Reset: ${boneName}`);
+  }
+});
+
+// 🚨 RESET TODO — limpia expressions + reset al bone tested + re-aplica rest pose
+document.getElementById('reset-all').addEventListener('click', () => {
+  if (!currentVrm) return;
+  // Limpiar todas las expressions/blendshapes
+  const exprMgr = currentVrm.expressionManager;
+  if (exprMgr) {
+    for (const expr of exprMgr.expressions) {
+      const n = expr.expressionName || expr.name;
+      if (n) exprMgr.setValue(n, 0);
+    }
+  }
+  // Reset el bone seleccionado
+  const boneName = document.getElementById('bone-select').value;
+  const node = getBoneNode(boneName);
+  if (node) { node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0; }
+  // Re-aplicar rest pose limpia
+  applyRestPose(currentVrm);
+  // Reset sliders en UI
+  document.querySelectorAll('input[type="range"]').forEach(s => {
+    s.value = 0;
+    if (s.nextElementSibling) s.nextElementSibling.textContent = '0.00';
+  });
+  setStatus('🚨 Todo reseteado — Ashley en rest pose limpia');
+  dbg('reset todo: expressions + bone + rest pose', 'ok');
+});
+
+// ─── Auto-screenshot v2 — Hi-res por bone con camera framing ──
+//
+// Cada bone se captura en una imagen separada de ~6400×900px con la cámara
+// encuadrada al área correcta del cuerpo (head close-up, hips full body, etc.)
+// para que cada axis se vea claro.
+
+const ALL_BONES = [
+  'head', 'neck', 'chest', 'spine', 'hips',
+  'rightUpperArm', 'rightLowerArm', 'rightHand',
+  'leftUpperArm', 'leftLowerArm', 'leftHand',
+  'rightUpperLeg', 'rightLowerLeg', 'rightFoot',
+  'leftUpperLeg', 'leftLowerLeg', 'leftFoot',
+];
+
+// Framing camera per bone: distancia (m) + offset del target relativo al bone
+const BONE_FRAMING = {
+  head:          { dist: 0.8, voffset: 0.05 },
+  neck:          { dist: 0.9, voffset: -0.02 },
+  chest:         { dist: 1.3, voffset: -0.05 },
+  spine:         { dist: 1.6, voffset: -0.10 },
+  hips:          { dist: 2.5, voffset: 0 },          // full body
+  rightUpperArm: { dist: 1.0, voffset: 0, hoffset: 0.15 },
+  rightLowerArm: { dist: 0.8, voffset: -0.05, hoffset: 0.20 },
+  rightHand:     { dist: 0.5, voffset: -0.10, hoffset: 0.25 },
+  leftUpperArm:  { dist: 1.0, voffset: 0, hoffset: -0.15 },
+  leftLowerArm:  { dist: 0.8, voffset: -0.05, hoffset: -0.20 },
+  leftHand:      { dist: 0.5, voffset: -0.10, hoffset: -0.25 },
+  rightUpperLeg: { dist: 1.0, voffset: 0, hoffset: 0.05 },
+  rightLowerLeg: { dist: 0.8, voffset: 0, hoffset: 0.05 },
+  rightFoot:     { dist: 0.5, voffset: 0, hoffset: 0.05 },
+  leftUpperLeg:  { dist: 1.0, voffset: 0, hoffset: -0.05 },
+  leftLowerLeg:  { dist: 0.8, voffset: 0, hoffset: -0.05 },
+  leftFoot:      { dist: 0.5, voffset: 0, hoffset: -0.05 },
+};
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function captureCanvasHiRes(width, height) {
+  return new Promise((resolve) => {
+    // Resize renderer temporalmente a tamaño grande para capture nítido
+    const oldW = renderer.domElement.width / renderer.getPixelRatio();
+    const oldH = renderer.domElement.height / renderer.getPixelRatio();
+    renderer.setPixelRatio(1);
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+    requestAnimationFrame(() => {
+      renderer.domElement.toBlob((blob) => {
+        // Restaurar tamaño original
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(oldW, oldH, false);
+        camera.aspect = oldW / oldH;
+        camera.updateProjectionMatrix();
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.src = URL.createObjectURL(blob);
+      }, 'image/png');
+    });
+  });
+}
+
+function frameCameraOnBone(boneName) {
+  const node = getBoneNode(boneName);
+  if (!node) return;
+  const wp = new THREE.Vector3();
+  node.getWorldPosition(wp);
+  const f = BONE_FRAMING[boneName] || { dist: 1.5, voffset: 0 };
+  const target = new THREE.Vector3(
+    wp.x + (f.hoffset || 0),
+    wp.y + (f.voffset || 0),
+    wp.z
+  );
+  const camPos = new THREE.Vector3(target.x, target.y, target.z + f.dist);
+  controls.target.copy(target);
+  camera.position.copy(camPos);
+  controls.update();
+}
+
+async function generateBoneImage(boneName) {
+  const CELL_W = 800, CELL_H = 800, LABEL_H = 60, HEADER_H = 80;
+  const COLS = 7;
+  const composite = document.createElement('canvas');
+  composite.width = COLS * CELL_W;
+  composite.height = CELL_H + LABEL_H + HEADER_H;
+  const ctx = composite.getContext('2d');
+
+  // Background + header
+  ctx.fillStyle = '#0a0408';
+  ctx.fillRect(0, 0, composite.width, composite.height);
+  ctx.fillStyle = '#d4a373';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${boneName} — Hi-res axis test (45° each axis)`, composite.width / 2, 50);
+
+  function drawCell(img, col, label) {
+    const x = col * CELL_W;
+    const y = HEADER_H;
+    // Label
+    ctx.fillStyle = '#1a0f15';
+    ctx.fillRect(x, y, CELL_W, LABEL_H);
+    ctx.fillStyle = '#d4a373';
+    ctx.font = 'bold 28px monospace';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + CELL_W / 2, y + LABEL_H / 2);
+    // Image
+    const imgRatio = img.width / img.height;
+    const cellImgH = CELL_H;
+    const cellImgW = CELL_W;
+    let drawW = cellImgW, drawH = cellImgW / imgRatio;
+    if (drawH > cellImgH) { drawH = cellImgH; drawW = cellImgH * imgRatio; }
+    const dx = x + (CELL_W - drawW) / 2;
+    const dy = y + LABEL_H + (cellImgH - drawH) / 2;
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+    ctx.strokeStyle = '#442a1f';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, CELL_W, CELL_H + LABEL_H);
+  }
+
+  // Setup: rest pose, expressions limpias, framing al bone
+  applyRestPose(currentVrm);
+  const exprMgr = currentVrm.expressionManager;
+  if (exprMgr) {
+    for (const expr of exprMgr.expressions) {
+      const n = expr.expressionName || expr.name;
+      if (n) exprMgr.setValue(n, 0);
+    }
+  }
+  const node = getBoneNode(boneName);
+  if (!node) {
+    dbg(`bone ${boneName} NULL — skipping`, 'err');
+    return null;
+  }
+  // Reset bone tested
+  node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+  await sleep(100);
+
+  // Frame camera AFTER applying rest pose (para que la posición del bone sea la real)
+  frameCameraOnBone(boneName);
+  await sleep(100);
+
+  // Cell 0: REST
+  let img = await captureCanvasHiRes(CELL_W, CELL_H);
+  drawCell(img, 0, 'REST (0°)');
+
+  // Cells 1-6: cada axis × signo
+  const tests = [['x', +1], ['x', -1], ['y', +1], ['y', -1], ['z', +1], ['z', -1]];
+  for (let j = 0; j < tests.length; j++) {
+    const [axis, sign] = tests[j];
+    node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+    await sleep(50);
+    node.rotation[axis] = sign * (45 * Math.PI / 180);
+    await sleep(150);
+    img = await captureCanvasHiRes(CELL_W, CELL_H);
+    const signStr = sign > 0 ? '+' : '-';
+    drawCell(img, j + 1, `${axis.toUpperCase()}${signStr} 45°`);
+  }
+  // Reset bone al final
+  node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+
+  return composite;
+}
+
+function downloadCanvas(canvas, filename) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); resolve(); }, 500);
+    }, 'image/png');
+  });
+}
+
+// Hi-res del bone seleccionado en el dropdown
+document.getElementById('auto-screenshot-one').addEventListener('click', async () => {
+  if (!currentVrm) return;
+  const boneName = document.getElementById('bone-select').value;
+  testRunning = true;
+  document.getElementById('debug').style.display = 'block';
+  try {
+    dbg(`📸 generating hi-res para ${boneName}...`, 'ok');
+    setStatus(`Generando hi-res de ${boneName}...`);
+    const img = await generateBoneImage(boneName);
+    if (img) {
+      await downloadCanvas(img, `ashley_bone_${boneName}.png`);
+      dbg(`✓ ashley_bone_${boneName}.png descargado (${img.width}×${img.height}px)`, 'ok');
+      setStatus(`✓ Hi-res descargado: ashley_bone_${boneName}.png`);
+    }
+  } catch (e) {
+    dbg('hi-res ERROR: ' + e.message, 'err');
+  } finally {
+    testRunning = false;
+    applyRestPose(currentVrm);
+  }
+});
+
+// Hi-res de TODOS los bones (17 PNGs separados)
+document.getElementById('auto-screenshot').addEventListener('click', async () => {
+  if (!currentVrm) return;
+  if (!confirm('Esto va a generar 17 archivos PNG en tu carpeta de descargas (~25MB total). ¿Continuar?')) return;
+  testRunning = true;
+  document.getElementById('debug').style.display = 'block';
+  dbg(`📸 iniciando hi-res de los 17 bones — tarda ~10 min, NO toques nada`, 'ok');
+  try {
+    for (let i = 0; i < ALL_BONES.length; i++) {
+      const boneName = ALL_BONES[i];
+      setStatus(`Hi-res ${boneName} (${i + 1}/${ALL_BONES.length})`);
+      dbg(`📸 ${boneName} (${i + 1}/${ALL_BONES.length})`, 'ok');
+      const img = await generateBoneImage(boneName);
+      if (img) {
+        await downloadCanvas(img, `ashley_bone_${String(i+1).padStart(2,'0')}_${boneName}.png`);
+      }
+    }
+    dbg('✓ TODOS los hi-res descargados', 'ok');
+    setStatus('✓ 17 PNGs descargados');
+  } catch (e) {
+    dbg('auto-screenshot ERROR: ' + e.message, 'err');
+  } finally {
+    testRunning = false;
+    applyRestPose(currentVrm);
+    // Reset framing
+    const center = new THREE.Vector3();
+    new THREE.Box3().setFromObject(currentVrm.scene).getCenter(center);
+    controls.target.copy(center);
+    camera.position.set(center.x, center.y, center.z + 3);
+    controls.update();
+  }
+});
+
+// ─── Pose Editor (sliders en vivo) ──────────────────────────
+// editorPose guarda bones + expressions tocadas por el user.
+// "Copiar JSON" exporta TODO (bones + expressions) como código JS.
+const editorPose = {};
+const editorExpressions = {};
+
+// Build sliders de expressions una sola vez al cargar el VRM (las expressions
+// dependen del rig — Ashley tiene 18 preset + 2 custom = 20 según vimos).
+function buildExpressionSliders(vrm) {
+  const container = document.getElementById('editor-expressions');
+  container.innerHTML = '';
+  const exprMgr = vrm.expressionManager;
+  if (!exprMgr) return;
+  // Las que más usaríamos en poses: emociones + blink. Excluimos visemes (los maneja lipsync)
+  // y excluimos lookAt (los maneja eye tracking).
+  const RELEVANT = [
+    'happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral',
+    'blink', 'blinkLeft', 'blinkRight',
+    'Joy', 'sorrow',  // customs
+  ];
+  for (const name of RELEVANT) {
+    const expr = exprMgr.expressions.find(e => (e.expressionName || e.name) === name);
+    if (!expr) continue;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns:60px 1fr 36px; gap:4px; align-items:center; margin-bottom:2px;';
+    const label = document.createElement('span');
+    label.textContent = name;
+    label.style.cssText = 'font-size:10px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = 0; slider.max = 1; slider.step = 0.01; slider.value = 0;
+    const val = document.createElement('span');
+    val.style.cssText = 'font-size:10px; color:var(--text-dim); text-align:right; font-family:monospace;';
+    val.textContent = '0.00';
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      val.textContent = v.toFixed(2);
+      exprMgr.setValue(name, v);
+      if (v > 0.001) editorExpressions[name] = v;
+      else delete editorExpressions[name];
+    });
+    row.appendChild(label);
+    row.appendChild(slider);
+    row.appendChild(val);
+    container.appendChild(row);
+  }
+}
+
+function buildSlidersForBone(boneName) {
+  const container = document.getElementById('editor-sliders');
+  container.innerHTML = '';
+  if (!currentVrm) return;
+  const node = getBoneNode(boneName);
+  if (!node) {
+    container.innerHTML = `<div style="color:#c97373; font-size:11px;">bone ${boneName} no existe</div>`;
+    return;
+  }
+  // Inicializar editorPose para este bone si no existe
+  if (!editorPose[boneName]) {
+    editorPose[boneName] = {
+      x: node.rotation.x,
+      y: node.rotation.y,
+      z: node.rotation.z,
+    };
+  }
+  // Sincronizar visual con bone actual
+  const current = editorPose[boneName];
+
+  for (const axis of ['x', 'y', 'z']) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns:18px 1fr 50px; gap:4px; align-items:center; margin-bottom:3px;';
+    const label = document.createElement('span');
+    label.textContent = axis.toUpperCase();
+    label.style.cssText = 'font-weight:bold; color:var(--accent);';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = -180; slider.max = 180; slider.step = 1;
+    slider.value = (current[axis] * 180 / Math.PI).toFixed(0);
+    const val = document.createElement('span');
+    val.style.cssText = 'font-size:10px; color:var(--text-dim); text-align:right; font-family:monospace;';
+    val.textContent = slider.value + '°';
+    slider.addEventListener('input', () => {
+      const deg = parseInt(slider.value, 10);
+      val.textContent = deg + '°';
+      const rad = deg * Math.PI / 180;
+      node.rotation[axis] = rad;
+      editorPose[boneName][axis] = rad;
+    });
+    row.appendChild(label);
+    row.appendChild(slider);
+    row.appendChild(val);
+    container.appendChild(row);
+  }
+}
+
+document.getElementById('editor-bone-select').addEventListener('change', (e) => {
+  buildSlidersForBone(e.target.value);
+});
+
+// Verificar qué bones del dropdown existen realmente en el VRM
+document.getElementById('check-fingers').addEventListener('click', () => {
+  if (!currentVrm) return;
+  document.getElementById('debug').style.display = 'block';
+  const select = document.getElementById('editor-bone-select');
+  const groups = select.querySelectorAll('optgroup');
+  let totalOk = 0, totalNull = 0;
+  for (const group of groups) {
+    const groupName = group.label;
+    dbg(`${groupName}`, 'ok');
+    for (const opt of group.querySelectorAll('option')) {
+      const boneName = opt.value;
+      const node = getBoneNode(boneName);
+      const status = node ? '✓ OK' : '✗ NULL';
+      const kind = node ? 'ok' : 'err';
+      dbg(`  ${boneName}: ${status}`, kind);
+      if (node) totalOk++; else totalNull++;
+      // Marcar la opción visualmente si no existe
+      if (!node) {
+        opt.textContent = boneName + ' (NULL)';
+        opt.style.color = '#666';
+      }
+    }
+  }
+  dbg(`Total: ${totalOk} OK, ${totalNull} NULL`, 'ok');
+  setStatus(`${totalOk} bones disponibles, ${totalNull} no existen`);
+});
+
+document.getElementById('editor-clear').addEventListener('click', () => {
+  // Limpiar editorPose + editorExpressions y aplicar rest pose
+  for (const k of Object.keys(editorPose)) delete editorPose[k];
+  for (const k of Object.keys(editorExpressions)) delete editorExpressions[k];
+  if (currentVrm) {
+    applyRestPose(currentVrm);
+    // Limpiar todas las expressions del modelo
+    const exprMgr = currentVrm.expressionManager;
+    if (exprMgr) {
+      for (const expr of exprMgr.expressions) {
+        const n = expr.expressionName || expr.name;
+        if (n) exprMgr.setValue(n, 0);
+      }
+    }
+  }
+  // Re-build sliders del bone actual + reset sliders de expressions a 0
+  buildSlidersForBone(document.getElementById('editor-bone-select').value);
+  document.querySelectorAll('#editor-expressions input[type="range"]').forEach(s => {
+    s.value = 0;
+    if (s.nextElementSibling) s.nextElementSibling.textContent = '0.00';
+  });
+  setStatus('Pose editor reset (bones + expressions)');
+});
+
+document.getElementById('editor-export').addEventListener('click', () => {
+  const hasBones = Object.keys(editorPose).length > 0;
+  const hasExpr = Object.keys(editorExpressions).length > 0;
+  if (!hasBones && !hasExpr) {
+    setStatus('No hay nada modificado en el editor');
+    return;
+  }
+  // Convertir radianes a expresión PI*N para legibilidad
+  const formatRad = (rad) => {
+    if (Math.abs(rad) < 0.001) return null;
+    const piFraction = rad / Math.PI;
+    return `PI * ${piFraction.toFixed(3)}`;
+  };
+  const lines = ['{'];
+  for (const [bone, rot] of Object.entries(editorPose)) {
+    const parts = [];
+    for (const axis of ['x', 'y', 'z']) {
+      const f = formatRad(rot[axis]);
+      if (f) parts.push(`${axis}: ${f}`);
+    }
+    if (parts.length > 0) {
+      lines.push(`  ${bone}: { ${parts.join(', ')} },`);
+    }
+  }
+  // Expressions van en una sub-key 'expressions'
+  if (hasExpr) {
+    const exprParts = [];
+    for (const [name, val] of Object.entries(editorExpressions)) {
+      exprParts.push(`${name}: ${val.toFixed(2)}`);
+    }
+    lines.push(`  expressions: { ${exprParts.join(', ')} },`);
+  }
+  lines.push('}');
+  const json = lines.join('\n');
+  // Copiar al clipboard
+  navigator.clipboard.writeText(json).then(() => {
+    setStatus('✓ Pose+expressions copiado al clipboard. Pégamelo a Claude.');
+    dbg('Pose copiada:\n' + json, 'ok');
+  }).catch(() => {
+    setStatus('✗ Clipboard falló. JSON en debug log.');
+    dbg('Pose JSON:\n' + json, 'ok');
+    document.getElementById('debug').style.display = 'block';
+  });
+});
+
+// Init: build sliders del primer bone (head). Expressions se construyen
+// dentro del loader.load callback cuando el VRM ya está listo.
+setTimeout(() => buildSlidersForBone('head'), 500);
+
+// ─── VRM Scene Transform sliders (manual ajuste cuando VRMA queda raro) ──
+function buildVrmTransformSliders() {
+  const container = document.getElementById('vrm-transform-sliders');
+  container.innerHTML = '';
+  if (!currentVrm) return;
+
+  const SLIDERS = [
+    { axis: 'rot.y',  label: 'Rot Y (gira hor)', min: -180, max: 180, step: 1, unit: '°', getter: () => (currentVrm.scene.rotation.y * 180 / Math.PI), setter: v => currentVrm.scene.rotation.y = v * Math.PI / 180 },
+    { axis: 'rot.x',  label: 'Rot X (inclina)',   min: -180, max: 180, step: 1, unit: '°', getter: () => (currentVrm.scene.rotation.x * 180 / Math.PI), setter: v => currentVrm.scene.rotation.x = v * Math.PI / 180 },
+    { axis: 'rot.z',  label: 'Rot Z (ladea)',     min: -180, max: 180, step: 1, unit: '°', getter: () => (currentVrm.scene.rotation.z * 180 / Math.PI), setter: v => currentVrm.scene.rotation.z = v * Math.PI / 180 },
+    { axis: 'pos.y',  label: 'Pos Y (sube/baja)', min: -2, max: 2, step: 0.01, unit: 'm', getter: () => currentVrm.scene.position.y, setter: v => currentVrm.scene.position.y = v },
+    { axis: 'pos.x',  label: 'Pos X (lat)',       min: -2, max: 2, step: 0.01, unit: 'm', getter: () => currentVrm.scene.position.x, setter: v => currentVrm.scene.position.x = v },
+    { axis: 'pos.z',  label: 'Pos Z (depth)',     min: -2, max: 2, step: 0.01, unit: 'm', getter: () => currentVrm.scene.position.z, setter: v => currentVrm.scene.position.z = v },
+  ];
+
+  for (const s of SLIDERS) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns:90px 1fr 50px; gap:4px; align-items:center; margin-bottom:3px;';
+    const label = document.createElement('span');
+    label.textContent = s.label;
+    label.style.cssText = 'font-size:10px; color:var(--text-muted);';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = s.min; slider.max = s.max; slider.step = s.step;
+    slider.value = s.getter().toFixed(s.step < 1 ? 2 : 0);
+    const val = document.createElement('span');
+    val.style.cssText = 'font-size:10px; color:var(--text-dim); text-align:right; font-family:monospace;';
+    val.textContent = parseFloat(slider.value).toFixed(s.step < 1 ? 2 : 0) + s.unit;
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      val.textContent = v.toFixed(s.step < 1 ? 2 : 0) + s.unit;
+      s.setter(v);
+    });
+    row.appendChild(label); row.appendChild(slider); row.appendChild(val);
+    container.appendChild(row);
+  }
+}
+
+document.getElementById('vrm-transform-reset').addEventListener('click', () => {
+  if (!currentVrm) return;
+  currentVrm.scene.rotation.set(0, 0, 0);
+  currentVrm.scene.position.set(0, 0, 0);
+  buildVrmTransformSliders();
+  setStatus('🎯 Transform reset (0,0,0)');
+});
+
+document.getElementById('vrm-transform-export').addEventListener('click', () => {
+  if (!currentVrm) return;
+  const r = currentVrm.scene.rotation;
+  const p = currentVrm.scene.position;
+  const PI = Math.PI;
+  const formatRad = (rad) => {
+    if (Math.abs(rad) < 0.001) return '0';
+    const piFraction = rad / PI;
+    return `PI * ${piFraction.toFixed(4)}`;
+  };
+  const json = `{
+  rotation: { x: ${formatRad(r.x)}, y: ${formatRad(r.y)}, z: ${formatRad(r.z)} },
+  position: { x: ${p.x.toFixed(3)}, y: ${p.y.toFixed(3)}, z: ${p.z.toFixed(3)} },
+}`;
+  navigator.clipboard.writeText(json).then(() => {
+    setStatus('✓ Transform copiado al clipboard');
+    dbg('VRM scene transform:\n' + json, 'ok');
+  }).catch(() => {
+    setStatus('✗ Clipboard falló — JSON en debug log');
+    dbg('VRM scene transform:\n' + json, 'ok');
+    document.getElementById('debug').style.display = 'block';
+  });
+});
+
+// Build sliders al cargar VRM
+setTimeout(buildVrmTransformSliders, 1000);
+
+// ─── External animations: drag&drop loader + UI ──────────────
+const animDropzone = document.getElementById('anim-dropzone');
+const animFileInput = document.getElementById('anim-file-input');
+const animListEl = document.getElementById('anim-list');
+
+function refreshAnimList() {
+  if (!animationLibrary) return;
+  const names = animationLibrary.list();
+  if (names.length === 0) {
+    animListEl.innerHTML = '<div style="opacity:0.5; padding:6px;">Sin animaciones cargadas todavía</div>';
+    return;
+  }
+  animListEl.innerHTML = '';
+  for (const name of names) {
+    const isPlaying = animationLibrary.currentName === name;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; background:' + (isPlaying ? 'rgba(115,201,127,0.15)' : 'rgba(212,163,115,0.05)') + '; margin-bottom:3px;';
+    const label = document.createElement('span');
+    label.textContent = (isPlaying ? '▶ ' : '') + name;
+    label.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    const playBtn = document.createElement('button');
+    playBtn.textContent = isPlaying ? '⏸' : '▶';
+    playBtn.style.cssText = 'padding:2px 8px; font-size:10px; cursor:pointer;';
+    playBtn.addEventListener('click', () => {
+      if (isPlaying) {
+        animationLibrary.stop();
+      } else {
+        animationLibrary.play(name, { loop: true });
+      }
+      setTimeout(refreshAnimList, 100);
+    });
+    const playOnceBtn = document.createElement('button');
+    playOnceBtn.textContent = '1×';
+    playOnceBtn.title = 'Play once (no loop)';
+    playOnceBtn.style.cssText = 'padding:2px 6px; font-size:10px; cursor:pointer;';
+    playOnceBtn.addEventListener('click', () => {
+      animationLibrary.play(name, { loop: false });
+      setTimeout(refreshAnimList, 100);
+    });
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Quitar';
+    removeBtn.style.cssText = 'padding:2px 6px; font-size:10px; cursor:pointer; background:rgba(201,115,115,0.2); border-color:rgba(201,115,115,0.4); color:#d4a0a0;';
+    removeBtn.addEventListener('click', () => {
+      animationLibrary.remove(name);
+      refreshAnimList();
+    });
+    row.appendChild(label);
+    row.appendChild(playBtn);
+    row.appendChild(playOnceBtn);
+    row.appendChild(removeBtn);
+    animListEl.appendChild(row);
+  }
+}
+
+async function loadAnimationFile(file) {
+  if (!animationLibrary) { setStatus('✗ AnimationLibrary aún no listo'); return; }
+  const lower = file.name.toLowerCase();
+  const displayName = file.name.replace(/\.(vrma|fbx|glb)$/i, '');
+  setStatus(`Cargando ${file.name}...`);
+  try {
+    let info;
+    if (lower.endsWith('.vrma')) {
+      info = await animationLibrary.loadVRMA(file, displayName);
+      dbg(`✓ VRMA "${info.name}" cargada (${info.duration.toFixed(2)}s, ${info.tracks} tracks)`, 'ok');
+    } else if (lower.endsWith('.fbx')) {
+      info = await animationLibrary.loadFBX(file, displayName);
+      dbg(`✓ FBX "${info.name}" cargada y retargeted (${info.duration.toFixed(2)}s, ${info.tracks} tracks)`, 'ok');
+    } else {
+      throw new Error('Formato no soportado: usa .vrma o .fbx');
+    }
+    setStatus(`✓ "${displayName}" listo — pulsa ▶ para reproducir`);
+    refreshAnimList();
+  } catch (e) {
+    dbg(`✗ Error cargando ${file.name}: ${e.message}`, 'err');
+    setStatus(`✗ Error: ${e.message}`);
+    document.getElementById('debug').style.display = 'block';
+  }
+}
+
+// Drag & drop
+['dragenter', 'dragover'].forEach(ev => {
+  animDropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    animDropzone.style.background = 'rgba(115,201,127,0.15)';
+  });
+});
+['dragleave', 'drop'].forEach(ev => {
+  animDropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    animDropzone.style.background = 'transparent';
+  });
+});
+animDropzone.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files);
+  for (const file of files) await loadAnimationFile(file);
+});
+animDropzone.addEventListener('click', () => animFileInput.click());
+animFileInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  for (const file of files) await loadAnimationFile(file);
+  e.target.value = '';
+});
+
+document.getElementById('anim-stop').addEventListener('click', () => {
+  if (animationLibrary) animationLibrary.stop();
+  setTimeout(refreshAnimList, 100);
+  setStatus('⏹ Animación parada');
+});
+
+// Init lista vacía
+setTimeout(refreshAnimList, 800);
+
+// SEQUENCES — gestos animados (encadena varias poses)
+document.querySelectorAll('[data-seq]').forEach(b => {
+  b.addEventListener('click', () => {
+    if (!sequencePlayer) return;
+    const seqName = b.dataset.seq;
+    const steps = SEQUENCES[seqName];
+    if (!steps) { setStatus('✗ sequence no existe: ' + seqName); return; }
+    sequencePlayer.play(steps);
+    setStatus(`🎬 sequence: ${b.textContent.trim()}`);
+  });
+});
+document.getElementById('seq-stop').addEventListener('click', () => {
+  if (sequencePlayer) sequencePlayer.stop();
+  if (poseAnimator) poseAnimator.transitionTo({}, 400);
+  setStatus('⏹ sequence parada, vuelta a rest');
+});
+
+// Animation controls
+document.getElementById('anim-enabled').addEventListener('change', (e) => {
+  animationsEnabled = e.target.checked;
+  setStatus(animationsEnabled ? '🎬 Transiciones ON' : '⚡ Modo instant');
+});
+document.getElementById('anim-duration').addEventListener('input', (e) => {
+  animationDurationMs = parseInt(e.target.value, 10);
+  document.getElementById('anim-duration-val').textContent = animationDurationMs + 'ms';
+});
+
+// Poses — anima si animationsEnabled, sino aplica instant
+document.querySelectorAll('[data-pose]').forEach(b => {
+  b.addEventListener('click', () => {
+    if (!currentVrm) return;
+    const name = b.dataset.pose;
+    const target = (name === 'REST') ? {} : POSES[name];  // {} = solo rest pose como base
+    if (animationsEnabled && poseAnimator) {
+      poseAnimator.transitionTo(target, animationDurationMs);
+      setStatus(`🎬 ${name === 'REST' ? 'Rest' : b.textContent.trim()} (${animationDurationMs}ms)`);
+    } else {
+      // Modo instant (legacy)
+      if (name === 'REST') applyRestPose(currentVrm);
+      else applyPose(currentVrm, POSES[name]);
+      setStatus(`Pose: ${b.textContent.trim()}`);
+    }
+  });
+});
+
+// Debug toggles
+document.getElementById('toggle-debug').addEventListener('click', (e) => {
+  if (window._debugToggle) window._debugToggle();
+  e.target.classList.toggle('active');
+});
+document.getElementById('toggle-floor').addEventListener('click', (e) => {
+  if (window._floorToggle) window._floorToggle();
+  e.target.classList.toggle('active');
+});
+document.getElementById('toggle-debug-log').addEventListener('click', () => {
+  const el = document.getElementById('debug');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+});
+
+// Suelo visible por defecto, debug log oculto
+document.getElementById('debug').style.display = 'none';
+
+// ─── Animation loop ─────────────────────────────────────────
+const clock = new THREE.Clock();
+let frames = 0, fpsTime = 0;
+let renderErrorCount = 0;
+const fpsEl = document.getElementById('fps');
+
+function animate() {
+  if (renderErrorCount > 5) {
+    dbg(`render abortado (${renderErrorCount} errores) — el shader MToon está roto, ver consola`, 'err');
+    return;
+  }
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  const time = clock.elapsedTime;
+
+  if (currentVrm) {
+    // AnimationLibrary update (clips externos VRMA/FBX)
+    const isPlayingExternalAnim = animationLibrary && animationLibrary.isPlaying();
+    if (animationLibrary) animationLibrary.update(delta);
+
+    // PoseAnimator update — interpola hacia la pose target si hay transición activa
+    let isTransitioning = false;
+    if (poseAnimator && !isPlayingExternalAnim) {
+      const wasActive = poseAnimator.isAnimating();
+      isTransitioning = poseAnimator.update();
+      // Detectar transición que ACABA de terminar (true → false)
+      // → recapturamos idleBase para que idle parta de los valores de la nueva pose
+      if (wasActive && !isTransitioning) {
+        captureIdleBase();
+      }
+    }
+
+    // Idle: respiración + sway + micromovimiento de cabeza
+    // ADITIVO: idle suma deltas pequeños SOBRE idleBase (los valores de la pose
+    // actual). Sin esto, cada frame idle pisaría hips/spine/etc de la pose con
+    // sus propios valores → tremor visible al terminar la transición.
+    // También se pausa si hay clip de animación externa (Mixamo/VRMA) corriendo.
+    if (idleEnabled && !testRunning && !isTransitioning && !isPlayingExternalAnim) {
+      const spine = currentVrm.humanoid?.getNormalizedBoneNode('spine');
+      const chest = currentVrm.humanoid?.getNormalizedBoneNode('chest');
+      const hips = currentVrm.humanoid?.getNormalizedBoneNode('hips');
+      const head = currentVrm.humanoid?.getNormalizedBoneNode('head');
+      const neck = currentVrm.humanoid?.getNormalizedBoneNode('neck');
+
+      const breath = Math.sin(time * 1.4) * 0.025;
+      if (spine) spine.rotation.x = idleBase.spine.x + breath * 0.5;
+      if (chest) chest.rotation.x = idleBase.chest.x + breath;
+
+      if (hips) {
+        hips.rotation.y = idleBase.hips.y + Math.sin(time * 0.5) * 0.04;
+        hips.rotation.z = idleBase.hips.z + Math.sin(time * 0.35) * 0.02;
+      }
+
+      if (head) {
+        head.rotation.y = idleBase.head.y + Math.sin(time * 0.7) * 0.015;
+        head.rotation.x = idleBase.head.x + Math.sin(time * 0.45) * 0.008;
+      }
+      if (neck) {
+        neck.rotation.x = idleBase.neck.x + Math.sin(time * 0.6) * 0.01;
+      }
+    }
+
+    // Auto blink
+    if (blinkEnabled) {
+      blinkTimer += delta;
+      if (blinkPhase === 0 && blinkTimer >= nextBlinkAt) {
+        blinkPhase = 1; blinkTimer = 0;
+      }
+      if (blinkPhase === 1) {
+        const t = Math.min(blinkTimer / 0.07, 1);
+        currentVrm.expressionManager?.setValue('blink', t);
+        if (t >= 1) { blinkPhase = 2; blinkTimer = 0; }
+      } else if (blinkPhase === 2) {
+        if (blinkTimer > 0.05) { blinkPhase = 3; blinkTimer = 0; }
+      } else if (blinkPhase === 3) {
+        const t = Math.min(blinkTimer / 0.10, 1);
+        currentVrm.expressionManager?.setValue('blink', 1 - t);
+        if (t >= 1) {
+          blinkPhase = 0; blinkTimer = 0;
+          nextBlinkAt = 2 + Math.random() * 4;
+        }
+      }
+    }
+
+    currentVrm.update(delta);
+  }
+
+  controls.update();
+  try {
+    renderer.render(scene, camera);
+  } catch (e) {
+    renderErrorCount++;
+    if (renderErrorCount === 1) {
+      dbg('RENDER ERROR: ' + (e?.message || e), 'err');
+      dbg('Probable causa: shader MToon falla — voy a probar fallback PBR', 'err');
+      // Fallback: reemplazar materiales MToon por MeshStandardMaterial
+      tryReplaceMToonMaterials();
+    }
+  }
+
+  // FPS
+  frames++;
+  fpsTime += delta;
+  if (fpsTime >= 0.5) {
+    fpsEl.textContent = `${(frames / fpsTime).toFixed(0)} fps`;
+    frames = 0; fpsTime = 0;
+  }
+}
+
+// Fallback: si MToon shader falla, reemplazar por materiales standard PBR
+// para al menos VER el modelo (sin el cel-shading anime, pero visible).
+function tryReplaceMToonMaterials() {
+  if (!currentVrm) return;
+  let replaced = 0;
+  currentVrm.scene.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      const newMats = mats.map(m => {
+        // Detectar MToon por nombre o por presencia de uniforms específicos
+        if (m.type && (m.type.includes('MToon') || m.userData?.isMToonMaterial)) {
+          const std = new THREE.MeshStandardMaterial({
+            map: m.map || m.baseMap || null,
+            color: m.color || 0xffffff,
+            transparent: m.transparent,
+            side: m.side,
+            skinning: true,
+            morphTargets: true,
+          });
+          replaced++;
+          return std;
+        }
+        return m;
+      });
+      obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
+    }
+  });
+  dbg(`fallback: ${replaced} materiales MToon → MeshStandardMaterial`, 'ok');
+  renderErrorCount = 0; // reset, intentar render de nuevo
+  requestAnimationFrame(animate);
+}
+animate();
+
+// ─── Resize ─────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// ─── Keyboard navigation ────────────────────────────────────
+// Flechas → paneo de la cámara (mueve target + cámara juntos en su plano)
+// R → reset a vista AUTO (cuerpo entero centrado)
+// 1/2/3/4 → vistas presets (cara, torso, cuerpo, auto)
+//
+// Skip si el user está escribiendo en un input/select/range del editor
+window.addEventListener('keydown', (e) => {
+  if (!currentVrm) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+
+  // Calcular ejes de la cámara en world space (para que pan sea relative al view)
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const camUp = camera.up.clone();
+  const camRight = new THREE.Vector3().crossVectors(camDir, camUp).normalize();
+  // Recalcular up exacto (perpendicular a cámara y right)
+  const camUpReal = new THREE.Vector3().crossVectors(camRight, camDir).normalize();
+
+  // Step proporcional a la distancia de la cámara al target (más zoom = pasos más finos)
+  const dist = camera.position.distanceTo(controls.target);
+  const STEP = dist * 0.05;  // 5% de la distancia por flecha
+
+  let pan = null;
+  switch (e.key) {
+    case 'ArrowLeft':  pan = camRight.clone().multiplyScalar(-STEP); break;
+    case 'ArrowRight': pan = camRight.clone().multiplyScalar(STEP); break;
+    case 'ArrowUp':    pan = camUpReal.clone().multiplyScalar(STEP); break;
+    case 'ArrowDown':  pan = camUpReal.clone().multiplyScalar(-STEP); break;
+    case 'r': case 'R':
+      // Reset view a auto-fit
+      try {
+        const b = new THREE.Box3().setFromObject(currentVrm.scene);
+        const sz = b.getSize(new THREE.Vector3());
+        const cn = b.getCenter(new THREE.Vector3());
+        const hp = new THREE.Vector3(cn.x, b.max.y * 0.92, cn.z);
+        const headBone = currentVrm.humanoid?.getNormalizedBoneNode?.('head');
+        if (headBone) headBone.getWorldPosition(hp);
+        setView(currentVrm, 'auto', hp, sz, cn);
+        setStatus('🎥 vista reset (auto)');
+      } catch (err) { console.warn(err); }
+      e.preventDefault();
+      return;
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+      try {
+        const b = new THREE.Box3().setFromObject(currentVrm.scene);
+        const sz = b.getSize(new THREE.Vector3());
+        const cn = b.getCenter(new THREE.Vector3());
+        const hp = new THREE.Vector3(cn.x, b.max.y * 0.92, cn.z);
+        const headBone = currentVrm.humanoid?.getNormalizedBoneNode?.('head');
+        if (headBone) headBone.getWorldPosition(hp);
+        const modes = { '1': 'face', '2': 'upper', '3': 'full', '4': 'auto' };
+        setView(currentVrm, modes[e.key], hp, sz, cn);
+        setStatus(`🎥 vista: ${modes[e.key]}`);
+      } catch (err) { console.warn(err); }
+      e.preventDefault();
+      return;
+    default:
+      return;
+  }
+  if (!pan) return;
+  controls.target.add(pan);
+  camera.position.add(pan);
+  controls.update();
+  e.preventDefault();
+});
+</script>
+
+</body>
+</html>

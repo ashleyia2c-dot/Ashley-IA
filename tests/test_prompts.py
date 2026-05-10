@@ -38,8 +38,43 @@ def test_build_system_prompt_default_is_english():
 
 def test_unsupported_lang_falls_back_to_english():
     """Unknown lang codes fall back to English instead of crashing."""
-    result = build_system_prompt([], [], lang="de")
+    # v0.18.6 — "de" se añadió al SUPPORTED. Usamos un código inexistente.
+    result = build_system_prompt([], [], lang="xx")
     assert "TAGS — READ FIRST" in result
+
+
+def test_build_system_prompt_japanese():
+    """v0.18.6 — lang='ja' produces the Japanese prompt."""
+    result = build_system_prompt([], [], lang="ja")
+    # Cualquier carácter japonés (hiragana/katakana/kanji) debe aparecer
+    assert any("぀" <= c <= "ゟ" or "゠" <= c <= "ヿ" or "一" <= c <= "鿿" for c in result), (
+        "Japanese prompt should contain Japanese characters"
+    )
+
+
+def test_build_system_prompt_german():
+    """v0.18.6 — lang='de' produces the German prompt."""
+    result = build_system_prompt([], [], lang="de")
+    # "Chef" debe aparecer (cómo Ashley llama al user en alemán)
+    assert "Chef" in result
+
+
+def test_build_system_prompt_russian():
+    """v0.18.6 — lang='ru' produces the Russian prompt."""
+    result = build_system_prompt([], [], lang="ru")
+    # Cualquier carácter cirílico debe aparecer
+    assert any("Ѐ" <= c <= "ӿ" for c in result), (
+        "Russian prompt should contain Cyrillic characters"
+    )
+
+
+def test_build_system_prompt_korean():
+    """v0.18.6 — lang='ko' produces the Korean prompt."""
+    result = build_system_prompt([], [], lang="ko")
+    # Cualquier carácter Hangul debe aparecer
+    assert any("가" <= c <= "힣" for c in result), (
+        "Korean prompt should contain Hangul characters"
+    )
 
 
 def test_build_initiative_prompt_french():

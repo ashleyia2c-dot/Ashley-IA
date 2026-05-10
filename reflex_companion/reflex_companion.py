@@ -3294,12 +3294,15 @@ class State(rx.State):
                 self._apply_affection_delta(ft_aff)
                 self.mood = ft_mood
                 self.current_response = ""
-                ts3 = now_iso()
-                self.messages.append({
-                    "role": "assistant", "content": _clean_display_fn(ft_clean),
-                    "timestamp": ts3, "id": f"a-{ts3}", "image": "",
-                })
-                self.save_history()
+                # v0.18.5 — guard contra bubble vacío
+                ft_display = _clean_display_fn(ft_clean)
+                if ft_display and ft_display.strip():
+                    ts3 = now_iso()
+                    self.messages.append({
+                        "role": "assistant", "content": ft_display,
+                        "timestamp": ts3, "id": f"a-{ts3}", "image": "",
+                    })
+                    self.save_history()
             except Exception as e:
                 self._handle_grok_error(e, "action_blocked_followup")
             yield
@@ -3317,11 +3320,25 @@ class State(rx.State):
         # plan está completo o falta algo. El LLM mismo es la
         # heurística: si emite tag, ejecutamos; si solo texto, listo.
         # Cuando emite 2+ acciones de una, asumimos plan ya cubierto.
+        #
+        # v0.18.5 — NO continuar si la única acción ejecutada fue
+        # conversacional/safe (save_taste, check_in_goal, save_goal, etc.).
+        # Estas tags son parte del flujo natural de conversación: Ashley
+        # dijo lo suyo Y emitió el tag en el mismo mensaje. No hay "plan
+        # multi-step" que continuar — al continuar, el LLM no tiene nada
+        # que añadir y produce una respuesta vacía → bubble vacío en UI.
+        # Bug reportado tras emitir [check_in_goal:...]: aparecía burbuja
+        # vacía después del system message del check-in.
         any_failed = any(not r["result"].get("success", True) for r in executed_results)
         executed_count = len(executed_results)
+        all_safe_conversational = all(
+            r.get("action", {}).get("type") in _SAFE_ACTIONS
+            for r in executed_results
+        )
         should_continue = (
             executed_count == 1
             and not any_failed  # failures ya disparan apology (también itera)
+            and not all_safe_conversational  # ← v0.18.5
             and self._auto_iter_count < 1  # cap 1 follow-up = 2 turns max
         )
         if should_continue:
@@ -3403,15 +3420,20 @@ class State(rx.State):
             self._apply_affection_delta(ct_aff)
             self.mood = ct_mood
             self.current_response = ""
-            ts = now_iso()
-            self.messages.append({
-                "role": "assistant",
-                "content": _clean_display_fn(ct_clean),
-                "timestamp": ts,
-                "id": f"a-{ts}",
-                "image": "",
-            })
-            self.save_history()
+            # v0.18.5 — guard contra bubble vacío. Si tras strippear tags
+            # el contenido queda vacío/whitespace, NO appendeamos. Mood y
+            # affection ya se aplicaron arriba — esos efectos se preservan.
+            display_content = _clean_display_fn(ct_clean)
+            if display_content and display_content.strip():
+                ts = now_iso()
+                self.messages.append({
+                    "role": "assistant",
+                    "content": display_content,
+                    "timestamp": ts,
+                    "id": f"a-{ts}",
+                    "image": "",
+                })
+                self.save_history()
 
             # Si Ashley emitió siguiente paso, ejecutarlo. Si tiene
             # success y el plan sigue sin parecer cerrado, el counter
@@ -5288,15 +5310,18 @@ class State(rx.State):
             self._apply_affection_delta(ap_aff)
             self.mood = ap_mood
             self.current_response = ""
-            ts = now_iso()
-            self.messages.append({
-                "role": "assistant",
-                "content": _clean_display_fn(ap_clean),
-                "timestamp": ts,
-                "id": f"a-{ts}",
-                "image": "",
-            })
-            self.save_history()
+            # v0.18.5 — guard contra bubble vacío
+            ap_display = _clean_display_fn(ap_clean)
+            if ap_display and ap_display.strip():
+                ts = now_iso()
+                self.messages.append({
+                    "role": "assistant",
+                    "content": ap_display,
+                    "timestamp": ts,
+                    "id": f"a-{ts}",
+                    "image": "",
+                })
+                self.save_history()
 
             # Agentic continuation: si Ashley reaccionó al fallo emitiendo
             # otra action y aún tenemos presupuesto de iteraciones,
@@ -6643,6 +6668,10 @@ app = rx.App(
     head_components=[
         rx.el.script(src="/ashley_fx.js", defer=True),
         rx.el.script(src="/ashley_voice.js", defer=True),
+        # v0.18.3 — bridge JS que conecta State.mood (Python) con el iframe
+        # del widget 3D via postMessage. Vive en la página principal y forwardea
+        # cursor + mood al iframe que tiene el three-vrm.
+        rx.el.script(src="/ashley_3d_bridge.js", defer=True),
     ],
 )
 app.add_page(index, title="Ashley", on_load=State.on_load)

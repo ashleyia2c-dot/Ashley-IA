@@ -2,17 +2,21 @@
 
 > **Nota para Claude**: este archivo describe el "qué" técnico de cada módulo. Para "si me piden X, ¿dónde modifico?" ver [`PROJECT_MAP.md`](./PROJECT_MAP.md).
 
-Versión actual: **v0.18.0 (Tier 1 — Vínculo más rico)** — 3 sistemas nuevos para profundizar la relación user↔Ashley:
-  • **Días juntos + achievements temporales**: usa `first_message_at` ya existente para exponer "Llevas X días con el jefe" + celebraciones automáticas a los 7/30/100/365 días. Achievements: first_week, month_together, hundred_days, year_together.
-  • **Cumpleaños y fechas importantes**: nuevo módulo `important_dates.py` con recurrencia anual (MM-DD). Action `[action:save_date:TYPE:DATE:LABEL]`. Inyección al prompt de fechas hoy + próximos 7 días.
-  • **Goals tracking**: nuevo módulo `goals.py` para objetivos a largo plazo. Actions `[action:save_goal/check_in_goal/complete_goal]`. Marcador ⏰ para goals "due for check-in" (>10 días sin que Ashley pregunte).
+Versión actual: **v0.19.0 (Ashley en 3D + 4 idiomas nuevos)** — el salto visual + ampliación de mercado más grande de la app:
+  • **Ashley en 3D (VRM)**: nuevo `assets/ashley_3d_widget.html` con three-vrm 3.x + MToon. Carga `assets/3d/ashley.vrm` en un iframe que sobrevive re-renders de React. Bridge IIFE (`ashley_3d_bridge.js`) crea el iframe vía JS en un mount div estático para no perder el WebGL context (ni recargar 47MB) en cada State change. Features: poses (wave/tsundere/coolFingers), parpadeo + saccades de ojos, head bob mientras habla, lipsync REAL via Web Audio API (analiza el audio TTS de ElevenLabs/Kokoro/VoiceVox en tiempo real), expression boost al final de cada frase, proximity smile cuando el cursor se acerca. Performance: amp 25fps + cursor 20fps + render 30fps + bbox cacheado 500ms para evitar layout thrashing durante streaming.
+  • **4 idiomas nuevos** (ja, de, ru, ko): `prompts_ja.py` (991 líneas, ご主人 + tsundere refinada), `prompts_de.py` (1163, "Chef" + verschmitzt), `prompts_ru.py` (1066, «шеф» + ironía RU), `prompts_ko.py` (955, 오빠 + 반말 + K-drama lead). Total `i18n.py` ahora 2403 líneas con UI/ACT_DESC/KEY_LABELS/TIME_CTX para 7 idiomas (paridad de 186/31/7/26 keys verificada por test).
+  • **TTS no lee roleplay** (v0.18.4): nuevo `_extractSpeechText` walker DOM que SALTA `<em>`/`<i>` (donde markdown deposita `*acción*`/`_acción_`). Antes el regex no matcheaba porque markdown ya había convertido los marcadores en tags HTML.
+  • **Bug fix burbuja vacía** (v0.18.5): la "agentic continuation" ya NO se dispara para acciones safe/conversacionales (check_in_goal, save_taste, etc.). Plus guarda defensiva en los 3 paths que appendean assistant message tras strippear tags.
 
-Tests: 941 (+116 vs v0.17.4). Cache prefix preservado al ≥95% en los 3 idiomas (verified). Coste extra por mensaje: ~10-50 tokens.
+Tests: 1236 (+295 vs v0.18.0). Cache prefix preservado al 100% en los 7 idiomas. Coste extra por mensaje (3D + nuevos idiomas): 0 tokens (el 3D vive entero en el cliente).
 
 Hitos recientes:
+- v0.18.6 — i18n.py 2403 líneas, 7 idiomas con paridad verificada por test.
+- v0.18.5 — fix bubble vacía después de [check_in_goal:...] u otra safe action.
+- v0.18.4 — TTS DOM walker para no leer *roleplay* italicizado por markdown.
+- v0.18.3 — TTS bridge para 3D Ashley (CustomEvents `ashley:ttsStart`/`ttsEnd`).
+- v0.18.0 — Tier 1 vínculo: días juntos + cumpleaños + goals tracking.
 - v0.17.4 — prompts sin ejemplos meta + filtro post-stream ampliado con catch-all.
-- v0.17.3 — servidor HTTP embebido + fast-path producción → arranque ~15s → ~4-6s. `done_important` idempotente.
-- v0.17.2 — boutique noir UI fluida, multi-provider onboarding, Ashley más sentimental.
 
 ## Commands
 
