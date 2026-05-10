@@ -35,7 +35,13 @@
   ; PowerShell filtra por CommandLine — si VS Code tiene un Python
   ; interpreter abierto, NO lo matamos (su CommandLine no contiene
   ; "ashley\resources").
-  nsExec::Exec 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { ($_.Name -match \"^(python|node|bun|reflex)\") -and ($_.CommandLine -like \"*ashley\\resources*\") } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"'
+  ;
+  ; v0.19.13 — NSIS warning fix: $_ de PowerShell colisiona con la
+  ; sintaxis de variables de NSIS ($VARNAME). En NSIS `$$` escapa a `$`
+  ; literal, así que $$_.Name → $_.Name al ejecutarse. Sin esto, NSIS
+  ; daba warning 6000 ("unknown variable/constant _.Name") y CI lo
+  ; trataba como error → build fallaba (v0.19.10 / v0.19.11 / v0.19.12).
+  nsExec::Exec 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { ($$_.Name -match \"^(python|node|bun|reflex)\") -and ($$_.CommandLine -like \"*ashley\\resources*\") } | ForEach-Object { try { Stop-Process -Id $$_.ProcessId -Force -ErrorAction Stop } catch {} }"'
 
   ; Esperar 2s para que Windows libere los file handles. Sin esto, el
   ; kill devuelve al instante pero el lock del .exe puede persistir.
