@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.19.3",
+  "version": "0.19.4",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -29,6 +29,9 @@
       "buildResources": "build-resources"
     },
     "asar": true,
+    "asarUnpack": [
+      "node_modules/cloudflared/**"
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -36,7 +39,8 @@
       "cloudflared-tunnel.js",
       "onboarding.html",
       "package.json",
-      "build-resources/icon.ico"
+      "build-resources/icon.ico",
+      "node_modules/cloudflared/**"
     ],
     "extraResources": [
       {

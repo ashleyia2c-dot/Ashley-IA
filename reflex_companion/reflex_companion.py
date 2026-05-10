@@ -1240,6 +1240,13 @@ class State(rx.State):
             self.refresh_ollama_status()
             yield  # push lista de modelos cuando llega
 
+    def set_show_settings(self, value: bool):
+        """v0.19.4 — Setter explícito para rx.dialog.root(on_open_change=...).
+        Sin esto, click fuera del modal o ESC no cerraba Settings (Radix
+        intentaba cerrar pero el state controlado por `open=` no se actualizaba).
+        Ahora click-outside-to-close + ESC funcionan."""
+        self.show_settings = bool(value)
+
     def save_voice_settings(self, form_data: dict):
         """Guarda cambios desde el modal de settings."""
         if "elevenlabs_key" in form_data:
@@ -5905,6 +5912,56 @@ def index():
                     rx.form(
                         rx.vstack(
                         # ═══════════════════════════════════════════════
+                        #  LANGUAGE — Selector global de idioma (v0.19.4)
+                        #  Antes solo se cambiaba editando %APPDATA%\Ashley\
+                        #  data\language.json a mano. Ahora visible al user.
+                        # ═══════════════════════════════════════════════
+                        rx.box(
+                            rx.vstack(
+                                rx.text(State.t["lang_label"],
+                                        color="#ff9aee", font_weight="700", font_size="14px",
+                                        letter_spacing="0.05em"),
+                                rx.hstack(
+                                    rx.button("English",
+                                        on_click=State.set_language("en"),
+                                        variant=rx.cond(State.language == "en", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("Español",
+                                        on_click=State.set_language("es"),
+                                        variant=rx.cond(State.language == "es", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("Français",
+                                        on_click=State.set_language("fr"),
+                                        variant=rx.cond(State.language == "fr", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("日本語",
+                                        on_click=State.set_language("ja"),
+                                        variant=rx.cond(State.language == "ja", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("Deutsch",
+                                        on_click=State.set_language("de"),
+                                        variant=rx.cond(State.language == "de", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("Русский",
+                                        on_click=State.set_language("ru"),
+                                        variant=rx.cond(State.language == "ru", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    rx.button("한국어",
+                                        on_click=State.set_language("ko"),
+                                        variant=rx.cond(State.language == "ko", "solid", "soft"),
+                                        color_scheme="pink", size="2", type="button"),
+                                    spacing="2", wrap="wrap",
+                                ),
+                                spacing="2", align="stretch",
+                            ),
+                            padding="14px 16px",
+                            bg="rgba(255,154,238,0.05)",
+                            border="1px solid rgba(255,154,238,0.2)",
+                            border_radius="10px",
+                            width="100%",
+                        ),
+
+                        # ═══════════════════════════════════════════════
                         #  REQUIRED — Grok key status
                         # ═══════════════════════════════════════════════
                         rx.box(
@@ -6651,6 +6708,10 @@ def index():
                 bg=COLOR_BG_CHAT,
             ),
             open=State.show_settings,
+            # v0.19.4 — click-outside-to-close + ESC funcionan ahora.
+            # Sin este handler, Radix intentaba cerrar pero el `open=` controlado
+            # nunca se actualizaba → el modal seguía abierto eternamente.
+            on_open_change=State.set_show_settings,
         ),
     )
 
