@@ -1118,7 +1118,7 @@ async def _mobile_sync_prompts_endpoint(request):
             languages[lang] = {"error": str(_e)}
 
     payload = {
-        "version": "0.19.7",
+        "version": "0.19.8",
         "languages": languages,
     }
     return _with_cors(_StarletteJSON(payload))
@@ -1151,7 +1151,7 @@ async def _mobile_sync_state_endpoint(request):
     if not _check_mobile_auth(request):
         return _unauthorized()
 
-    payload: dict = {"version": "0.19.7"}
+    payload: dict = {"version": "0.19.8"}
 
     # Chat history (últimos 50)
     try:
@@ -1329,9 +1329,48 @@ async def _mobile_sync_push_endpoint(request):
     }))
 
 
+async def _export_data_endpoint(request):
+    """GET /api/export/data — descarga ZIP con todos los datos del user.
+
+    v0.19.7 — feature de "Export all my data" en Settings. Builds in-memory
+    a partir de %APPDATA%\\Ashley\\data\\ (todos los JSON files que Ashley
+    persiste). Excluye key.bin (cifrado DPAPI inútil de exportar) y
+    license.json (atado a una activación específica).
+
+    Devuelve:
+      Content-Type: application/zip
+      Content-Disposition: attachment; filename="ashley-backup-YYYY-MM-DD_HHMM.zip"
+    """
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+    try:
+        from .export import build_data_zip
+        zip_bytes, filename = build_data_zip()
+        return _with_cors(_StarletteResponse(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(zip_bytes)),
+                # Cache control — el zip cambia cada llamada (timestamp diferente)
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+        ))
+    except Exception as e:
+        import logging
+        logging.getLogger("ashley.export").exception("export failed: %s", e)
+        return _with_cors(_StarletteJSON(
+            {"error": f"Export failed: {e}"},
+            status_code=500,
+        ))
+
+
 def register_routes(app):
     """Insert API routes at the BEGINNING of the Starlette router.
     Include OPTIONS methods for CORS preflight."""
+    # ── Data export (v0.19.7) ──
+    app._api.router.routes.insert(0, _StarletteRoute(
+        "/api/export/data", _export_data_endpoint, methods=["GET", "OPTIONS"]))
     # ── Mobile API (v0.18.2) ──
     app._api.router.routes.insert(0, _StarletteRoute(
         "/api/mobile/status", _mobile_status_endpoint, methods=["GET", "OPTIONS"]))

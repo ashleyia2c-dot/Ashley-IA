@@ -6766,14 +6766,13 @@ def index():
                         ),
 
                         # ═══════════════════════════════════════════════
-                        #  LEGAL — Privacy + Terms (v0.19.7)
-                        #  Required para Lemon Squeezy + GDPR. Texts vienen
-                        #  de legal_content.py (EN/ES, fallback a EN para
-                        #  los demás idiomas).
+                        #  LEGAL & DATA (v0.19.7)
+                        #  - Privacy + Terms: required Lemon Squeezy + GDPR.
+                        #  - Export: GDPR right to data portability (Art 20).
                         # ═══════════════════════════════════════════════
                         rx.box(
                             rx.vstack(
-                                rx.text("⚖ Legal",
+                                rx.text("⚖ Legal & Data",
                                         color="#888", font_weight="700", font_size="14px",
                                         letter_spacing="0.05em"),
                                 rx.hstack(
@@ -6800,6 +6799,47 @@ def index():
                                         cursor="pointer",
                                     ),
                                     spacing="2",
+                                ),
+                                # Backup/export — RGPD Art 20 (right to data portability)
+                                rx.text(
+                                    "Backup all your data (chat history, facts, "
+                                    "diary, achievements, preferences) as a ZIP file. "
+                                    "Useful before reinstalling, migrating to "
+                                    "another PC, or simply for peace of mind.",
+                                    color="#777", font_size="11px",
+                                    line_height="1.4", margin_top="4px",
+                                ),
+                                rx.button(
+                                    rx.hstack(
+                                        rx.text("📦", font_size="14px"),
+                                        rx.text("Export all my data (.zip)"),
+                                        spacing="2", align="center",
+                                    ),
+                                    type="button",
+                                    on_click=rx.call_script(
+                                        # Trigger browser download via API endpoint.
+                                        # El backend port viene del DOM marker que
+                                        # ya usa ashley_voice.js etc.
+                                        "(function(){"
+                                        "  var port = (document.getElementById('ashley-voice-state')||{}).getAttribute "
+                                        "    ? document.getElementById('ashley-voice-state').getAttribute('data-backend-port') "
+                                        "    : '17800';"
+                                        "  var url = 'http://127.0.0.1:' + (port||'17800') + '/api/export/data';"
+                                        "  var a = document.createElement('a');"
+                                        "  a.href = url;"
+                                        "  a.download = '';"
+                                        "  document.body.appendChild(a);"
+                                        "  a.click();"
+                                        "  document.body.removeChild(a);"
+                                        "})();"
+                                    ),
+                                    bg="rgba(255,255,255,0.04)",
+                                    color="#bbb",
+                                    border="1px solid rgba(255,255,255,0.1)",
+                                    size="2",
+                                    _hover={"bg": "rgba(255,255,255,0.08)", "color": "#ddd"},
+                                    cursor="pointer",
+                                    margin_top="2px",
                                 ),
                                 spacing="2", align="stretch",
                             ),

@@ -322,6 +322,10 @@
     <button id="btn-en" class="active">EN</button>
     <button id="btn-es">ES</button>
     <button id="btn-fr">FR</button>
+    <button id="btn-ja">日本語</button>
+    <button id="btn-de">DE</button>
+    <button id="btn-ru">RU</button>
+    <button id="btn-ko">한국어</button>
   </div>
 
   <h1 id="title">Welcome to Ashley</h1>
@@ -420,7 +424,7 @@
           "Voit ton écran quand tu l'autorises (réponses contextuelles)",
           "Agit sur ton PC — ouvre apps, ferme onglets, contrôle le volume, tape, capture écran",
           "Cherche sur Internet pour te répondre (quand la recherche web est activée)",
-          "Multilingue : français, anglais, espagnol",
+          "Multilingue : 7 langues (en, es, fr, ja, de, ru, ko)",
           "Succès, système d'affection, humeur, narration avec gestes",
         ],
         hPrivacy: "Confidentialité",
@@ -433,6 +437,103 @@
         cancel: "Annuler",
         submit: "Accepter et démarrer",
       },
+      // v0.19.8 — 4 idiomas nuevos para mantener paridad con el resto de la app
+      ja: {
+        docTitle: "Ashleyへようこそ",
+        subtitle: "初回セットアップ",
+        hPerms: "Ashleyにできること",
+        perms: [
+          "ご主人のことを長期的に覚える本物の会話 (事実、日記、好み)",
+          "音声 — オフラインWhisperで聞き取り、ElevenLabs / Kokoro / VoiceVox / Web Speechで話す",
+          "ウェイクワード — 「Ashley」と呼ぶとハンズフリーで起動",
+          "許可すれば画面が見える(状況を理解した返答)",
+          "PCで動作 — アプリを開く、タブを閉じる、音量調整、入力、スクリーンショット",
+          "ウェブ検索で答える(ウェブ検索が有効な場合)",
+          "多言語: 7言語 (en, es, fr, ja, de, ru, ko)",
+          "実績、好感度システム、ムード、ジェスチャー演出",
+        ],
+        hPrivacy: "プライバシー",
+        privacy: "Ashleyは<strong>あなたのマシン上でローカル</strong>に動作します。チャット履歴、事実、日記、設定はあなたのユーザーフォルダにあり、<strong>私たちのサーバーに送信されることは決してありません</strong>(サーバーがありません)。<br><br><strong>AIプロバイダーを選択</strong>: <strong>xAI (Grok)</strong>、<strong>OpenRouter</strong>(クラウド、高速 — 自分のキーで従量課金)、<strong>Ollama</strong>(100%ローカル、無料、キー不要)。設定からいつでも切り替え可能。<br><br>クラウドプロバイダーを使用する場合、メッセージは彼らのプライバシーポリシーに従って直接送信されます — Ashleyは仲介しません。",
+        hKey: "AIプロバイダーのキー",
+        keyLabel: "<code>xAI</code> (Grok) または <code>OpenRouter</code> のキーを貼り付けるか、Ollamaを使う場合はスキップ:",
+        keyHint: "キーがない? Grokのキーは <a id=\"get-key-link\">console.x.ai</a> で、OpenRouterのキーは <a id=\"get-or-key-link\">openrouter.ai</a> で取得できます。どちらの場合も、キーはWindows DPAPIでデバイス上で暗号化され、PCから離れることはありません。<strong>または下のチェックボックスをオン</strong>にしてOllama(無料、完全ローカル、キー不要)で開始し、後で設定で構成することもできます。",
+        skipLabel: "Ollamaを使用します(無料、ローカル) — 今はAPIキーをスキップ",
+        termsLabel: "Ashleyができることを理解し、選択したAIプロバイダーを使用して応答を生成することを許可します。",
+        cancel: "キャンセル",
+        submit: "同意して開始",
+      },
+      de: {
+        docTitle: "Willkommen bei Ashley",
+        subtitle: "Erste Einrichtung",
+        hPerms: "Was Ashley kann",
+        perms: [
+          "Echtes Gespräch mit Langzeitgedächtnis von dir (Fakten, Tagebuch, Vorlieben)",
+          "Stimme — hört über Offline-Whisper, spricht über ElevenLabs / Kokoro / VoiceVox / Web Speech",
+          "Wake-Wort — sag \"Ashley\" und sie aktiviert sich freihändig",
+          "Sieht deinen Bildschirm, wenn du es erlaubst (kontextbewusste Antworten)",
+          "Handelt auf deinem PC — öffnet Apps, schließt Tabs, regelt Lautstärke, tippt, macht Screenshots",
+          "Sucht im Web, um dir zu antworten (wenn Websuche aktiviert ist)",
+          "Mehrsprachig: 7 Sprachen (en, es, fr, ja, de, ru, ko)",
+          "Achievements, Affection-System, Stimmungen, narrative Gesten",
+        ],
+        hPrivacy: "Datenschutz",
+        privacy: "Ashley läuft <strong>lokal</strong> auf deinem Rechner. Dein Chat-Verlauf, Fakten, Tagebuch und Einstellungen liegen in deinem Benutzerordner — <strong>nie an unsere Server geschickt</strong> (wir haben keine).<br><br><strong>Wähle deinen AI-Provider</strong>: <strong>xAI (Grok)</strong> oder <strong>OpenRouter</strong> (Cloud, schnell — Bezahlung pro Nutzung mit deinem eigenen Key) oder <strong>Ollama</strong> (100% lokal, kostenlos, kein Key nötig). Du kannst jederzeit in den Einstellungen wechseln.<br><br>Wenn du einen Cloud-Provider nutzt, gehen deine Nachrichten direkt zu ihm unter dessen Datenschutzrichtlinie — Ashley vermittelt nie.",
+        hKey: "AI-Provider-Schlüssel",
+        keyLabel: "Füge einen Schlüssel für <code>xAI</code> (Grok) oder <code>OpenRouter</code> ein, oder überspringe für Ollama:",
+        keyHint: "Keinen Schlüssel? Hol dir einen Grok-Schlüssel auf <a id=\"get-key-link\">console.x.ai</a> oder einen OpenRouter-Schlüssel auf <a id=\"get-or-key-link\">openrouter.ai</a>. In beiden Fällen wird der Schlüssel auf deinem Gerät mit Windows DPAPI verschlüsselt und verlässt nie deinen PC. <strong>Oder kreuze die Box unten an</strong>, um mit Ollama (kostenlos, 100% lokal, kein Key) zu starten und später in den Einstellungen zu konfigurieren.",
+        skipLabel: "Ich nutze Ollama (kostenlos, lokal) — API-Key vorerst überspringen",
+        termsLabel: "Ich verstehe, was Ashley tun kann, und autorisiere sie, meinen gewählten AI-Provider zur Generierung von Antworten zu nutzen.",
+        cancel: "Abbrechen",
+        submit: "Akzeptieren und starten",
+      },
+      ru: {
+        docTitle: "Добро пожаловать в Ashley",
+        subtitle: "Первоначальная настройка",
+        hPerms: "Что умеет Ashley",
+        perms: [
+          "Настоящий разговор с долговременной памятью о тебе (факты, дневник, предпочтения)",
+          "Голос — слушает через офлайн Whisper, говорит через ElevenLabs / Kokoro / VoiceVox / Web Speech",
+          "Слово активации — скажи \"Ashley\" и она активируется без рук",
+          "Видит твой экран, когда ты разрешаешь (контекстные ответы)",
+          "Действует на твоём ПК — открывает приложения, закрывает вкладки, управляет громкостью, печатает, делает скриншоты",
+          "Ищет в интернете, чтобы ответить (когда веб-поиск включён)",
+          "Многоязычность: 7 языков (en, es, fr, ja, de, ru, ko)",
+          "Достижения, система привязанности, настроения, нарративные жесты",
+        ],
+        hPrivacy: "Конфиденциальность",
+        privacy: "Ashley работает <strong>локально</strong> на твоей машине. История чата, факты, дневник и настройки живут в твоей папке пользователя — <strong>никогда не отправляются на наши серверы</strong> (у нас их нет).<br><br><strong>Выбери своего AI-провайдера</strong>: <strong>xAI (Grok)</strong> или <strong>OpenRouter</strong> (облако, быстро — оплата за использование своим ключом) или <strong>Ollama</strong> (100% локально, бесплатно, без ключа). Можешь переключаться в Настройках в любой момент.<br><br>Если используешь облачный провайдер, сообщения идут напрямую к нему по его политике конфиденциальности — Ashley никогда не посредничает.",
+        hKey: "Ключ AI-провайдера",
+        keyLabel: "Вставь ключ для <code>xAI</code> (Grok) или <code>OpenRouter</code>, или пропусти для Ollama:",
+        keyHint: "Нет ключа? Получи Grok на <a id=\"get-key-link\">console.x.ai</a> или OpenRouter на <a id=\"get-or-key-link\">openrouter.ai</a>. В обоих случаях ключ шифруется на твоём устройстве через Windows DPAPI и никогда не покидает ПК. <strong>Или поставь галочку ниже</strong>, чтобы начать с Ollama (бесплатно, полностью локально, без ключа) и настроить позже в Настройках.",
+        skipLabel: "Буду использовать Ollama (бесплатно, локально) — пропустить ключ сейчас",
+        termsLabel: "Я понимаю, что может делать Ashley, и разрешаю ей использовать выбранного AI-провайдера для генерации ответов.",
+        cancel: "Отмена",
+        submit: "Принять и начать",
+      },
+      ko: {
+        docTitle: "Ashley에 오신 것을 환영합니다",
+        subtitle: "최초 설정",
+        hPerms: "Ashley가 할 수 있는 것",
+        perms: [
+          "오빠에 대한 장기 기억이 있는 진짜 대화 (사실, 일기, 선호도)",
+          "음성 — 오프라인 Whisper로 듣고, ElevenLabs / Kokoro / VoiceVox / Web Speech로 말해",
+          "웨이크 워드 — \"Ashley\"라고 말하면 핸즈프리로 활성화돼",
+          "허락하면 화면을 봐 (맥락을 인식한 답변)",
+          "PC에서 작동 — 앱 열기, 탭 닫기, 음량 제어, 입력, 스크린샷",
+          "웹에서 검색해서 답해 (웹 검색이 활성화되었을 때)",
+          "다국어: 7개 언어 (en, es, fr, ja, de, ru, ko)",
+          "업적, 호감도 시스템, 무드, 제스처 연출",
+        ],
+        hPrivacy: "개인정보",
+        privacy: "Ashley는 오빠의 컴퓨터에서 <strong>로컬</strong>로 실행돼. 채팅 기록, 사실, 일기, 설정은 사용자 폴더에 있고, <strong>우리 서버에 절대 전송되지 않아</strong> (우리는 서버가 없어).<br><br><strong>AI 제공자를 선택해</strong>: <strong>xAI (Grok)</strong> 또는 <strong>OpenRouter</strong> (클라우드, 빠름 — 자신의 키로 사용량 결제) 또는 <strong>Ollama</strong> (100% 로컬, 무료, 키 불필요). 설정에서 언제든 전환할 수 있어.<br><br>클라우드 제공자를 사용하면, 메시지는 그들의 개인정보 정책에 따라 직접 전송돼 — Ashley는 절대 중개하지 않아.",
+        hKey: "AI 제공자 키",
+        keyLabel: "<code>xAI</code> (Grok) 또는 <code>OpenRouter</code> 키를 붙여넣거나, Ollama를 쓸 거면 건너뛰기:",
+        keyHint: "키가 없어? Grok 키는 <a id=\"get-key-link\">console.x.ai</a>에서, OpenRouter 키는 <a id=\"get-or-key-link\">openrouter.ai</a>에서 받을 수 있어. 어느 쪽이든, 키는 Windows DPAPI로 너의 기기에서 암호화되고 PC를 떠나지 않아. <strong>또는 아래 체크박스를 선택</strong>해서 Ollama (무료, 완전 로컬, 키 불필요)로 시작하고 나중에 설정에서 구성할 수도 있어.",
+        skipLabel: "Ollama를 쓸 거야 (무료, 로컬) — 지금은 API 키 건너뛰기",
+        termsLabel: "Ashley가 할 수 있는 것을 이해했고, 선택한 AI 제공자를 사용해 응답을 생성하는 것을 허락해.",
+        cancel: "취소",
+        submit: "동의하고 시작",
+      },
     };
 
     let currentLang = "en";
@@ -440,7 +541,11 @@
     function apply(lang) {
       currentLang = lang;
       const S = STRINGS[lang];
-      const titleSuffix = { en: 'Initial setup', es: 'Configuración inicial', fr: 'Configuration initiale' };
+      const titleSuffix = {
+        en: 'Initial setup', es: 'Configuración inicial', fr: 'Configuration initiale',
+        ja: '初回セットアップ', de: 'Erste Einrichtung',
+        ru: 'Первоначальная настройка', ko: '최초 설정',
+      };
       document.title = S.docTitle + " — " + (titleSuffix[lang] || titleSuffix.en);
       document.getElementById('title').textContent = S.docTitle;
       document.getElementById('subtitle').textContent = S.subtitle;
@@ -484,6 +589,10 @@
       document.getElementById('btn-en').classList.toggle('active', lang === 'en');
       document.getElementById('btn-es').classList.toggle('active', lang === 'es');
       document.getElementById('btn-fr').classList.toggle('active', lang === 'fr');
+      document.getElementById('btn-ja').classList.toggle('active', lang === 'ja');
+      document.getElementById('btn-de').classList.toggle('active', lang === 'de');
+      document.getElementById('btn-ru').classList.toggle('active', lang === 'ru');
+      document.getElementById('btn-ko').classList.toggle('active', lang === 'ko');
 
       document.documentElement.lang = lang;
     }
@@ -491,6 +600,10 @@
     document.getElementById('btn-en').addEventListener('click', () => apply('en'));
     document.getElementById('btn-es').addEventListener('click', () => apply('es'));
     document.getElementById('btn-fr').addEventListener('click', () => apply('fr'));
+    document.getElementById('btn-ja').addEventListener('click', () => apply('ja'));
+    document.getElementById('btn-de').addEventListener('click', () => apply('de'));
+    document.getElementById('btn-ru').addEventListener('click', () => apply('ru'));
+    document.getElementById('btn-ko').addEventListener('click', () => apply('ko'));
 
     const keyInput = document.getElementById('api-key');
     const acceptBox = document.getElementById('accept-terms');
