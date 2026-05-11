@@ -3741,7 +3741,20 @@ class State(rx.State):
           3. Siempre le pasamos el historial reciente (últimos 14 msgs)
              como contexto — antes pasaba [] y Ashley no sabía ni de qué
              se estaba hablando.
+
+        v0.19.21 — gate al inicio: si el user aún no envió ningún mensaje
+        (solo está el welcome de Ashley), el botón es no-op. Antes Ashley
+        veía solo su propio welcome como contexto, generaba un mensaje
+        corto tipo [mood:default] (silencio), y el bubble flasheaba ~1s
+        antes de borrarse — el user lo reportó como "crea un mensaje y
+        se borra al segundo". Mismo gate que `_run_startup_engagement`.
         """
+        # Si no hay ningún mensaje del user todavía, no hagas nada.
+        # Ashley no tiene contexto al que reaccionar y solo generaría
+        # un flash visual molesto.
+        if not any(m.get("role") == "user" for m in self.messages):
+            return
+
         self.is_thinking = True
         self.current_response = ""
         yield

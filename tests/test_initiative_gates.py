@@ -165,3 +165,91 @@ def test_banned_truncates_long_topics():
     topics = extract_banned_topics(messages)
     for t in topics:
         assert len(t) <= 60
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  v0.19.21 — Gate al inicio del chat (no flash bubble)
+# ══════════════════════════════════════════════════════════════════════
+#
+# Bug: el user reportó que al iniciar el chat con Ashley (sin haber
+# enviado ningún mensaje todavía, solo está el welcome de Ashley en el
+# historial), pulsar el botón ✨ creaba un mensaje que se borraba al
+# segundo. Causa: el trigger del initiative pide a Ashley que "mire el
+# hilo reciente" pero solo está su propio welcome → genera [mood:default]
+# silencioso → el `current_response` flashea durante el stream y se
+# limpia al final. El user lo ve como "crea un mensaje y se borra".
+#
+# Fix (en reflex_companion.py:send_initiative): gate al top del handler
+# que retorna inmediatamente si NO hay ningún mensaje del user en el
+# historial. Sin flash, sin llamada a la API, sin gasto de tokens.
+
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RC_FILE = REPO_ROOT / "reflex_companion" / "reflex_companion.py"
+
+
+def _send_initiative_body() -> str:
+    """Extrae el cuerpo de send_initiative para verificar el gate."""
+    src = RC_FILE.read_text(encoding="utf-8")
+    # Capturamos desde "def send_initiative" hasta la siguiente def al mismo nivel
+    match = re.search(
+        r"    def send_initiative\(self\):.*?(?=\n    (?:def |async def |# ─))",
+        src,
+        re.DOTALL,
+    )
+    assert match, "No se encontró send_initiative en reflex_companion.py"
+    return match.group(0)
+
+
+def test_send_initiative_gates_before_any_user_message():
+    """send_initiative debe retornar early si no hay mensajes del user.
+
+    El gate va ANTES de tocar `is_thinking` y de cualquier `yield` —
+    si tocara is_thinking primero el spinner aparecería y desaparecería
+    causando flash similar al original.
+    """
+    body = _send_initiative_body()
+    # El gate debe usar el mismo patrón que _run_startup_engagement
+    # (any(m.get("role") == "user" for m in self.messages)) y retornar.
+    gate_pattern = re.search(
+        r"if not any\(\s*m\.get\(\s*[\"']role[\"']\s*\)\s*==\s*[\"']user[\"'].*?for m in self\.messages\s*\):\s*\n\s*(#[^\n]*\n\s*)*return",
+        body,
+        re.DOTALL,
+    )
+    assert gate_pattern is not None, (
+        "send_initiative debe gatear con `if not any(m.get('role') == 'user' "
+        "for m in self.messages): return` ANTES de tocar is_thinking. Sin "
+        "este gate, clickear ✨ al inicio del chat crea un flash de bubble "
+        "vacía que se borra ~1s después (Ashley no tiene contexto y "
+        "devuelve [mood:default] silencioso)."
+    )
+
+
+def test_send_initiative_gate_is_before_is_thinking():
+    """El gate DEBE estar antes de `self.is_thinking = True`. Si va
+    después, ya hay efecto secundario visible y el flash persiste."""
+    body = _send_initiative_body()
+    gate_idx = body.find("if not any(")
+    is_thinking_idx = body.find("self.is_thinking = True")
+    assert gate_idx != -1, "Falta el gate `if not any(...)`"
+    assert is_thinking_idx != -1, "Falta `self.is_thinking = True`"
+    assert gate_idx < is_thinking_idx, (
+        "El gate debe ir ANTES de `self.is_thinking = True`. Si va "
+        "después, el spinner se enciende y se apaga produciendo flash."
+    )
+
+
+def test_send_initiative_gate_is_before_first_yield():
+    """El gate debe ir antes del primer `yield`. Cualquier yield ya
+    fuerza un re-render del UI."""
+    body = _send_initiative_body()
+    gate_idx = body.find("if not any(")
+    yield_match = re.search(r"\n        yield\b", body)
+    assert gate_idx != -1, "Falta el gate `if not any(...)`"
+    assert yield_match is not None, "Falta `yield` en send_initiative"
+    assert gate_idx < yield_match.start(), (
+        "El gate debe ir ANTES del primer `yield`. Cualquier yield "
+        "fuerza render del UI y produce flash visible."
+    )
