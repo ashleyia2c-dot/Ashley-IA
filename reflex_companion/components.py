@@ -617,45 +617,48 @@ def license_gate() -> rx.Component:
             ),
             rx.form(
                 rx.vstack(
-                    rx.input(
+                    # v0.19.18 — CRITICAL FIX: usábamos rx.input que es Radix
+                    # TextField y APLICA SUS PROPIOS estilos por encima de los
+                    # míos. Por eso aunque el código tenía font_size=14px,
+                    # text_align=left, etc, el render SEGUÍA mostrando el
+                    # input default de Radix con el texto recortado.
+                    #
+                    # Cambio a rx.el.input (HTML crudo, sin Radix wrapper).
+                    # Ahora mis estilos son los únicos que aplican.
+                    rx.el.input(
                         placeholder=State.t["license_placeholder"],
                         id="license_key",
                         name="license_key",
-                        # v0.19.11 — fix: la key se veía ilegible (font 11px).
-                        # v0.19.12 — fix #2: las keys de Lemon Squeezy son
-                        # ~36 chars (UUID-style XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
-                        # y NO cabían en la caja con text_align=center
-                        # (se mostraba el medio recortado). Cambios:
-                        #   1. text_align: center → left (user ve el inicio)
-                        #   2. letter_spacing: 1.5px → 1px (más chars caben)
-                        #   3. font_size: 16px → 14px (más chars caben)
-                        #   4. parent vstack: 460px → 540px (caja más ancha)
-                        #   5. padding interior: 16px → 14px horizontal
-                        #   6. cursor blinking visible para confirmar input ON
-                        font_family="'Consolas', 'Courier New', monospace",
-                        bg="rgba(255,255,255,0.06)",
-                        color="#fff5e6",
-                        border="1px solid rgba(255,255,255,0.18)",
-                        border_radius="10px",
-                        padding="14px",
-                        font_size="14px",
-                        letter_spacing="1px",
-                        font_weight="500",
-                        width="100%",
-                        text_align="left",  # ← KEY FIX: ver el inicio, no el medio
+                        type="text",
+                        spell_check=False,
+                        auto_complete="off",
                         auto_focus=True,
-                        _focus={
-                            "border": "1px solid rgba(255,154,238,0.55)",
-                            "box_shadow": "0 0 14px rgba(255,154,238,0.2)",
+                        style={
+                            "fontFamily": "'Consolas', 'Courier New', monospace",
+                            "background": "rgba(255,255,255,0.06)",
+                            "color": "#fff5e6",
+                            "border": "1px solid rgba(255,255,255,0.18)",
+                            "borderRadius": "10px",
+                            "padding": "16px 14px",
+                            "fontSize": "16px",
+                            "letterSpacing": "1.5px",
+                            "fontWeight": "500",
+                            "width": "100%",
+                            "textAlign": "left",
                             "outline": "none",
-                            "bg": "rgba(255,255,255,0.08)",
+                            "boxSizing": "border-box",
+                            "transition": "border 0.2s, box-shadow 0.2s, background 0.2s",
                         },
-                        _placeholder={
-                            "color": "#666",
-                            "letter_spacing": "0.5px",
-                            "font_size": "13px",
-                            "text_align": "center",  # placeholder centered (más bonito vacío)
-                        },
+                        on_focus=rx.call_script("""
+                            (function() {
+                                var el = document.getElementById('license_key');
+                                if (el) {
+                                    el.style.border = '1px solid rgba(255,154,238,0.55)';
+                                    el.style.boxShadow = '0 0 14px rgba(255,154,238,0.2)';
+                                    el.style.background = 'rgba(255,255,255,0.08)';
+                                }
+                            })();
+                        """),
                     ),
                     rx.cond(
                         State.license_error != "",
