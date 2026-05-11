@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.19.26",
+  "version": "0.19.27",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -55,7 +55,7 @@
       {
         "from": "../assets",
         "to": "assets",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!**/*.bak", "!**/*.bak.*"]
       },
       {
         "from": "../rxconfig.py",

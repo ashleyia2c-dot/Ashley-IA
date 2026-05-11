@@ -89,3 +89,10 @@ wake_word_training/logs/
 reflex_companion/wake_word/*.onnx
 reflex_companion/wake_word/*.onnx.data
 fill_grille.py
+
+# ───────── Backups locales (.bak, .bak.X) ─────────
+# v0.19.27 — al swappear assets binarios grandes (VRM, etc.) hacemos
+# backup local para rollback rápido. NO commiteamos los .bak — pesan
+# tanto como el original (47 MB en el caso del VRM) y no aportan al repo.
+*.bak
+*.bak.*
