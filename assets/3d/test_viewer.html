@@ -26,6 +26,13 @@
       border-right: 1px solid rgba(212, 163, 115, 0.15);
       padding: 16px;
       overflow-y: auto;
+      /* v0.19.28 — bug típico CSS grid + overflow: si el grid item no
+         tiene min-height: 0 explícito, el browser le calcula min-height
+         basado en su contenido y NUNCA hace scroll. Sin esto, el panel
+         sidebar crecía fuera del viewport y los botones de abajo (DIAG,
+         pose editor) eran inaccesibles. */
+      min-height: 0;
+      height: 100vh;
       font-size: 13px;
     }
     #controls h1 {
@@ -216,6 +223,9 @@
   <div class="btn-row">
     <button id="cycle-axes">▶ Cycle 6 axes</button>
     <button id="reset-bone">↺ Reset bone</button>
+  </div>
+  <div class="btn-row">
+    <button id="diag-head" style="background:#c9a373; color:#000; border-color:#c9a373;">🩺 DIAG: ¿qué bone mueve la cabeza?</button>
   </div>
   <div class="btn-row">
     <button id="reset-all" style="background:#c97373; color:#fff; border-color:#c97373;">🚨 RESET TODO</button>
@@ -2008,7 +2018,99 @@ function applyBoneRotation(boneName, axis, sign, degrees) {
   return node;
 }
 
+// 🩺 DIAG-CONSOLA: funciones globales que el user puede llamar desde
+// DevTools (F12 → Console). Más fiables que botones — bypasean cualquier
+// problema de UI y el output va directo a console.log que NO se borra.
+//
+// USO desde la consola del browser:
+//   listBones()           → imprime TODOS los humanoid bones del rig actual
+//   testBone('head', 60)  → rota el bone X° y print rotation antes/después
+//   meshBoneTree()        → imprime la jerarquía de meshes + qué bone los driva
+window.listBones = () => {
+  if (!currentVrm) { console.log('NO VRM cargado'); return; }
+  const NAMES = ['hips','spine','chest','upperChest','neck','head',
+    'leftEye','rightEye','jaw',
+    'leftUpperArm','leftLowerArm','leftHand',
+    'rightUpperArm','rightLowerArm','rightHand'];
+  console.log('═══ HUMANOID BONES ═══');
+  for (const n of NAMES) {
+    const norm = currentVrm.humanoid?.getNormalizedBoneNode?.(n);
+    const raw = currentVrm.humanoid?.getRawBoneNode?.(n);
+    console.log(`  ${n}:`,
+      norm ? `normalized=${norm.name||'?'}` : 'normalized=NULL',
+      raw ? `| raw=${raw.name||'?'}` : '| raw=NULL',
+      norm ? `| pos=${norm.position.toArray().map(v=>v.toFixed(2)).join(',')}` : '');
+  }
+};
+window.testBone = (boneName, deg = 60) => {
+  if (!currentVrm) { console.log('NO VRM'); return; }
+  const node = currentVrm.humanoid?.getNormalizedBoneNode?.(boneName);
+  if (!node) { console.log(`NO bone "${boneName}"`); return; }
+  console.log(`BEFORE ${boneName}: rotation = ${node.rotation.x.toFixed(3)}, ${node.rotation.y.toFixed(3)}, ${node.rotation.z.toFixed(3)}`);
+  testRunning = true;
+  _boneOverride = {
+    boneName, axis: 'x', value: deg * Math.PI / 180,
+    expiresAt: performance.now() + 5000,
+  };
+  console.log(`APPLIED override ${boneName}.rotation.x = ${deg}° (5s)`);
+  console.log(`MIRA si la cabeza se movió. Vuelve a llamar testBone() para reset/reintento.`);
+  setStatus(`testBone('${boneName}', ${deg}°)`);
+};
+console.log('%c🩺 Diagnóstico disponible: listBones() / testBone("head", 60) / testBone("neck", 60)',
+  'color:#c9a373;font-weight:bold');
+
+// 🩺 DIAG: prueba secuencialmente cada bone candidato del head con
+// rotación 60° en X (chin up). El user mira cuál mueve la cabeza visible.
+// El override hard al final del animate loop garantiza que se aplique.
+document.getElementById('diag-head').addEventListener('click', async () => {
+  if (!currentVrm) return;
+  document.getElementById('debug').style.display = 'block';
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const candidates = ['head', 'neck', 'upperChest', 'chest', 'spine'];
+  testRunning = true;
+  dbg('🩺 DIAG: probando 5 bones con rotation.x = 60° (3s c/u)', 'ok');
+  for (const bone of candidates) {
+    const node = currentVrm.humanoid?.getNormalizedBoneNode?.(bone);
+    if (!node) {
+      dbg(`  ${bone}: NO EXISTE en este rig`, 'err');
+      setStatus(`${bone}: NO existe`);
+      await sleep(800);
+      continue;
+    }
+    // Activar override que se reaplica DESPUÉS de vrm.update (gana sobre lookAt/idle)
+    _boneOverride = {
+      boneName: bone,
+      axis: 'x',
+      value: 60 * Math.PI / 180,
+      expiresAt: performance.now() + 3500,  // 3s + margen
+    };
+    dbg(`  ${bone}.rotation.x = +60° → MIRA SI MUEVE LA CABEZA`, 'ok');
+    setStatus(`PROBANDO: ${bone} +60° X — ¿mueve la cabeza?`);
+    await sleep(3000);
+  }
+  // Limpiar
+  _boneOverride = null;
+  testRunning = false;
+  for (const bone of candidates) {
+    const node = currentVrm.humanoid?.getNormalizedBoneNode?.(bone);
+    if (node) { node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0; }
+  }
+  dbg('🩺 DIAG terminado. Anota cuáles bones movieron la cabeza arriba.', 'ok');
+  setStatus('🩺 DIAG terminado — dime qué viste');
+});
+
 // Botones individuales X+ / X- / Y+ / Y- / Z+ / Z-
+//
+// FIX bug pose editor (head/neck X y Y "no funcionan", solo Z):
+// Múltiples sistemas pisan rotation.x/y del head cada frame:
+//   1) Idle loop (sin(time)*delta sutil sobre idleBase)
+//   2) vrm.lookAt — apunta head al cursorTarget (pitch+yaw, no roll → solo Z funciona)
+//   3) vrm.update(delta) puede aplicar otros internals (springBone, etc.)
+//
+// Approach robusto: registrar un OVERRIDE activo. El animate loop, AL FINAL
+// (después de vrm.update), reaplica nuestra rotación → gana sobre todo.
+// Auto-expira tras 3s o al próximo click.
+let _boneOverride = null;  // { boneName, axis, value, expiresAt }
 document.querySelectorAll('[data-bone-axis]').forEach(b => {
   b.addEventListener('click', () => {
     if (!currentVrm) return;
@@ -2016,9 +2118,22 @@ document.querySelectorAll('[data-bone-axis]').forEach(b => {
     const angle = parseInt(document.getElementById('bone-angle').value, 10);
     const [axis, signStr] = b.dataset.boneAxis.split('');
     const sign = signStr === '+' ? 1 : -1;
+    const rad = sign * (angle * Math.PI / 180);
+
+    // Pausar idle (defense in depth)
+    testRunning = true;
+
+    // Override hard: el animate loop lo reaplicará tras vrm.update cada frame
+    _boneOverride = {
+      boneName,
+      axis,
+      value: rad,
+      expiresAt: performance.now() + 3000,
+    };
+
     applyBoneRotation(boneName, axis, sign, angle);
-    setStatus(`${boneName} ${axis.toUpperCase()}${signStr}${angle}° → ¿qué hace?`);
-    dbg(`test: ${boneName}.rotation.${axis} = ${signStr}${angle}°`, 'ok');
+    setStatus(`${boneName} ${axis.toUpperCase()}${signStr}${angle}° (override 3s)`);
+    dbg(`test: ${boneName}.rotation.${axis} = ${signStr}${angle}° (override activo)`, 'ok');
   });
 });
 
@@ -2857,6 +2972,23 @@ function animate() {
     }
 
     currentVrm.update(delta);
+
+    // v0.19.28 — Override del pose editor: reaplicar rotación DESPUÉS de
+    // vrm.update para garantizar que gana sobre lookAt/idle/etc. Auto-expira
+    // tras 3s. Resetea el bone a 0 antes de aplicar (igual que el botón hace
+    // en applyBoneRotation, para que cambios sucesivos no se acumulen).
+    if (_boneOverride) {
+      if (performance.now() > _boneOverride.expiresAt) {
+        _boneOverride = null;
+        testRunning = false;
+      } else {
+        const node = currentVrm.humanoid?.getNormalizedBoneNode?.(_boneOverride.boneName);
+        if (node) {
+          node.rotation.x = 0; node.rotation.y = 0; node.rotation.z = 0;
+          node.rotation[_boneOverride.axis] = _boneOverride.value;
+        }
+      }
+    }
   }
 
   controls.update();

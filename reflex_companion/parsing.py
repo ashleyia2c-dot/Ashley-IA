@@ -267,6 +267,24 @@ def extract_all_actions(text: str) -> tuple[str, list[dict]]:
     procesaba el primero — la segunda acción se quedaba sin ejecutar
     pero la descripción verbal daba a entender que sí. Ahora las
     recogemos todas.
+
+    v0.19.30 — DEDUPE de acciones idempotentes. Bug observado en producción:
+    Ashley emitió [action:play_music:URL_1][action:play_music:URL_2] en la
+    MISMA respuesta donde URL_1 y URL_2 apuntaban al MISMO video pero con
+    query params distintos (ej: ?v=X vs ?v=X&t=10s) → 2 tabs idénticas en
+    Opera. El "dedupe accidental" previo via text.replace en extract_action
+    solo colapsaba byte-idénticos — variaciones de URL no.
+
+    Fix:
+    • play_music: dedupe por videoId extraído (regex YouTube /watch?v=XXX
+      o youtu.be/XXX). Si no es URL de YouTube, fallback a key exacta.
+    • open_url / search_web / open_app / focus_window / screenshot:
+      dedupe por (type, params) — defensa explícita aunque text.replace ya
+      colapse byte-idénticos.
+
+    Para type_text / hotkey / press_key / volume NO deduplicamos en esta
+    capa (aunque el text.replace accidental colapse byte-idénticos —
+    comportamiento histórico, fuera de scope de este fix).
     """
     actions: list[dict] = []
     remaining_text = text
@@ -276,7 +294,40 @@ def extract_all_actions(text: str) -> tuple[str, list[dict]]:
             break
         actions.append(action)
         remaining_text = stripped
-    return remaining_text, actions
+
+    # ── v0.19.30 — dedupe idempotent actions ──────────────────────────
+    _IDEMPOTENT_FOR_DEDUPE = {
+        "play_music", "open_url", "search_web", "open_app",
+        "focus_window", "screenshot",
+    }
+    # Regex para extraer videoId de URLs YouTube (ambos formatos)
+    _YT_ID_RE = re.compile(
+        r'(?:youtube\.com/watch\?[^"\s]*?[?&]?v=|youtu\.be/)'
+        r'([a-zA-Z0-9_-]{11})',
+        re.IGNORECASE,
+    )
+
+    def _dedupe_key(act: dict) -> tuple | None:
+        atype = act["type"]
+        params = act.get("params") or []
+        # Caso especial: play_music con URL de YouTube → dedupe por videoId
+        if atype == "play_music" and params:
+            url = params[0] or ""
+            m = _YT_ID_RE.search(url)
+            if m:
+                return ("play_music_yt", m.group(1))
+        return (atype, tuple(params))
+
+    seen_keys: set[tuple] = set()
+    deduped: list[dict] = []
+    for a in actions:
+        if a["type"] in _IDEMPOTENT_FOR_DEDUPE:
+            key = _dedupe_key(a)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+        deduped.append(a)
+    return remaining_text, deduped
 
 
 def extract_action(text: str) -> tuple[str, dict | None]:

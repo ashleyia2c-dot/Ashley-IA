@@ -499,3 +499,142 @@ class TestExtractActionFallthroughBranch:
         assert action is not None
         assert action["type"] == "future_action"
         assert action["params"] == ["foo", "bar", "baz"]
+
+
+# ─────────────────────────────────────────────────────────────────
+# v0.19.30 — extract_all_actions DEBE deduplicar acciones idempotentes,
+# especialmente play_music donde dos URLs distintas pueden apuntar al
+# mismo videoId (?v=X vs ?v=X&t=10s). Bug producción: Ashley emitió
+# play_music dos veces en la misma respuesta → 2 tabs idénticas en Opera.
+#
+# Notar: `extract_action` ya colapsa byte-idénticos vía text.replace()
+# (comportamiento histórico, no parte de este fix). Los tests aquí se
+# enfocan en lo que el dedupe NUEVO añade: variaciones de URL para el
+# mismo videoId, y defensa explícita para los demás idempotentes.
+# ─────────────────────────────────────────────────────────────────
+
+
+class TestExtractAllActionsDedupe:
+    """Garantiza que el LLM emitiendo dos veces play_music para el mismo
+    video (con URLs ligeramente distintas) no genera doble tab."""
+
+    def test_dedupes_play_music_same_videoid_diff_url_params(self):
+        """BUG B v0.19.29 → fix v0.19.30: dos play_music con MISMO videoId
+        pero query params distintos (?t=10) ya NO abre 2 tabs."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:https://www.youtube.com/watch?v=dQw4w9WgXcQ]"
+            "[action:play_music:https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1, (
+            f"Dos play_music para el mismo videoId con URLs distintas deben "
+            f"deduplicarse. Got {len(actions)} actions."
+        )
+        assert actions[0]["type"] == "play_music"
+
+    def test_dedupes_play_music_youtu_be_vs_youtube_com_same_video(self):
+        """youtu.be/X y youtube.com/watch?v=X son el mismo video."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:https://youtu.be/dQw4w9WgXcQ]"
+            "[action:play_music:https://www.youtube.com/watch?v=dQw4w9WgXcQ]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_does_NOT_dedupe_different_videoids(self):
+        """Si los videoIds son distintos, ambas deben ejecutarse."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:https://youtube.com/watch?v=AAAAAAAAAAA]"
+            "[action:play_music:https://youtube.com/watch?v=BBBBBBBBBBB]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 2
+
+    def test_dedupes_open_url(self):
+        """defensa explícita aunque text.replace ya colapse byte-idénticos."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:open_url:https://github.com]"
+            "[action:open_url:https://github.com]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_dedupes_search_web(self):
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:search_web:python tutorials]"
+            "[action:search_web:python tutorials]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_dedupes_open_app(self):
+        from reflex_companion.parsing import extract_all_actions
+        text = "[action:open_app:notepad][action:open_app:notepad]"
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_dedupes_focus_window(self):
+        from reflex_companion.parsing import extract_all_actions
+        text = "[action:focus_window:Chrome][action:focus_window:Chrome]"
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_does_NOT_dedupe_different_open_apps(self):
+        """User pide 'abre notepad y abre paint' → 2 acciones."""
+        from reflex_companion.parsing import extract_all_actions
+        text = "[action:open_app:notepad][action:open_app:mspaint]"
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 2
+
+    def test_does_NOT_dedupe_different_search_terms(self):
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:search_web:python tutorials]"
+            "[action:search_web:rust tutorials]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 2
+
+    def test_dedupe_preserves_order_for_mixed_actions(self):
+        """Si hay [play_music:A][type_text:X][play_music:A_t=10], el segundo
+        play_music se elimina (mismo videoId) pero type_text se mantiene."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:https://youtube.com/watch?v=dQw4w9WgXcQ]"
+            "[action:type_text:hello]"
+            "[action:play_music:https://youtube.com/watch?v=dQw4w9WgXcQ&t=5]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 2
+        assert actions[0]["type"] == "play_music"
+        assert actions[1]["type"] == "type_text"
+
+    def test_three_identical_play_music_collapse_to_one(self):
+        """Si Ashley emite el mismo videoId 3+ veces (con URLs distintas
+        cada una para evitar el dedupe accidental de text.replace), sigue
+        siendo solo 1."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:https://youtube.com/watch?v=dQw4w9WgXcQ]"
+            "[action:play_music:https://youtube.com/watch?v=dQw4w9WgXcQ&t=5]"
+            "[action:play_music:https://youtu.be/dQw4w9WgXcQ]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 1
+
+    def test_play_music_non_youtube_url_falls_back_to_exact_key(self):
+        """Si la URL no es YouTube, el videoId regex no matchea y caemos
+        al dedupe por exact (type, params). Spotify/SoundCloud quedan
+        protegidos por el accidental text.replace."""
+        from reflex_companion.parsing import extract_all_actions
+        text = (
+            "[action:play_music:spotify:track:abc123]"
+            "[action:play_music:spotify:track:xyz789]"
+        )
+        _, actions = extract_all_actions(text)
+        assert len(actions) == 2  # tracks distintos → ambos pasan
