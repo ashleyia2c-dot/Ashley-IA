@@ -5627,6 +5627,34 @@ from .components import (  # noqa: E402
 from .styles import global_styles  # noqa: E402
 
 
+def _t_match(key: str):
+    """v0.19.28 — Workaround para bug de Reflex: State.t["key"] (dict
+    computed Var lookup) NO se re-renderiza reactivamente cuando language
+    cambia en algunos contextos (verificado empíricamente en el dialog
+    de Settings, sección CDP — el user lo reportó dos veces y la
+    confirmación de que el dict ES contiene los strings correctos NO
+    bastó porque el render quedaba con los EN del primer mount).
+
+    Solución: construir un `rx.match(State.language, ...)` directamente
+    desde el dict i18n.UI. Esto es runtime-evaluated en el cliente y
+    Reflex sí lo trata como reactivo a State.language correctamente.
+
+    Trade-off: si la key no existe en algún idioma, fallback silencioso
+    a EN (mismo comportamiento que i18n.ui()).
+    """
+    en_val = i18n.UI["en"].get(key, key)
+    return rx.match(
+        State.language,
+        ("es", i18n.UI["es"].get(key, en_val)),
+        ("fr", i18n.UI["fr"].get(key, en_val)),
+        ("ja", i18n.UI["ja"].get(key, en_val)),
+        ("de", i18n.UI["de"].get(key, en_val)),
+        ("ru", i18n.UI["ru"].get(key, en_val)),
+        ("ko", i18n.UI["ko"].get(key, en_val)),
+        en_val,
+    )
+
+
 def index():
     # ── Input area v0.16 ──────────────────────────────────────
     # En el rediseño boutique noir, los botones de acción
@@ -6451,7 +6479,7 @@ def index():
                         rx.box(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.text(State.t["settings_cdp_heading"],
+                                    rx.text(_t_match("settings_cdp_heading"),
                                             color="#88ddff", font_weight="700", font_size="14px",
                                             letter_spacing="0.05em"),
                                     rx.spacer(),
@@ -6462,20 +6490,20 @@ def index():
                                     ),
                                     width="100%", align="center",
                                 ),
-                                rx.text(State.t["settings_cdp_label"],
+                                rx.text(_t_match("settings_cdp_label"),
                                         color="#ddd", font_size="13px", font_weight="500"),
                                 rx.cond(
                                     State.cdp_enabled,
-                                    rx.text(State.t["settings_cdp_on"],
+                                    rx.text(_t_match("settings_cdp_on"),
                                             color="#88ddff", font_size="11px",
                                             font_weight="600"),
-                                    rx.text(State.t["settings_cdp_off"],
+                                    rx.text(_t_match("settings_cdp_off"),
                                             color="#88ffaa", font_size="11px",
                                             font_weight="600"),
                                 ),
-                                rx.text(State.t["settings_cdp_desc"],
+                                rx.text(_t_match("settings_cdp_desc"),
                                         color="#888", font_size="10px", line_height="1.5"),
-                                rx.text(State.t["settings_cdp_howto"],
+                                rx.text(_t_match("settings_cdp_howto"),
                                         color="#ffaa44", font_size="10px",
                                         line_height="1.5", font_style="italic"),
                                 # Estado del wizard: spinner mientras corre,
