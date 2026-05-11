@@ -1,6 +1,6 @@
 {
   "name": "ashley",
-  "version": "0.19.14",
+  "version": "0.19.15",
   "description": "Ashley - Personal AI Companion",
   "main": "main.js",
   "author": "Mister Squishi",
@@ -127,10 +127,9 @@
       "icon": "build-resources/icon.ico"
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Ashley",
