@@ -806,10 +806,14 @@ class State(rx.State):
         new_state = not self.cdp_enabled
         self.cdp_enabled = new_state
         self.cdp_setup_in_progress = True
+        # v0.19.20 — i18n: estos mensajes se mostraban hardcoded en español
+        # incluso si la UI estaba en inglés/japonés/etc. Ahora vienen del
+        # dict UI[lang] como cualquier otra string.
+        _ui = i18n.ui(self.language)
         if new_state:
-            self.cdp_setup_message = "Configurando accesos directos del navegador..."
+            self.cdp_setup_message = _ui["cdp_setup_in_progress"]
         else:
-            self.cdp_setup_message = "Restaurando accesos directos al estado original..."
+            self.cdp_setup_message = _ui["cdp_setup_in_progress_off"]
         self._persist_voice()
         return State.run_cdp_setup_wizard(new_state)
 
@@ -952,7 +956,8 @@ class State(rx.State):
                                           # dura 400-700ms → sobra.
                 )
                 if ok:
-                    self.wake_word_status_message = "OK escuchando"
+                    # v0.19.20 — i18n
+                    self.wake_word_status_message = i18n.ui(self.language)["wake_word_listening"]
                     self._persist_voice()
                     # Lanzar el bg listener que polea el bridge
                     return State.run_wake_word_listener
@@ -997,7 +1002,8 @@ class State(rx.State):
             consecutive_required=2,   # v0.14.5: rechaza impulsos cortos
         )
         if ok:
-            self.wake_word_status_message = "OK escuchando"
+            # v0.19.20 — i18n
+            self.wake_word_status_message = i18n.ui(self.language)["wake_word_listening"]
             yield State.run_wake_word_listener
         else:
             self.wake_word_status_message = f"Error: {reason}"

@@ -428,3 +428,74 @@ class TestParseRemindParams:
             "2026-12-25T09:00:00",
             "Christmas morning: open presents!",
         ]
+
+
+# ─────────────────────────────────────────────────────────────────
+# v0.19.20 — guard contra UnboundLocalError "params"
+# Bug original: extract_action no tenía rama else para action types
+# que no eran type_text/type_in/write_to_app/remind/add_important/
+# done_important/save_taste/save_date/save_goal/check_in_goal/complete_goal.
+# Para volume/open_app/close_window/screenshot/hotkey/etc, params nunca
+# se asignaba y al return crashaba con UnboundLocalError visible al
+# user como "Something went wrong with Grok (send_message): cannot
+# access local variable 'params' where it is not associated with a value".
+# ─────────────────────────────────────────────────────────────────
+
+
+class TestExtractActionFallthroughBranch:
+    """Ensures extract_action handles ALL action types without crashing,
+    not just the ones explicitly listed in if/elif branches."""
+
+    def test_volume_up(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:volume:up]")
+        assert action == {"type": "volume", "params": ["up"]}
+
+    def test_volume_set_with_value(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:volume:set:75]")
+        assert action == {"type": "volume", "params": ["set", "75"]}
+
+    def test_open_app(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:open_app:notepad]")
+        assert action == {"type": "open_app", "params": ["notepad"]}
+
+    def test_close_window(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:close_window:Discord]")
+        assert action == {"type": "close_window", "params": ["Discord"]}
+
+    def test_close_tab(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:close_tab:YouTube]")
+        assert action == {"type": "close_tab", "params": ["YouTube"]}
+
+    def test_screenshot_no_params(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:screenshot]")
+        assert action == {"type": "screenshot", "params": []}
+
+    def test_hotkey_multiple_keys(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:hotkey:ctrl:c]")
+        assert action == {"type": "hotkey", "params": ["ctrl", "c"]}
+
+    def test_press_key(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:press_key:enter]")
+        assert action == {"type": "press_key", "params": ["enter"]}
+
+    def test_focus_window(self):
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:focus_window:Chrome]")
+        assert action == {"type": "focus_window", "params": ["Chrome"]}
+
+    def test_unknown_action_type_doesnt_crash(self):
+        """Even for completely new/unknown action types, must not raise
+        UnboundLocalError. The fallback branch handles it gracefully."""
+        from reflex_companion.parsing import extract_action
+        clean, action = extract_action("[action:future_action:foo:bar:baz]")
+        assert action is not None
+        assert action["type"] == "future_action"
+        assert action["params"] == ["foo", "bar", "baz"]

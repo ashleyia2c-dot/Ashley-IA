@@ -368,6 +368,18 @@ def extract_action(text: str) -> tuple[str, dict | None]:
         # check_in_goal:ID_O_TEXTO  /  complete_goal:ID_O_TEXTO
         # v0.18.0 Fase 3 — un único parámetro (puede contener colons).
         params = [rest] if rest else []
+    else:
+        # v0.19.20 — FALLBACK CRÍTICO. El docstring decía "resto: split normal
+        # por ':'" pero el branch nunca se implementó → UnboundLocalError al
+        # return cuando a_type era algo no listado arriba (volume, open_app,
+        # close_window, hotkey, press_key, focus_window, screenshot, etc).
+        # Síntoma para el user: "Something went wrong with Grok (send_message):
+        # cannot access local variable 'params' where it is not associated
+        # with a value" tras pedir "increase volume" / "abre notepad" / etc.
+        # Fix: split por ":" normal — cubre TODOS los action types restantes
+        # que tienen 0+ params separados por colons (volume:up, volume:set:75,
+        # open_app:NOMBRE, hotkey:ctrl:c, etc).
+        params = rest.split(":") if rest else []
 
     clean = text.replace(full_tag, "").strip()
     return clean, {"type": a_type, "params": params}

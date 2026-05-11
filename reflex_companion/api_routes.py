@@ -1118,7 +1118,7 @@ async def _mobile_sync_prompts_endpoint(request):
             languages[lang] = {"error": str(_e)}
 
     payload = {
-        "version": "0.19.19",
+        "version": "0.19.20",
         "languages": languages,
     }
     return _with_cors(_StarletteJSON(payload))
@@ -1151,7 +1151,7 @@ async def _mobile_sync_state_endpoint(request):
     if not _check_mobile_auth(request):
         return _unauthorized()
 
-    payload: dict = {"version": "0.19.19"}
+    payload: dict = {"version": "0.19.20"}
 
     # Chat history (últimos 50)
     try:

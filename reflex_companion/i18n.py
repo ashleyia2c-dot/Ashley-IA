@@ -34,6 +34,11 @@ UI = {
         "status_speaking":    "speaking...",
         "status_online":      "online",
 
+        # v0.19.20 — Settings dynamic status messages (CDP toggle + wake word)
+        "cdp_setup_in_progress":     "Configuring browser shortcuts...",
+        "cdp_setup_in_progress_off": "Restoring browser shortcuts to original state...",
+        "wake_word_listening":       "OK listening",
+
         # Input
         "input_placeholder":  "Type your message...  (Enter to send, Shift+Enter for new line)",
         "btn_send":           "Send",
@@ -274,6 +279,10 @@ UI = {
         "status_speaking":    "hablando...",
         "status_online":      "en línea",
 
+        "cdp_setup_in_progress":     "Configurando accesos directos del navegador...",
+        "cdp_setup_in_progress_off": "Restaurando accesos directos al estado original...",
+        "wake_word_listening":       "OK escuchando",
+
         "input_placeholder":  "Escribe tu mensaje...  (Enter para enviar, Shift+Enter = nueva línea)",
         "btn_send":           "Enviar",
 
@@ -498,6 +507,10 @@ UI = {
         "status_thinking":    "réfléchit...",
         "status_speaking":    "parle...",
         "status_online":      "en ligne",
+
+        "cdp_setup_in_progress":     "Configuration des raccourcis du navigateur...",
+        "cdp_setup_in_progress_off": "Restauration des raccourcis à l'état original...",
+        "wake_word_listening":       "OK j'écoute",
 
         "input_placeholder":  "Écris ton message...  (Entrée pour envoyer, Maj+Entrée = nouvelle ligne)",
         "btn_send":           "Envoyer",
@@ -725,6 +738,11 @@ UI = {
         "status_thinking":    "考え中...",
         "status_speaking":    "話している...",
         "status_online":      "オンライン",
+
+        # v0.19.20 — Settings dynamic status messages
+        "cdp_setup_in_progress":     "ブラウザのショートカットを設定中...",
+        "cdp_setup_in_progress_off": "ショートカットを元の状態に復元中...",
+        "wake_word_listening":       "聞いてる",
 
         # Input
         "input_placeholder":  "メッセージを入力...  (Enterで送信、Shift+Enterで改行)",
@@ -965,6 +983,11 @@ UI = {
         "status_speaking":    "spricht...",
         "status_online":      "online",
 
+        # v0.19.20 — Settings dynamic status messages
+        "cdp_setup_in_progress":     "Browser-Verknüpfungen werden konfiguriert...",
+        "cdp_setup_in_progress_off": "Verknüpfungen werden in den Originalzustand zurückgesetzt...",
+        "wake_word_listening":       "OK ich höre",
+
         # Input
         "input_placeholder":  "Schreib deine Nachricht...  (Enter zum Senden, Shift+Enter für neue Zeile)",
         "btn_send":           "Senden",
@@ -1204,6 +1227,11 @@ UI = {
         "status_speaking":    "говорит...",
         "status_online":      "онлайн",
 
+        # v0.19.20 — Settings dynamic status messages
+        "cdp_setup_in_progress":     "Настройка ярлыков браузера...",
+        "cdp_setup_in_progress_off": "Восстановление ярлыков в исходное состояние...",
+        "wake_word_listening":       "ОК слушаю",
+
         # Input
         "input_placeholder":  "Напиши сообщение...  (Enter — отправить, Shift+Enter — новая строка)",
         "btn_send":           "Отправить",
@@ -1442,6 +1470,11 @@ UI = {
         "status_thinking":    "생각 중...",
         "status_speaking":    "말하는 중...",
         "status_online":      "온라인",
+
+        # v0.19.20 — Settings dynamic status messages
+        "cdp_setup_in_progress":     "브라우저 바로가기 설정 중...",
+        "cdp_setup_in_progress_off": "바로가기를 원래 상태로 복원 중...",
+        "wake_word_listening":       "OK 듣는 중",
 
         # Input
         "input_placeholder":  "메시지를 입력해...  (Enter로 보내기, Shift+Enter는 줄바꿈)",
