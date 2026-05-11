@@ -287,6 +287,7 @@ def compress_history(messages: list[dict], language: str) -> list[dict]:
     summary_msg = {
         "role": "system_result",
         "content": f"{header}\n{summary_text}",
+        "ui_content": "",  # v0.19.23 — schema consistency (this msg never reaches UI but defensive)
         "timestamp": cached.get("generated_at", ""),
         "id": "_ctx_summary",
         "image": "",

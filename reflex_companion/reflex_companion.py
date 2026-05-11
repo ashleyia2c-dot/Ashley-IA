@@ -2137,9 +2137,16 @@ class State(rx.State):
             self.tastes = load_tastes()
 
         ts = now_iso()
+        # v0.19.23 — PRIVACY: si el action devolvió `ui_result`, ese es el
+        # texto público que se renderiza en el chat (corto, sin leak de datos
+        # sensibles). El `content` completo se mantiene para que Ashley lo
+        # vea en su contexto del siguiente turn. Aplicado a read_page.
+        # Siempre seteamos `ui_content` (string vacío si no hay overrride) para
+        # que Reflex Var no se queje de keys ausentes en el dict del foreach.
         self.messages.append({
             "role": "system_result",
             "content": result["result"],
+            "ui_content": result.get("ui_result", ""),
             "timestamp": ts,
             "id": f"sys-{ts}",
             "image": result.get("screenshot") or "",
@@ -3304,6 +3311,7 @@ class State(rx.State):
                         self.messages.append({
                             "role": "system_result",
                             "content": result["result"],
+                            "ui_content": result.get("ui_result", ""),  # v0.19.23 privacy
                             "timestamp": ts,
                             "id": f"sys-{ts}",
                             "image": result.get("screenshot") or "",
@@ -3363,6 +3371,7 @@ class State(rx.State):
             self.messages.append({
                 "role": "system_result",
                 "content": hint,
+                "ui_content": "",  # v0.19.23 — schema consistency for UI render
                 "timestamp": ts_h,
                 "id": f"sys-{ts_h}",
                 "image": "",
@@ -3721,7 +3730,21 @@ class State(rx.State):
         # borró intencionalmente.
         self.is_thinking = False
         self.current_response = ""
-        self.save_history()
+        # v0.19.23 — bug fix CRÍTICO: save_history() hace merge con el
+        # archivo en disco para preservar mensajes que el móvil escribió.
+        # Pero ese merge RE-APAREZA el mensaje borrado: el archivo en
+        # disco aún lo tiene, el merge ve un id que no está en self.messages
+        # (porque acabamos de borrarlo) y lo re-añade desde disco como si
+        # fuera un msg del móvil → self.messages = list(saveable) lo
+        # reasigna → el delete se desace.
+        # Fix: escribir DIRECTO sin merge. Trade-off: si el móvil escribió
+        # un msg nuevo entre el último save y este delete, ese msg móvil
+        # se pierde. Aceptable porque el user activamente intentó borrar.
+        saveable = [
+            {**m, "image": ""} if m.get("role") == "system_result" else m
+            for m in self.messages
+        ]
+        save_json(CHAT_FILE, saveable)
 
     # ─────────────────────────────────────────
     #  Iniciativa de Ashley
@@ -6791,12 +6814,12 @@ def index():
                         # ═══════════════════════════════════════════════
                         rx.box(
                             rx.vstack(
-                                rx.text("⚖ Legal & Data",
+                                rx.text(State.t["settings_legal_heading"],
                                         color="#888", font_weight="700", font_size="14px",
                                         letter_spacing="0.05em"),
                                 rx.hstack(
                                     rx.button(
-                                        "Privacy Policy",
+                                        State.t["settings_privacy_btn"],
                                         on_click=State.open_privacy,
                                         type="button",
                                         bg="rgba(255,255,255,0.04)",
@@ -6807,7 +6830,7 @@ def index():
                                         cursor="pointer",
                                     ),
                                     rx.button(
-                                        "Terms of Service",
+                                        State.t["settings_terms_btn"],
                                         on_click=State.open_terms,
                                         type="button",
                                         bg="rgba(255,255,255,0.04)",
@@ -6821,17 +6844,14 @@ def index():
                                 ),
                                 # Backup/export — RGPD Art 20 (right to data portability)
                                 rx.text(
-                                    "Backup all your data (chat history, facts, "
-                                    "diary, achievements, preferences) as a ZIP file. "
-                                    "Useful before reinstalling, migrating to "
-                                    "another PC, or simply for peace of mind.",
+                                    State.t["settings_backup_desc"],
                                     color="#777", font_size="11px",
                                     line_height="1.4", margin_top="4px",
                                 ),
                                 rx.button(
                                     rx.hstack(
                                         rx.text("📦", font_size="14px"),
-                                        rx.text("Export all my data (.zip)"),
+                                        rx.text(State.t["settings_export_btn"]),
                                         spacing="2", align="center",
                                     ),
                                     type="button",
@@ -6933,7 +6953,7 @@ def index():
         # ═══════════════════════════════════════════════════════════════
         rx.dialog.root(
             rx.dialog.content(
-                rx.dialog.title("Privacy Policy"),
+                rx.dialog.title(State.t["settings_privacy_btn"]),
                 rx.box(
                     rx.markdown(State.privacy_md, color="#ddd"),
                     max_height="65vh",
@@ -6943,7 +6963,7 @@ def index():
                 rx.flex(
                     rx.spacer(),
                     rx.button(
-                        "Close",
+                        State.t["settings_close"],
                         on_click=State.set_show_privacy(False),
                         bg="rgba(255,255,255,0.06)",
                         color="#ddd",
@@ -6964,7 +6984,7 @@ def index():
         # ═══════════════════════════════════════════════════════════════
         rx.dialog.root(
             rx.dialog.content(
-                rx.dialog.title("Terms of Service"),
+                rx.dialog.title(State.t["settings_terms_btn"]),
                 rx.box(
                     rx.markdown(State.terms_md, color="#ddd"),
                     max_height="65vh",
@@ -6974,7 +6994,7 @@ def index():
                 rx.flex(
                     rx.spacer(),
                     rx.button(
-                        "Close",
+                        State.t["settings_close"],
                         on_click=State.set_show_terms(False),
                         bg="rgba(255,255,255,0.06)",
                         color="#ddd",

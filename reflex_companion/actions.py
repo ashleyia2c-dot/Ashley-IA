@@ -2043,11 +2043,16 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     return {"success": False,
                             "result": "No se pudo leer la página.",
                             "screenshot": None, "browser_opened": browser_opened}
-                # Pasamos el texto al chat como result — Ashley lo verá
-                # en el siguiente turn y puede comentarlo en personaje.
+                # v0.19.23 — PRIVACY FIX: el contenido completo de la página
+                # va en `result` (lo ve Ashley en su contexto) pero `ui_result`
+                # tiene el resumen corto que es lo único que ve el user en el
+                # chat. Antes el user veía toda la página (YouTube tabs, links,
+                # historial sugerido, etc.) — leak de privacidad serio.
                 preview = text[:1500] + "…" if len(text) > 1500 else text
+                char_count = len(text)
                 return {"success": True,
                         "result": f"Contenido de la página:\n{preview}",
+                        "ui_result": f"📄 Página leída ({char_count} caracteres)",
                         "screenshot": None, "browser_opened": browser_opened}
 
             elif action_type == "scroll_page":

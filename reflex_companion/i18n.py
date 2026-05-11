@@ -234,6 +234,13 @@ UI = {
         "settings_usage_hint":      "Used to verify refund eligibility (refund available within 14 days and under 40 messages).",
         "settings_usage_tampered":  "⚠️ Integrity check failed — counter cannot be verified. Reinstall Ashley if you need this value for support.",
 
+        # Legal & Data section (v0.19.23 — fix hardcoded EN strings)
+        "settings_legal_heading":   "⚖ Legal & Data",
+        "settings_privacy_btn":     "Privacy Policy",
+        "settings_terms_btn":       "Terms of Service",
+        "settings_backup_desc":     "Backup all your data (chat history, facts, diary, achievements, preferences) as a ZIP file. Useful before reinstalling, migrating to another PC, or simply for peace of mind.",
+        "settings_export_btn":      "Export all my data (.zip)",
+
         "settings_save":            "Save",
         "settings_close":           "Close",
 
@@ -465,6 +472,13 @@ UI = {
         "settings_usage_hint":      "Se usa para verificar elegibilidad de reembolso (14 días y menos de 40 mensajes).",
         "settings_usage_tampered":  "⚠️ Error de integridad — el contador no se puede verificar. Reinstala Ashley si necesitas este valor para soporte.",
 
+        # Legal & Data section (v0.19.23)
+        "settings_legal_heading":   "⚖ Legal y Datos",
+        "settings_privacy_btn":     "Política de Privacidad",
+        "settings_terms_btn":       "Términos de Servicio",
+        "settings_backup_desc":     "Haz backup de todos tus datos (historial de chat, hechos, diario, logros, preferencias) como archivo ZIP. Útil antes de reinstalar, migrar a otro PC, o simplemente para tener tranquilidad.",
+        "settings_export_btn":      "Exportar todos mis datos (.zip)",
+
         "settings_save":            "Guardar",
         "settings_close":           "Cerrar",
 
@@ -693,6 +707,13 @@ UI = {
         "settings_usage_label":     "Messages envoyés à Ashley",
         "settings_usage_hint":      "Sert à vérifier l'éligibilité au remboursement (14 jours et moins de 40 messages).",
         "settings_usage_tampered":  "⚠️ Erreur d'intégrité — le compteur ne peut pas être vérifié. Réinstalle Ashley si tu as besoin de cette valeur pour le support.",
+
+        # Légal & Données (v0.19.23)
+        "settings_legal_heading":   "⚖ Légal et Données",
+        "settings_privacy_btn":     "Politique de confidentialité",
+        "settings_terms_btn":       "Conditions d'utilisation",
+        "settings_backup_desc":     "Sauvegarde toutes tes données (historique de chat, faits, journal, succès, préférences) sous forme de ZIP. Utile avant de réinstaller, migrer vers un autre PC, ou juste pour ta tranquillité d'esprit.",
+        "settings_export_btn":      "Exporter toutes mes données (.zip)",
 
         "settings_save":            "Enregistrer",
         "settings_close":           "Fermer",
@@ -936,6 +957,13 @@ UI = {
         "settings_usage_label":     "Ashleyに送信したメッセージ",
         "settings_usage_hint":      "返金資格の確認に使用 (14日以内かつ40メッセージ未満で返金可能)。",
         "settings_usage_tampered":  "⚠️ 整合性チェック失敗 — カウンターを検証できません。サポート用にこの値が必要な場合はAshleyを再インストールしてください。",
+
+        # 法的事項とデータ (v0.19.23)
+        "settings_legal_heading":   "⚖ 法的事項とデータ",
+        "settings_privacy_btn":     "プライバシーポリシー",
+        "settings_terms_btn":       "利用規約",
+        "settings_backup_desc":     "全データ(チャット履歴、事実、日記、実績、設定)をZIPファイルでバックアップ。再インストール前、別のPCへの移行、または安心のために便利。",
+        "settings_export_btn":      "全データをエクスポート(.zip)",
 
         "settings_save":            "保存",
         "settings_close":           "閉じる",
@@ -1181,6 +1209,13 @@ UI = {
         "settings_usage_hint":      "Wird zur Überprüfung der Rückerstattungsberechtigung genutzt (Rückerstattung möglich innerhalb von 14 Tagen und unter 40 Nachrichten).",
         "settings_usage_tampered":  "⚠️ Integritätsprüfung fehlgeschlagen — Zähler kann nicht verifiziert werden. Installiere Ashley neu, falls du diesen Wert für den Support brauchst.",
 
+        # Rechtliches & Daten (v0.19.23)
+        "settings_legal_heading":   "⚖ Rechtliches & Daten",
+        "settings_privacy_btn":     "Datenschutzerklärung",
+        "settings_terms_btn":       "Nutzungsbedingungen",
+        "settings_backup_desc":     "Sichere all deine Daten (Chat-Verlauf, Fakten, Tagebuch, Errungenschaften, Einstellungen) als ZIP-Datei. Nützlich vor Neuinstallation, Migration zu einem anderen PC oder einfach zur Beruhigung.",
+        "settings_export_btn":      "Alle meine Daten exportieren (.zip)",
+
         "settings_save":            "Speichern",
         "settings_close":           "Schließen",
 
@@ -1425,6 +1460,13 @@ UI = {
         "settings_usage_hint":      "Используется для проверки права на возврат (возврат возможен в течение 14 дней и при менее чем 40 сообщениях).",
         "settings_usage_tampered":  "⚠️ Проверка целостности не пройдена — счётчик нельзя проверить. Переустанови Ashley, если этот показатель нужен для поддержки.",
 
+        # Правовое и Данные (v0.19.23)
+        "settings_legal_heading":   "⚖ Правовое и Данные",
+        "settings_privacy_btn":     "Политика конфиденциальности",
+        "settings_terms_btn":       "Условия использования",
+        "settings_backup_desc":     "Сделай резервную копию всех своих данных (история чата, факты, дневник, достижения, настройки) в виде ZIP-файла. Полезно перед переустановкой, переходом на другой ПК или просто для душевного спокойствия.",
+        "settings_export_btn":      "Экспортировать все мои данные (.zip)",
+
         "settings_save":            "Сохранить",
         "settings_close":           "Закрыть",
 
@@ -1668,6 +1710,13 @@ UI = {
         "settings_usage_label":     "Ashley에게 보낸 메시지",
         "settings_usage_hint":      "환불 자격 확인에 사용 (14일 이내 40 메시지 미만이면 환불 가능).",
         "settings_usage_tampered":  "⚠️ 무결성 검사 실패 — 카운터 검증 불가. 지원에 이 값이 필요하면 Ashley 다시 설치해.",
+
+        # 법률 및 데이터 (v0.19.23)
+        "settings_legal_heading":   "⚖ 법률 및 데이터",
+        "settings_privacy_btn":     "개인정보 처리방침",
+        "settings_terms_btn":       "이용약관",
+        "settings_backup_desc":     "모든 데이터(채팅 기록, 사실, 일기, 업적, 환경설정)를 ZIP 파일로 백업해. 재설치 전, 다른 PC로 이동할 때, 또는 그냥 마음의 평화를 위해 유용해.",
+        "settings_export_btn":      "내 모든 데이터 내보내기 (.zip)",
 
         "settings_save":            "저장",
         "settings_close":           "닫기",

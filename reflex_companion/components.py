@@ -73,6 +73,15 @@ def message_item(m: dict[str, str]):
     State = _get_state()
     is_ashley = m["role"] == "assistant"
     is_system = m["role"] == "system_result"
+    # v0.19.23 — Si el system_result tiene `ui_content` no vacío (read_page
+    # leak fix), mostramos esa versión corta en vez del `content` completo.
+    # El content completo se sigue enviando al LLM como contexto invisible.
+    # Reflex Var no soporta dict.get() con default — usamos rx.cond + lookup.
+    sys_display_text = rx.cond(
+        m["ui_content"] != "",
+        m["ui_content"],
+        m["content"],
+    )
     return rx.box(
         rx.cond(
             is_system,
@@ -80,7 +89,7 @@ def message_item(m: dict[str, str]):
             rx.center(
                 rx.hstack(
                     rx.text("⚙️", font_size="11px"),
-                    rx.text(m["content"], font_size="12px", color="#777777"),
+                    rx.text(sys_display_text, font_size="12px", color="#777777"),
                     spacing="1", align="center",
                 ),
                 bg="#0d0d0d",
@@ -122,6 +131,13 @@ def message_item(m: dict[str, str]):
         ),
         width="100%",
         padding_y="4px",
+        # v0.19.23 — id estable por mensaje, usado por el observer de
+        # ashley_fx.js para evitar que la animación .msg-enter se re-dispare
+        # al re-mount (React re-monta todos los items al borrar uno porque
+        # rx.foreach usa index como key, no el id real). Sin esto, borrar
+        # un mensaje hace que TODOS los demás "parpadeen" como si acabaran
+        # de aparecer.
+        custom_attrs={"data-msg-id": m["id"]},
         class_name=rx.cond(
             is_system, "msg-enter",
             rx.cond(is_ashley, "msg-enter ashley-msg", "msg-enter user-msg"),

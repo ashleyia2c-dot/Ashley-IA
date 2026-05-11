@@ -914,10 +914,14 @@ async def _mobile_chat_endpoint(request):
     for m in history:
         if m.get("role") == "system_result":
             # Mensajes de sistema (resultado de actions) — los incluimos
-            # como tipo distinto para que móvil pueda renderizar diferente
+            # como tipo distinto para que móvil pueda renderizar diferente.
+            # v0.19.23 — PRIVACY: si hay ui_content, lo enviamos en vez del
+            # content completo (read_page leak fix también aplica al móvil).
+            ui_short = m.get("ui_content") or ""
+            mobile_content = ui_short if ui_short else m.get("content", "")
             out.append({
                 "role": "system",
-                "content": m.get("content", ""),
+                "content": mobile_content,
                 "timestamp": m.get("timestamp", ""),
                 "id": m.get("id", ""),
             })

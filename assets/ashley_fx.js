@@ -624,6 +624,78 @@
 
 
   /* ══════════════════════════════════════════
+     ANTI-FLICKER OBSERVER (v0.19.23)
+  ══════════════════════════════════════════
+     El bug: rx.foreach usa el INDEX del array como React key, no el id
+     real del mensaje. Cuando borramos el mensaje en posición N, los
+     mensajes N+1, N+2... se re-indexan y React los considera "items
+     diferentes" → re-mount → la clase .msg-enter dispara fadeSlideIn
+     otra vez en TODOS los messages → "flicker" generalizado al borrar.
+
+     Fix: el wrapper de cada mensaje ahora lleva data-msg-id={m["id"]}.
+     Mantenemos un Set de IDs ya animados. Si React re-monta un nodo
+     cuyo data-msg-id ya está en el Set, le quitamos la clase .msg-enter
+     ANTES de que el browser pinte → no se re-anima.
+
+     Trade-off: el primer paint sí tiene la clase aplicada brevemente
+     antes del MutationObserver callback. En la práctica es <1 frame
+     y no se ve flicker porque la animación ni alcanza a empezar antes
+     de quitarle la clase.
+  ══════════════════════════════════════════ */
+  function _initMsgEnterDedupe() {
+    var box = document.getElementById('chat_messages');
+    if (!box) {
+      // Reintenta en 200ms — el chat_messages puede no haber montado aún.
+      setTimeout(_initMsgEnterDedupe, 200);
+      return;
+    }
+    if (box._msgDedupeInit) return;
+    box._msgDedupeInit = true;
+
+    var seen = new Set();
+
+    function _processNode(node) {
+      if (!node || node.nodeType !== 1 || !node.getAttribute) return;
+      var id = node.getAttribute('data-msg-id');
+      if (!id) return;
+      if (seen.has(id)) {
+        // React re-montó este mensaje (delete causó re-index del foreach).
+        // Quitarle la clase msg-enter para que no re-anime.
+        node.classList.remove('msg-enter');
+      } else {
+        seen.add(id);
+      }
+    }
+
+    // Procesar nodos ya presentes (al boot inicial todos los msgs son "nuevos"
+    // y deben animar la primera vez).
+    var existing = box.querySelectorAll('[data-msg-id]');
+    for (var i = 0; i < existing.length; i++) {
+      seen.add(existing[i].getAttribute('data-msg-id'));
+    }
+
+    var obs = new MutationObserver(function (mutations) {
+      for (var m = 0; m < mutations.length; m++) {
+        var added = mutations[m].addedNodes;
+        for (var a = 0; a < added.length; a++) {
+          var node = added[a];
+          if (node.nodeType !== 1) continue;
+          // El wrapper directo o un descendant pueden tener data-msg-id.
+          if (node.hasAttribute && node.hasAttribute('data-msg-id')) {
+            _processNode(node);
+          }
+          if (node.querySelectorAll) {
+            var nested = node.querySelectorAll('[data-msg-id]');
+            for (var n = 0; n < nested.length; n++) _processNode(nested[n]);
+          }
+        }
+      }
+    });
+    obs.observe(box, { childList: true, subtree: true });
+  }
+
+
+  /* ══════════════════════════════════════════
      OPTIMISTIC UI — bubble fake temporal (v0.16.12 — simple)
   ══════════════════════════════════════════
      Filosofía:
@@ -1414,6 +1486,7 @@
     preloadMoodImages();       // v0.16.14 — cachear imágenes mood
     initTextarea();
     initObservers();
+    _initMsgEnterDedupe();     // v0.19.23 — anti-flicker en delete msg
     initInteractiveSounds();  // v0.16.5 — hover/click sounds
     initImagePaste();          // v0.14.1 — Ctrl+V de imagen al chat
     initOptimisticUI();        // v0.14.3 — bubble fake instantáneo

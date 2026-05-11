@@ -133,12 +133,20 @@ def now_iso() -> str:
 
 
 def ensure_ids(messages: list[dict]) -> list[dict]:
-    """Compatibilidad: añade id e image a mensajes sin ellos."""
+    """Compatibilidad: añade id, image y ui_content a mensajes sin ellos.
+
+    v0.19.23 — añadido `ui_content`. Para mensajes legacy que no lo tenían,
+    se setea a string vacío; el componente message_item entonces hace fallback
+    a `content`. Sin esto, Reflex Var hace lookup en JS y crashea con
+    `Cannot read properties of undefined`.
+    """
     for i, msg in enumerate(messages):
         if not msg.get("id"):
             msg["id"] = f"legacy-{i}-{msg.get('timestamp', now_iso())}"
         if "image" not in msg:
             msg["image"] = ""
+        if "ui_content" not in msg:
+            msg["ui_content"] = ""
     return messages
 
 
