@@ -83,22 +83,26 @@ class TestObserverWaitsForDeadline:
 
 
 class TestBootstrapTakesBaselineAfterDeadline:
-    """Tras el deadline, el observer toma el baseline con el contenido del
-    último ashley-msg (v0.16.14: cambiado de count → text por Bug B)."""
+    """Tras el deadline, el observer marca todos los mensajes existentes
+    como ya-vistos (v0.19.26: cambiado de _lastAshleyText → _spokenIds Set
+    de IDs para no romper en delete ni en startup tardío)."""
 
     def test_sets_baseline_after_deadline(self, voice_js):
-        """Después del deadline, debe asignar `_lastAshleyText` (el
-        contenido del último ashley-msg) y marcar `_bootstrapped = true`.
-        Antes usábamos `_prevMessageCount = msgs.length` pero el count
-        es no fiable cuando MAX_HISTORY_MESSAGES trima — Bug B."""
+        """Después del deadline, debe añadir los msg-id existentes al
+        Set _spokenIds y marcar `_bootstrapped = true`.
+
+        v0.19.26: era _lastAshleyText (texto del último), ahora _spokenIds
+        Set por ID. Razón: tracking por texto se rompía cuando user
+        borraba el último ashley-msg o cuando Reflex hidrataba tarde.
+        """
         match = re.search(
-            r"_lastAshleyText\s*=[\s\S]{0,400}?_bootstrapped\s*=\s*true",
+            r"_spokenIds\.add[\s\S]{0,400}?_bootstrapped\s*=\s*true",
             voice_js,
         )
         assert match, (
-            "Tras el deadline, el observer no asigna _lastAshleyText "
-            "antes de marcar _bootstrapped=true. Sin baseline de texto, "
-            "el primer mensaje real podría leerse incorrectamente."
+            "Tras el deadline, el observer no añade los IDs al Set "
+            "_spokenIds antes de marcar _bootstrapped=true. Sin esto, "
+            "el primer mensaje real se leería como nuevo."
         )
 
 

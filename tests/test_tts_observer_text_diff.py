@@ -38,51 +38,55 @@ def voice_js() -> str:
 # ════════════════════════════════════════════════════════════════════════
 
 
-class TestObserverDetectsByText:
-    def test_uses_last_ashley_text_state(self, voice_js):
-        """El observer debe trackear `_lastAshleyText` para comparar
-        contenido, no count."""
-        assert "_lastAshleyText" in voice_js, (
-            "ashley_voice.js no usa _lastAshleyText. Sin esto, cuando "
-            "MAX_HISTORY_MESSAGES trima mensajes viejos, el count de "
-            "ashley-msg puede quedar igual aunque haya respuesta nueva, "
-            "y el observer skipea speech."
+class TestObserverDetectsByMsgId:
+    """v0.19.26 — cambio de tracking por texto a tracking por data-msg-id.
+
+    Razón: el tracking por texto rompía dos casos:
+      1) Delete del último ashley-msg → penúltimo se vuelve "último",
+         tiene texto distinto al baseline → observer cree que es nuevo
+         y lo lee (re-leía el mensaje borrado anterior).
+      2) Startup tardío (Reflex hidrata >3s) → bootstrap toma baseline
+         con msgs.length=0 y texto=''. Al hidratar después, cualquier
+         mensaje se ve como nuevo y se lee.
+
+    Fix: Set<msgId> de mensajes ya vistos. Cada msg lleva data-msg-id
+    estable (v0.19.23). Bootstrap añade los existentes al set sin leer.
+    Delete: el id queda en el set pero no en DOM (no problema).
+    """
+
+    def test_uses_spoken_ids_set(self, voice_js):
+        """El observer debe trackear `_spokenIds` Set de IDs ya leídos."""
+        assert "_spokenIds" in voice_js, (
+            "v0.19.26: ashley_voice.js debe usar _spokenIds (Set) para "
+            "trackear mensajes ya leídos por ID, no por texto"
+        )
+        assert "new Set()" in voice_js, (
+            "_spokenIds debe inicializarse como new Set()"
         )
 
-    def test_compares_text_not_count(self, voice_js):
-        """En _tickObserver, la condición de 'mensaje nuevo' debe ser
-        text-based, no count-based."""
-        # Buscar la condición text === _lastAshleyText (skip)
-        # o text !== _lastAshleyText (act)
-        assert "this._lastAshleyText" in voice_js
-        # Verificar que NO se sigue usando solo count comparison
-        # (puede haber count para diagnóstico, pero la decisión debe ser
-        # por text)
-        # Buscar la línea de decisión: if (text === this._lastAshleyText) return;
-        assert "text === this._lastAshleyText" in voice_js, (
-            "El observer no compara `text === this._lastAshleyText`. "
-            "Necesario para detectar mensajes nuevos cuando el count "
-            "está estable por trim."
+    def test_observer_reads_data_msg_id(self, voice_js):
+        """En _tickObserver, debe leer data-msg-id del wrapper."""
+        assert "getAttribute('data-msg-id')" in voice_js, (
+            "El observer debe leer data-msg-id de cada .ashley-msg para "
+            "trackear quién ha sido leído"
         )
 
 
-class TestBootstrapTakesTextBaseline:
-    def test_bootstrap_stores_last_text(self, voice_js):
-        """Tras los 3s de deadline, el bootstrap debe leer y guardar el
-        textContent del último ashley-msg como baseline."""
-        # Buscar que en el bootstrap se asigne _lastAshleyText
-        # tras el deadline
-        # Patrón: if (now < this._bootstrapDeadline) { return; }
-        # ... seguido de this._lastAshleyText = ...
+class TestBootstrapAddsExistingIdsToSet:
+    def test_bootstrap_adds_existing_ids_to_set(self, voice_js):
+        """Tras el deadline, el bootstrap debe añadir todos los msg-id
+        existentes al set _spokenIds sin leerlos."""
         import re
+        # Patrón: bootstrap añade ids al spokenIds antes de marcar bootstrapped
         match = re.search(
-            r"_bootstrapped[\s\S]{0,800}?_lastAshleyText\s*=",
+            r"_spokenIds\.add[\s\S]{0,300}?_bootstrapped\s*=\s*true",
             voice_js,
         )
         assert match, (
-            "El bootstrap no asigna _lastAshleyText con el contenido del "
-            "último ashley-msg. Sin esto, el primer mensaje real podría "
-            "leerse o saltarse incorrectamente."
+            "v0.19.26: el bootstrap debe llamar _spokenIds.add(id) sobre "
+            "todos los mensajes existentes antes de marcar bootstrapped "
+            "como true. Sin esto, al hidratar Reflex el último msg se "
+            "leería como si fuera nuevo."
         )
 
     def test_bootstrap_does_not_speak(self, voice_js):

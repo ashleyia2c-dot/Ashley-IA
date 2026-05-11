@@ -758,34 +758,42 @@
       if (!box) return;
       const msgs = box.querySelectorAll('.ashley-msg');
 
-      // v0.16.14 — Bootstrap con TIMESTAMP ABSOLUTO. El bug original:
-      //   tick 1 (t=0):   msgs.length=0 (Reflex aún no hidrató historial)
-      //   tick 2 (t=500): msgs.length=0 (Reflex sigue cargando)
-      //   tick 3 (t=1500): msgs.length=N (historial cargado)
-      //   N > 0 → LEE EL ÚLTIMO MENSAJE DEL HISTORIAL
-      // Solución: esperar 3 segundos absolutos desde init() antes de
-      // tomar baseline. Reflex hidrata en <3s en cualquier máquina
-      // razonable.
+      // v0.19.26 — Tracking por ID en vez de por texto. Bugs anteriores:
+      //   (a) Delete msg → el observer compara texto del último msg vs
+      //       baseline. Si borras el último, el penúltimo se vuelve el
+      //       "último" con texto distinto → bootstrap lee el penúltimo.
+      //   (b) Startup tardío → si Reflex tarda más de 3s en hidratar,
+      //       bootstrap toma baseline con msgs.length=0 y texto=''. Al
+      //       hidratar después, cualquier mensaje del historial se ve
+      //       como nuevo y se lee.
+      //
+      // Fix: trackear un Set<msgId> de mensajes ya "vistos" (no a leer).
+      // - Bootstrap: SOLO cuando msgs.length > 0 (esperar a Reflex). Cap
+      //   absoluto de 15s para no quedar bloqueado en cuentas sin chat.
+      //   Añade todos los IDs existentes al set sin leerlos.
+      // - Cada tick: encontrar el último ashley-msg cuyo ID NO está en
+      //   el set, leerlo, añadir ID al set.
+      // - Delete: el ID del borrado se queda en el set pero el msg ya
+      //   no aparece. El nuevo "último" ya está en el set → no se relee.
+      if (!this._spokenIds) this._spokenIds = new Set();
+
       const now = Date.now();
       if (!this._bootstrapDeadline) {
-        this._bootstrapDeadline = now + 3000;
+        this._bootstrapDeadline = now + 15000;  // cap absoluto
       }
       if (!this._bootstrapped) {
-        if (now < this._bootstrapDeadline) {
+        // Espera hasta que haya mensajes O hasta el cap (15s).
+        if (msgs.length === 0 && now < this._bootstrapDeadline) {
           return;
         }
-        // 3s+ desde init: tomar baseline del CONTENIDO del último ashley-msg
-        // (no del count). El count cambia poco fiablemente cuando
-        // MAX_HISTORY_MESSAGES trima mensajes viejos: si el trim borra 1
-        // ashley + 1 user, el count se queda igual aunque haya un nuevo
-        // mensaje de Ashley. Detectamos por contenido textual del último.
-        const latestEl = msgs.length ? msgs[msgs.length - 1] : null;
-        this._lastAshleyText = latestEl
-          ? this._extractSpeechText(latestEl)
-          : '';
+        // Añadir todos los IDs existentes al set sin leerlos.
+        for (const m of msgs) {
+          const id = m.getAttribute('data-msg-id');
+          if (id) this._spokenIds.add(id);
+        }
         this._bootstrapped = true;
-        log('TTS observer bootstrapped after 3s with', msgs.length,
-            'existing messages, lastTextLen=' + this._lastAshleyText.length);
+        log('TTS observer bootstrapped with', msgs.length,
+            'existing messages tracked by id');
         return;
       }
 
@@ -803,23 +811,32 @@
       if (streamingNow) return;
       if (msgs.length === 0) return;
 
-      // FIX v0.16.14 (Bug B): comparar por CONTENIDO del último mensaje,
-      // no por count. Cuando MAX_HISTORY_MESSAGES trima los mensajes
-      // viejos, el count puede quedar igual aunque haya respuesta nueva.
-      // El contenido del ÚLTIMO ashley-msg sí cambia siempre que hay una
-      // respuesta nueva (el nuevo mensaje pasa al final).
-      const latest = msgs[msgs.length - 1];
-      // v0.18.4 — extraer texto SALTANDO <em>/<i> (que es donde rx.markdown
-      // mete *roleplay* y _roleplay_). Si usábamos textContent directo, los
-      // asteriscos ya estaban convertidos a tags, los regex no matcheaban,
-      // y la TTS terminaba leyendo las acciones de roleplay.
-      const text = this._extractSpeechText(latest);
-      if (!text) return;
-      if (text === this._lastAshleyText) return;
+      // v0.19.26 — buscar el último msg cuyo data-msg-id NO esté en el
+      // set. Iteramos desde el final para encontrar el más reciente.
+      let unseenEl = null;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        const id = m.getAttribute('data-msg-id');
+        if (!id) continue;
+        if (!this._spokenIds.has(id)) {
+          unseenEl = m;
+          // Marcar TODOS los anteriores como vistos también (no queremos
+          // leer mensajes salteados — solo el más reciente sin leer).
+          for (let j = 0; j <= i; j++) {
+            const oid = msgs[j].getAttribute('data-msg-id');
+            if (oid) this._spokenIds.add(oid);
+          }
+          break;
+        }
+      }
 
-      // Es un mensaje nuevo (texto diferente del último que vimos)
-      log('TTS: nuevo .ashley-msg detectado (textChanged), llamando speak()');
-      this._lastAshleyText = text;
+      if (!unseenEl) return;
+      // v0.18.4 — extraer texto SALTANDO <em>/<i> (que es donde rx.markdown
+      // mete *roleplay* y _roleplay_).
+      const text = this._extractSpeechText(unseenEl);
+      if (!text) return;
+      log('TTS: nuevo .ashley-msg detectado (id=' +
+          unseenEl.getAttribute('data-msg-id') + '), llamando speak()');
       this.speak(text);
     },
 

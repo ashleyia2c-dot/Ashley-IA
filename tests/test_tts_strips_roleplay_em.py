@@ -83,23 +83,27 @@ class TestExtractSpeechTextHelper:
 
 class TestObserverUsesHelper:
     def test_observer_calls_extract_speech_text(self, voice_js):
-        """`_tickObserver` debe extraer texto vía `_extractSpeechText(latest)`,
-        NO vía `latest.textContent` directo."""
-        # Buscamos el patrón de uso real
-        assert "this._extractSpeechText(latest)" in voice_js, (
-            "_tickObserver no llama _extractSpeechText(latest). Si vuelve "
-            "a usar `latest.textContent` directo, se pierde el filtro de "
-            "<em>/<i> y la TTS lee el roleplay otra vez."
+        """`_tickObserver` debe extraer texto vía `_extractSpeechText()`,
+        NO vía `latest.textContent` directo.
+
+        v0.19.26: el observer ahora identifica el mensaje a leer por
+        data-msg-id (no por texto), pero CUANDO encuentra uno nuevo,
+        sigue extrayendo el texto a vocalizar con _extractSpeechText
+        (para no leer las acciones italic de roleplay)."""
+        assert "_extractSpeechText(unseenEl)" in voice_js or \
+               "this._extractSpeechText(latest)" in voice_js, (
+            "_tickObserver no llama _extractSpeechText() sobre el msg "
+            "nuevo encontrado. Sin esto, leería roleplay italic."
         )
 
-    def test_bootstrap_baseline_also_uses_helper(self, voice_js):
-        """El baseline al bootstrap debe usar el mismo helper para que la
-        comparación posterior (text === _lastAshleyText) sea consistente."""
-        assert "this._extractSpeechText(latestEl)" in voice_js, (
-            "El bootstrap del observer debe usar _extractSpeechText(latestEl) "
-            "para tomar baseline. Si el baseline usa textContent y el tick "
-            "usa _extractSpeechText, los strings serán SIEMPRE diferentes "
-            "y la TTS leerá el último mensaje del historial al iniciar."
+    def test_bootstrap_uses_msg_id_tracking(self, voice_js):
+        """v0.19.26 — el bootstrap ya no usa textContent baseline.
+        En su lugar añade los data-msg-id existentes al _spokenIds Set."""
+        # Cualquier referencia a _spokenIds.add en el bootstrap basta
+        assert "_spokenIds.add" in voice_js, (
+            "v0.19.26: el bootstrap debe usar _spokenIds.add(id) en vez "
+            "de almacenar texto como baseline. El tracking por texto se "
+            "rompía en delete + startup tardío."
         )
 
     def test_no_direct_textcontent_in_tick_check(self, voice_js):
