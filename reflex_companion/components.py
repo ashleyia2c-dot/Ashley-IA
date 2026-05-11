@@ -85,11 +85,22 @@ def message_item(m: dict[str, str]):
     return rx.box(
         rx.cond(
             is_system,
-            # Notificación de sistema: centrada y discreta
+            # Notificación de sistema: centrada y discreta + botón borrar
+            # v0.19.29 — antes los system_result no tenían 🗑️, no se podían
+            # eliminar individualmente. El user reportó que "al borrar
+            # mensajes los de la tuerquita no se borran". Ahora sí.
             rx.center(
                 rx.hstack(
                     rx.text("⚙️", font_size="11px"),
                     rx.text(sys_display_text, font_size="12px", color="#777777"),
+                    rx.button(
+                        "🗑️",
+                        on_click=State.delete_message(m["id"]),
+                        size="1", bg="transparent", color="#555555",
+                        _hover={"color": "#ff6b6b", "bg": "transparent"},
+                        cursor="pointer",
+                        padding="0 4px",
+                    ),
                     spacing="1", align="center",
                 ),
                 bg="#0d0d0d",

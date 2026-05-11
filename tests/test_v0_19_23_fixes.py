@@ -141,7 +141,9 @@ class TestAntiFlickerObserver:
         src = COMPONENTS_FILE.read_text(encoding="utf-8")
         idx = src.find("def message_item")
         assert idx != -1
-        block = src[idx:idx + 3000]
+        # v0.19.29 — la función creció (botón 🗑️ añadido a system_result),
+        # subimos el cap para que el regex llegue al wrapper rx.box final
+        block = src[idx:idx + 5000]
         assert "custom_attrs" in block, (
             "message_item debe usar custom_attrs para añadir data-msg-id"
         )

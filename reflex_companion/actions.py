@@ -454,6 +454,15 @@ _ACTION_MSGS = {
         "ru": "Видео не нашёл, открыл поиск YouTube по '{query}'. Попроси шефа сам выбрать нужное.",
         "ko": "영상 못 찾아서 '{query}' YouTube 검색 열었어. 오빠가 직접 맞는 거 클릭해줘.",
     },
+    "music_open_failed": {
+        "en": "Couldn't open '{title}' in the browser.",
+        "es": "No se pudo abrir '{title}' en el navegador.",
+        "fr": "Impossible d'ouvrir '{title}' dans le navigateur.",
+        "ja": "'{title}' をブラウザで開けませんでした。",
+        "de": "Konnte '{title}' nicht im Browser öffnen.",
+        "ru": "Не удалось открыть '{title}' в браузере.",
+        "ko": "'{title}' 브라우저에서 못 열었어.",
+    },
     # ── close_window / close_browser_tab ───────────────────────────
     "win_closed": {
         "en": "'{name}' closed.",
@@ -985,6 +994,27 @@ def play_music(query: str, browser_already_open: bool = False,
 
     log.warning(f"play_music: query={query!r} hwnd={_youtube_hwnd} url={video_url}")
 
+    # v0.19.29 — guard contra doble apertura. El user reportó que
+    # Ashley emitió dos veces seguidas la misma URL → 2 tabs idénticas.
+    # Si ya existe una tab con la URL EXACTA o con el videoId en el href,
+    # no reabrimos. Mejor reportar éxito y dejar al user con UNA tab.
+    if prefer_cdp:
+        try:
+            from . import browser_cdp as _cdp
+            if _cdp.is_cdp_available():
+                # video_id está en la URL como ?v=XXXXXXXXX
+                import re as _re
+                vid_match = _re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', video_url)
+                if vid_match:
+                    target_vid = vid_match.group(1)
+                    existing_tabs = _cdp.find_tabs_matching("youtube")
+                    for t in existing_tabs:
+                        if target_vid in (t.get("url") or ""):
+                            log.warning(f"play_music: video {target_vid} already in tab {t['id']}, NOT re-opening")
+                            return _amsg(lang, "music_playing", title=title), True, True
+        except Exception as _e:
+            log.warning(f"play_music: dedupe check failed ({_e}), continuing normal flow")
+
     # ── Path CDP (modo moderno opt-in) ───────────────────────────────────
     if prefer_cdp:
         from . import browser_cdp as _cdp
@@ -1130,9 +1160,7 @@ def play_music(query: str, browser_already_open: bool = False,
         f"play_music: VERIFICATION FAILED — pre={pre_count} post={post_count} "
         f"query={query!r} title={title!r}"
     )
-    return (
-        f"No se pudo abrir '{title}' en el navegador."
-    ), False, False
+    return _amsg(lang, "music_open_failed", title=title), False, False
 
 
 # ── Búsqueda web ──────────────────────────────────────────────────────────────
