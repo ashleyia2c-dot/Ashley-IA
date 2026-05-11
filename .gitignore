@@ -88,3 +88,4 @@ wake_word_training/logs/
 # bundlea si están presentes en el momento del build.
 reflex_companion/wake_word/*.onnx
 reflex_companion/wake_word/*.onnx.data
+fill_grille.py
