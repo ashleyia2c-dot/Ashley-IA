@@ -25,6 +25,29 @@ _SAFE_ACTIONS = {
     "save_goal", "check_in_goal", "complete_goal",
 }
 
+# v0.19.31 — Acciones TERMINALES (auto-completas). Una vez ejecutadas, NO
+# tiene sentido disparar la "agentic continuation" porque no hay plan que
+# continuar.
+#
+# Bug observado v0.19.30 (screenshot en producción): Ashley emitió
+# play_music, sonó la canción, el agentic-continuation disparó un follow-up
+# y Ashley re-emitió play_music con la MISMA canción → 2 tabs idénticas en
+# Opera. La heurística previa "executed_count == 1 = plan incompleto" es
+# demasiado optimista para acciones que ya cubren la petición entera del
+# user (típicamente verbos atómicos tipo "pon X", "screenshot", "lista
+# ventanas"). El trigger del continuation pide al LLM "si está completo,
+# no emitas tag" — pero la presión textual hace que re-emita igual.
+#
+# Mantenemos la lista MÍNIMA para no romper flujos multi-step legítimos
+# como "abre YT y busca X" (donde después de open_url SÍ esperamos search).
+# Si aparecen más bugs reportados con otras acciones, ampliar la lista.
+_TERMINAL_ACTIONS = {
+    "play_music",       # canción ya sonando, no hay siguiente paso
+    "screenshot",       # captura ya tomada
+    "list_windows",     # info ya devuelta a Ashley
+    "read_page",        # página ya leída a Ashley
+}
+
 # Verbos del usuario que indican un pedido de acción (para fallback)
 _USER_ACTION_VERBS = (
     # Spanish

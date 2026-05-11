@@ -30,7 +30,8 @@ from .parsing import (
     extract_mood as _extract_mood_fn,
     extract_action as _extract_action_fn,
     extract_affection as _extract_affection_fn,
-    _SAFE_ACTIONS, _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
+    _SAFE_ACTIONS, _TERMINAL_ACTIONS,
+    _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
 )
 from . import i18n
 
@@ -857,42 +858,34 @@ class State(rx.State):
                 None, configure_all_shortcuts, enable,
             )
 
+            # v0.19.31 — i18n. Antes estos 6 mensajes estaban hardcoded
+            # en español → user con UI en inglés/ja/de/etc veía ES. Ahora
+            # vienen del dict UI[lang] como cualquier otra string.
+            _ui = i18n.ui(self.language)
             if enable:
                 if result["modified"] > 0:
-                    msg = (
-                        f"✓ {result['modified']} acceso(s) directo(s) "
-                        f"modificados. Cierra y reabre tu navegador para "
-                        f"aplicar el cambio."
-                    )
+                    msg = _ui["cdp_result_modified"].format(n=result["modified"])
                 elif result["total"] == 0:
-                    msg = (
-                        "⚠ No encontré accesos directos de navegadores "
-                        "Chromium en tu PC. Activa el flag manualmente."
-                    )
+                    msg = _ui["cdp_result_no_shortcuts"]
                 else:
-                    msg = (
-                        f"✓ Los {result['total']} accesos directos ya "
-                        f"tenían el flag activo."
-                    )
+                    msg = _ui["cdp_result_already_active"].format(n=result["total"])
             else:
                 if result["modified"] > 0:
-                    msg = (
-                        f"✓ {result['modified']} acceso(s) directo(s) "
-                        f"restaurados al estado original."
-                    )
+                    msg = _ui["cdp_result_restored"].format(n=result["modified"])
                 else:
-                    msg = "✓ Modo clásico activado."
+                    msg = _ui["cdp_result_classic_mode"]
 
             if result["failed"] > 0:
-                msg += f" ({result['failed']} fallaron)"
+                msg += _ui["cdp_result_failed_suffix"].format(n=result["failed"])
 
             async with self:
                 self.cdp_setup_message = msg
                 self.cdp_setup_in_progress = False
         except Exception as e:
             logging.getLogger("ashley").warning("CDP setup failed: %s", e)
+            _ui = i18n.ui(self.language)
             async with self:
-                self.cdp_setup_message = f"Error en el wizard: {e}"
+                self.cdp_setup_message = _ui["cdp_result_error"].format(err=e)
                 self.cdp_setup_in_progress = False
 
     def open_manual(self):
@@ -3514,10 +3507,21 @@ class State(rx.State):
             r.get("action", {}).get("type") in _SAFE_ACTIONS
             for r in executed_results
         )
+        # v0.19.31 — NO continuar si la única acción fue terminal
+        # (play_music, screenshot, list_windows, read_page). Estas
+        # acciones cubren la petición entera del user en sí mismas; al
+        # forzar un follow-up turn, el LLM tiende a re-emitir la misma
+        # acción con ligeras variaciones (bug producción: 2 tabs idénticas
+        # del mismo video tras "pon música X").
+        all_terminal = all(
+            r.get("action", {}).get("type") in _TERMINAL_ACTIONS
+            for r in executed_results
+        )
         should_continue = (
             executed_count == 1
             and not any_failed  # failures ya disparan apology (también itera)
             and not all_safe_conversational  # ← v0.18.5
+            and not all_terminal  # ← v0.19.31
             and self._auto_iter_count < 1  # cap 1 follow-up = 2 turns max
         )
         if should_continue:

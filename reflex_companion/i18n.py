@@ -37,6 +37,14 @@ UI = {
         # v0.19.20 — Settings dynamic status messages (CDP toggle + wake word)
         "cdp_setup_in_progress":     "Configuring browser shortcuts...",
         "cdp_setup_in_progress_off": "Restoring browser shortcuts to original state...",
+        # v0.19.31 — CDP wizard result messages (estaban hardcoded en ES)
+        "cdp_result_modified":        "✓ {n} shortcut(s) modified. Close and reopen your browser to apply the change.",
+        "cdp_result_no_shortcuts":    "⚠ No Chromium browser shortcuts found on your PC. Activate the flag manually.",
+        "cdp_result_already_active":  "✓ All {n} shortcuts already had the flag active.",
+        "cdp_result_restored":        "✓ {n} shortcut(s) restored to original state.",
+        "cdp_result_classic_mode":    "✓ Classic mode activated.",
+        "cdp_result_failed_suffix":   " ({n} failed)",
+        "cdp_result_error":           "Error in wizard: {err}",
         "wake_word_listening":       "OK listening",
 
         # Input
@@ -289,6 +297,14 @@ UI = {
 
         "cdp_setup_in_progress":     "Configurando accesos directos del navegador...",
         "cdp_setup_in_progress_off": "Restaurando accesos directos al estado original...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ {n} acceso(s) directo(s) modificados. Cierra y reabre tu navegador para aplicar el cambio.",
+        "cdp_result_no_shortcuts":    "⚠ No encontré accesos directos de navegadores Chromium en tu PC. Activa el flag manualmente.",
+        "cdp_result_already_active":  "✓ Los {n} accesos directos ya tenían el flag activo.",
+        "cdp_result_restored":        "✓ {n} acceso(s) directo(s) restaurados al estado original.",
+        "cdp_result_classic_mode":    "✓ Modo clásico activado.",
+        "cdp_result_failed_suffix":   " ({n} fallaron)",
+        "cdp_result_error":           "Error en el wizard: {err}",
         "wake_word_listening":       "OK escuchando",
 
         "input_placeholder":  "Escribe tu mensaje...  (Enter para enviar, Shift+Enter = nueva línea)",
@@ -526,6 +542,14 @@ UI = {
 
         "cdp_setup_in_progress":     "Configuration des raccourcis du navigateur...",
         "cdp_setup_in_progress_off": "Restauration des raccourcis à l'état original...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ {n} raccourci(s) modifié(s). Ferme et rouvre ton navigateur pour appliquer le changement.",
+        "cdp_result_no_shortcuts":    "⚠ Aucun raccourci de navigateur Chromium trouvé sur ton PC. Active le flag manuellement.",
+        "cdp_result_already_active":  "✓ Les {n} raccourcis avaient déjà le flag activé.",
+        "cdp_result_restored":        "✓ {n} raccourci(s) restauré(s) à l'état original.",
+        "cdp_result_classic_mode":    "✓ Mode classique activé.",
+        "cdp_result_failed_suffix":   " ({n} échec(s))",
+        "cdp_result_error":           "Erreur dans l'assistant : {err}",
         "wake_word_listening":       "OK j'écoute",
 
         "input_placeholder":  "Écris ton message...  (Entrée pour envoyer, Maj+Entrée = nouvelle ligne)",
@@ -766,6 +790,14 @@ UI = {
         # v0.19.20 — Settings dynamic status messages
         "cdp_setup_in_progress":     "ブラウザのショートカットを設定中...",
         "cdp_setup_in_progress_off": "ショートカットを元の状態に復元中...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ {n}個のショートカットを変更したよ。ブラウザを閉じて再起動してね。",
+        "cdp_result_no_shortcuts":    "⚠ ChromiumブラウザのショートカットがPCに見つからない。手動でフラグを有効にしてね。",
+        "cdp_result_already_active":  "✓ {n}個のショートカットすべてが既に有効だったよ。",
+        "cdp_result_restored":        "✓ {n}個のショートカットを元の状態に戻したよ。",
+        "cdp_result_classic_mode":    "✓ クラシックモードに切り替えたよ。",
+        "cdp_result_failed_suffix":   "（{n}個失敗）",
+        "cdp_result_error":           "ウィザードでエラー：{err}",
         "wake_word_listening":       "聞いてる",
 
         # Input
@@ -1018,6 +1050,14 @@ UI = {
         # v0.19.20 — Settings dynamic status messages
         "cdp_setup_in_progress":     "Browser-Verknüpfungen werden konfiguriert...",
         "cdp_setup_in_progress_off": "Verknüpfungen werden in den Originalzustand zurückgesetzt...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ {n} Verknüpfung(en) geändert. Schließ deinen Browser und öffne ihn neu, damit die Änderung wirkt.",
+        "cdp_result_no_shortcuts":    "⚠ Keine Chromium-Browser-Verknüpfungen auf deinem PC gefunden. Aktivier das Flag manuell.",
+        "cdp_result_already_active":  "✓ Alle {n} Verknüpfungen hatten das Flag schon aktiv.",
+        "cdp_result_restored":        "✓ {n} Verknüpfung(en) auf den Originalzustand zurückgesetzt.",
+        "cdp_result_classic_mode":    "✓ Klassischer Modus aktiviert.",
+        "cdp_result_failed_suffix":   " ({n} fehlgeschlagen)",
+        "cdp_result_error":           "Fehler im Assistenten: {err}",
         "wake_word_listening":       "OK ich höre",
 
         # Input
@@ -1270,6 +1310,14 @@ UI = {
         # v0.19.20 — Settings dynamic status messages
         "cdp_setup_in_progress":     "Настройка ярлыков браузера...",
         "cdp_setup_in_progress_off": "Восстановление ярлыков в исходное состояние...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ Изменено ярлыков: {n}. Закрой и снова открой браузер, чтобы применить изменения.",
+        "cdp_result_no_shortcuts":    "⚠ Ярлыков браузеров Chromium на твоём ПК не нашёл. Активируй флаг вручную.",
+        "cdp_result_already_active":  "✓ Все {n} ярлыков уже имели активный флаг.",
+        "cdp_result_restored":        "✓ Восстановлено ярлыков: {n}.",
+        "cdp_result_classic_mode":    "✓ Классический режим активирован.",
+        "cdp_result_failed_suffix":   " (не удалось: {n})",
+        "cdp_result_error":           "Ошибка в мастере: {err}",
         "wake_word_listening":       "ОК слушаю",
 
         # Input
@@ -1522,6 +1570,14 @@ UI = {
         # v0.19.20 — Settings dynamic status messages
         "cdp_setup_in_progress":     "브라우저 바로가기 설정 중...",
         "cdp_setup_in_progress_off": "바로가기를 원래 상태로 복원 중...",
+        # v0.19.31 — CDP wizard result messages
+        "cdp_result_modified":        "✓ 바로가기 {n}개를 수정했어. 변경사항 적용하려면 브라우저 닫았다 다시 열어줘.",
+        "cdp_result_no_shortcuts":    "⚠ PC에서 크로미움 브라우저 바로가기를 못 찾았어. 수동으로 플래그 활성화해줘.",
+        "cdp_result_already_active":  "✓ 바로가기 {n}개 모두 이미 플래그가 활성화되어 있었어.",
+        "cdp_result_restored":        "✓ 바로가기 {n}개를 원래 상태로 복원했어.",
+        "cdp_result_classic_mode":    "✓ 클래식 모드로 전환했어.",
+        "cdp_result_failed_suffix":   " ({n}개 실패)",
+        "cdp_result_error":           "위자드 오류: {err}",
         "wake_word_listening":       "OK 듣는 중",
 
         # Input
