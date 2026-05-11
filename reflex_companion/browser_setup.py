@@ -96,13 +96,42 @@ _CHROMIUM_EXES = frozenset({
 })
 
 
+def _is_writable_dir(path: Path) -> bool:
+    """v0.19.19 — True si el proceso actual puede ESCRIBIR en path.
+
+    Test = intento crear un archivo temporal y borrarlo. Más fiable que
+    chequear permisos porque Windows ACL puede ser cualquier cosa.
+
+    Razón: queremos saltarnos shortcuts en `C:\\ProgramData\\` cuando
+    Ashley corre como user (sin admin). Modificar esos `.lnk` requiere
+    elevation que no tenemos en perUser install. Sin este filter,
+    `find_browser_shortcuts()` los devuelve, `add_cdp_flag()` falla con
+    PermissionError, y el user ve "(1 fallaron)" sin entender por qué.
+    """
+    if not path.exists():
+        return False
+    try:
+        test_file = path / f".ashley-write-test-{os.getpid()}"
+        test_file.write_text("ok", encoding="ascii")
+        test_file.unlink()
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
 def _shortcut_locations() -> list[Path]:
-    """Carpetas donde Windows guarda shortcuts de aplicaciones."""
+    """Carpetas donde Windows guarda shortcuts de aplicaciones.
+
+    v0.19.19 — Filtramos las que no son escribibles por el user actual
+    (típicamente C:\\ProgramData\\ sin admin). Estos shortcuts son
+    casi siempre duplicados del Start Menu del user, así que filtrarlos
+    no pierde funcionalidad y evita el "(N fallaron)" feo en la UI.
+    """
     home = Path(os.environ.get("USERPROFILE", ""))
     appdata = Path(os.environ.get("APPDATA", ""))
     public = Path(os.environ.get("PUBLIC", ""))
     progdata = Path(os.environ.get("PROGRAMDATA", ""))
-    return [
+    candidates = [
         home / "Desktop",
         public / "Desktop",
         appdata / "Microsoft/Windows/Start Menu/Programs",
@@ -110,6 +139,7 @@ def _shortcut_locations() -> list[Path]:
         # Pinned to taskbar — Windows guarda las shortcuts pinneadas aquí
         appdata / "Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar",
     ]
+    return [p for p in candidates if _is_writable_dir(p)]
 
 
 def _read_lnk_via_ps(lnk_path: str) -> Optional[dict]:
