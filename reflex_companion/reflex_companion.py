@@ -5499,13 +5499,15 @@ class State(rx.State):
             apology_text = self._last_response
             ap_clean, ap_mood = self._extract_mood(apology_text)
             ap_clean, ap_aff = self._extract_affection(ap_clean)
-            # v0.14.3 — agentic loop: si Ashley emite una NUEVA acción en
-            # su respuesta a este fallo, la ejecutamos en lugar de
-            # descartarla. Eso le permite reintentar / ajustar el plan
-            # / pedir info adicional automáticamente, sin que el user
-            # tenga que mandar otro mensaje. Cap a 2 iteraciones extras
-            # (3 turns total) para evitar bucles si el LLM se atasca.
-            ap_clean, follow_action = self._extract_action(ap_clean)
+            # v0.19.33 — Discard any action emitted in apology. Antes
+            # (v0.14.3) ejecutaba el action como retry automático, pero
+            # eso causaba duplicados cuando un FALSO fallo (acción
+            # ejecutada OK pero reportada como failed) hacía que Ashley
+            # "reintentara" → segunda apertura/ejecución real. Consistente
+            # con v0.19.32 que desactivó la continuation del path de éxito:
+            # filosofía "una sola vez para todo". El user puede reintentar
+            # manualmente si quiere.
+            ap_clean, _discarded_follow = self._extract_action(ap_clean)
             self._apply_affection_delta(ap_aff)
             self.mood = ap_mood
             self.current_response = ""
@@ -5521,25 +5523,6 @@ class State(rx.State):
                     "image": "",
                 })
                 self.save_history()
-
-            # Agentic continuation: si Ashley reaccionó al fallo emitiendo
-            # otra action y aún tenemos presupuesto de iteraciones,
-            # ejecutamos esa action y, si falla también, recursivamente
-            # disparamos otra apology que puede emitir el siguiente paso.
-            # Si tiene success → el loop termina ahí.
-            if follow_action is not None and self._auto_iter_count < 1:
-                self._auto_iter_count += 1
-                _is_safe = follow_action["type"] in _SAFE_ACTIONS
-                if self.auto_actions or _is_safe:
-                    follow_result = self._execute_and_record_action(follow_action)
-                    yield
-                    if not follow_result.get("success", True):
-                        # Encadenamos: el siguiente apology puede emitir
-                        # un nuevo paso. Recursión natural acotada por
-                        # el counter.
-                        yield from self._stream_action_failure_apology(
-                            follow_action, follow_result["result"],
-                        )
         except Exception as e:
             self._handle_grok_error(e, "action_failure_apology")
         yield
