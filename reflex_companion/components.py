@@ -744,22 +744,25 @@ def license_gate() -> rx.Component:
 def _manual_section_item(section: dict) -> rx.Component:
     """Una sección del manual = un AccordionItem colapsable.
     section = {"id": str, "icon": str, "title": str, "content_md": str}
+
+    v0.19.22 — restyled to match boutique noir warm theme (era pink puro
+    de la v1, ahora ámbar/crema sobre vino para combinar con el resto).
     """
     return rx.accordion.item(
         header=rx.hstack(
             rx.text(section["icon"], font_size="18px"),
             rx.text(section["title"],
-                    color="#ddd", font_weight="600", font_size="14px"),
+                    color=COLOR_TEXT_FACT, font_weight="600", font_size="14px"),
             spacing="3", align="center", width="100%",
         ),
         content=rx.box(
             rx.markdown(
                 section["content_md"],
-                color="#ccc",
+                color=COLOR_TEXT_DIM,
                 font_size="13px",
-                line_height="1.7",
+                line_height="1.75",
             ),
-            padding="12px 16px 16px 16px",
+            padding="12px 16px 18px 16px",
         ),
         value=section["id"],
     )
@@ -768,29 +771,32 @@ def _manual_section_item(section: dict) -> rx.Component:
 def _manual_body(manual: dict) -> rx.Component:
     """Renderiza el body completo del manual desde un dict de
     manual_content.MANUAL[lang]. Se evalúa en Python al definir el
-    componente — Reflex maneja los 3 idiomas via rx.match en el caller.
+    componente — Reflex maneja los 7 idiomas via rx.match en el caller.
+
+    v0.19.22 — colores warm boutique noir (era hot pink contrasting).
     """
     return rx.vstack(
         rx.heading(
             manual["title"],
-            color="#ff9aee",
+            color=COLOR_PRIMARY,
             font_size="20px",
             font_weight="700",
             letter_spacing="0.02em",
+            font_family="'Cormorant Garamond', 'Georgia', serif",
         ),
         rx.markdown(
             manual["intro"],
-            color="#ccc",
+            color=COLOR_TEXT_DIM,
             font_size="13px",
-            line_height="1.7",
+            line_height="1.75",
         ),
-        rx.divider(border_color="rgba(255,154,238,0.2)"),
+        rx.divider(border_color="rgba(212,163,115,0.22)"),
         rx.accordion.root(
             *[_manual_section_item(s) for s in manual["sections"]],
             collapsible=True,
             type="multiple",
             variant="ghost",
-            color_scheme="pink",
+            color_scheme="amber",
             width="100%",
         ),
         spacing="3",
@@ -802,8 +808,14 @@ def _manual_body(manual: dict) -> rx.Component:
 def manual_dialog() -> rx.Component:
     """Dialog modal del manual de usuario. Se abre con el botón ❓ del
     header. El contenido cambia con el idioma del state via rx.match —
-    los 3 árboles (EN/ES/FR) se compilan al inicio pero solo el activo
-    se monta gracias al diff de Reflex."""
+    los 7 árboles (EN/ES/FR/JA/DE/RU/KO) se compilan al inicio pero
+    solo el activo se monta gracias al diff de Reflex.
+
+    v0.19.22 — añadidos los 4 idiomas que faltaban (ja/de/ru/ko). Antes
+    todo user en esos idiomas veía EN aunque el contenido en su idioma
+    SÍ existía en manual_content.MANUAL — solo faltaba el branch del
+    rx.match. Plus restyle al theme warm boutique noir.
+    """
     State = _get_state()
 
     # Lazy import del contenido — no es necesario al cargar el módulo
@@ -812,6 +824,10 @@ def manual_dialog() -> rx.Component:
     en_body = _manual_body(get_manual("en"))
     es_body = _manual_body(get_manual("es"))
     fr_body = _manual_body(get_manual("fr"))
+    ja_body = _manual_body(get_manual("ja"))
+    de_body = _manual_body(get_manual("de"))
+    ru_body = _manual_body(get_manual("ru"))
+    ko_body = _manual_body(get_manual("ko"))
 
     return rx.dialog.root(
         rx.dialog.content(
@@ -820,11 +836,15 @@ def manual_dialog() -> rx.Component:
                     State.language,
                     ("es", es_body),
                     ("fr", fr_body),
+                    ("ja", ja_body),
+                    ("de", de_body),
+                    ("ru", ru_body),
+                    ("ko", ko_body),
                     en_body,  # default: EN
                 ),
                 max_height="70vh",
                 overflow_y="auto",
-                padding="4px",
+                padding="4px 8px 4px 4px",
             ),
             rx.flex(
                 rx.spacer(),
@@ -837,13 +857,14 @@ def manual_dialog() -> rx.Component:
                         color_scheme="gray",
                     ),
                 ),
-                margin_top="12px",
+                margin_top="14px",
             ),
-            max_width="640px",
-            bg="#18181f",
-            border="1px solid rgba(255,154,238,0.18)",
-            border_radius="14px",
-            padding="24px",
+            max_width="660px",
+            bg="rgba(35, 17, 25, 0.96)",
+            border=f"1px solid rgba(212, 163, 115, 0.22)",
+            border_radius="16px",
+            padding="28px",
+            box_shadow="0 24px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 245, 230, 0.04) inset",
         ),
         open=State.manual_open,
         on_open_change=State.set_manual_open,
