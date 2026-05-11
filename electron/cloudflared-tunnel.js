@@ -209,27 +209,61 @@ async function startTunnel({ localPort, tunnelUrlFile, log, timeoutMs = 30000 } 
   _lastError = null;
 
   try {
-    await ensureCloudflaredBinary(log);
-
+    // v0.19.16 — bypass del tunnel() del npm package porque internamente
+    // hace spawn(originalBin) ignorando nuestro path-rewrite. Hacemos el
+    // spawn nosotros con el path CORRECTO (asar.unpacked o fallback).
+    const binPath = await ensureCloudflaredBinary(log);
     log(`Arrancando Cloudflare Quick Tunnel → http://localhost:${localPort}`);
-    const { tunnel } = cloudflared;
-    const t = tunnel({ '--url': `http://localhost:${localPort}` });
 
-    // `tunnel()` devuelve { url: Promise<string>, connections: ..., child, stop }
+    // Spawn directo — replicamos lo que hace `tunnel()` del npm pkg pero
+    // con NUESTRO path. Args: `tunnel --url <localPort>`. Capturamos
+    // stdout/stderr buscando el patrón https://*.trycloudflare.com.
+    const { spawn } = require('child_process');
+    const child = spawn(binPath, ['tunnel', '--url', `http://localhost:${localPort}`], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    // Promise que resuelve cuando capturamos la URL pública del túnel.
+    let urlResolve, urlReject;
+    const urlPromise = new Promise((res, rej) => { urlResolve = res; urlReject = rej; });
+    let urlCaptured = false;
+    const urlRegex = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+    const onLine = (chunk) => {
+      const text = chunk.toString('utf-8');
+      if (!urlCaptured) {
+        const m = text.match(urlRegex);
+        if (m) {
+          urlCaptured = true;
+          urlResolve(m[0]);
+        }
+      }
+    };
+    child.stdout.on('data', onLine);
+    child.stderr.on('data', onLine);
+    child.on('error', (err) => {
+      if (!urlCaptured) urlReject(err);
+    });
+    child.on('exit', (code, signal) => {
+      if (!urlCaptured) {
+        urlReject(new Error(`cloudflared exited prematurely (code=${code}, signal=${signal})`));
+      }
+    });
+
     _activeTunnel = {
-      child: t.child,
-      stop: t.stop,
+      child,
+      stop: () => { try { child.kill(); } catch {} },
       url: null,
     };
 
     // Race: capturar URL vs timeout
-    const urlPromise = t.url;
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error(`timeout ${timeoutMs}ms esperando URL del túnel`)), timeoutMs)
     );
 
     const url = await Promise.race([urlPromise, timeoutPromise]);
     _activeTunnel.url = url;
+    const t = { child, stop: _activeTunnel.stop };  // alias para código abajo
 
     log(`✓ Túnel listo: ${url}`);
 
