@@ -129,19 +129,29 @@ class TestCleanForSpeechRegexes:
     para testSpeak() con texto crudo y para comillas que markdown no procesa.
     """
 
-    def test_strips_quote_roleplay(self, voice_js):
-        """Las comillas curly y rectas siguen filtradas (markdown no las
-        toca, así que llegan al texto extraído)."""
-        # Curly double quotes
-        assert "[^\"\\n]{2,120}" in voice_js, (
-            "_cleanForSpeech debe seguir filtrando comillas curly \"..\""
+    def test_does_NOT_strip_quoted_text(self, voice_js):
+        """v0.19.25 — INVERTIDO: ahora SÍ leemos texto entre comillas.
+        Antes _cleanForSpeech eliminaba todo "..." asumiendo roleplay
+        ("se ríe", "levanta una ceja"). Pero Ashley usa comillas para
+        títulos de canciones ("Manchild", "Espresso"), nombres propios,
+        citas. Filtrarlos rompía la TTS — user no oía qué canción puso.
+        """
+        # El regex que filtraba comillas dobles rectas NO debe estar.
+        # (El código de v0.18.3 era: .replace(/\"[^\"\\n]{2,120}\"/g, ''))
+        assert ".replace(/\"[^\"" not in voice_js, (
+            "v0.19.25: las comillas YA NO deben filtrarse — Ashley las "
+            "usa para títulos de canciones / nombres / citas que SÍ debe "
+            "leer la TTS"
         )
 
-    def test_strips_guillemets(self, voice_js):
-        """Comillas españolas «...» — markdown no las procesa, se preservan
-        como texto literal y deben filtrarse."""
-        assert "«" in voice_js and "»" in voice_js, (
-            "_cleanForSpeech debe filtrar guillemets españoles «...»"
+    def test_does_NOT_strip_guillemets(self, voice_js):
+        """v0.19.25 — guillemets españoles «...» tampoco se filtran.
+        Mismo razonamiento: pueden ser títulos en español, no roleplay.
+        El roleplay real va entre asteriscos *así*."""
+        # Buscar el regex específico que filtraba «...»
+        assert ".replace(/«" not in voice_js, (
+            "v0.19.25: guillemets ya NO se filtran — el roleplay real "
+            "va entre asteriscos, no entre «»"
         )
 
     def test_strips_mood_action_tags(self, voice_js):

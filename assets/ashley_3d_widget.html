@@ -407,6 +407,24 @@ window.addEventListener('message', (e) => {
       } else {
         nextVisemeAt = 0;
         visemeTimer = 0;
+        // v0.19.25 — RESET expressions a NEUTRAL antes de empezar a hablar.
+        // Bug: las poses con `happy` alto (excited, default-soft, proud, etc.)
+        // tienen la boca ya sonriendo. El viseme se SUMA encima → boca se
+        // abre demasiado y se ve grotesca (boca enorme cuadrada).
+        // Fix: poner happy/sorrow/relaxed/angry/surprised a 0 cuando empieza
+        // a hablar, y dejar que el endSpeechBoost los restaure al terminar.
+        // Mientras habla, la expresividad viene del HEAD BOB + lipsync + eye
+        // saccades, no del smile base. Al terminar, el boost trae de vuelta
+        // la emoción del mood.
+        if (currentVrm?.expressionManager) {
+          const NEUTRALIZE = ['happy', 'sorrow', 'relaxed', 'angry', 'surprised'];
+          for (const expr of NEUTRALIZE) {
+            currentVrm.expressionManager.setValue(expr, 0);
+          }
+          // Reset también el proximity smile para que no compita con visemes
+          proximitySmile = 0;
+          lastProximitySmile = 0;
+        }
       }
       break;
     }
@@ -517,7 +535,13 @@ function animate() {
     // ── Proximity smile — Ashley sonríe sutil cuando cursor cerca ──
     // Aplicamos como DELTA sobre el happy actual (no setValue absoluto)
     // para no pisar el happy de la pose ni el end-speech-boost.
-    if (currentVrm?.expressionManager) {
+    //
+    // v0.19.25 — DESACTIVADO mientras isTalking. El proximity smile sumaba
+    // happy en cada frame y eso volvía a "abrir la boca exagerada" sobre
+    // el viseme → derrotaba el reset que hacemos en setTalking. Mientras
+    // habla, sin smile; al terminar (endSpeechBoost se aplica), el smile
+    // vuelve naturalmente con la emoción del mood.
+    if (currentVrm?.expressionManager && !isTalking) {
       const targetSmile = cursorProximity * PROXIMITY_SMILE_MAX;
       proximitySmile += (targetSmile - proximitySmile) * 0.10;  // lerp 10%/frame ≈ ~120ms
       const delta = proximitySmile - lastProximitySmile;

@@ -503,19 +503,17 @@
     },
 
     // ─── TTS — limpieza de texto ────────────────────────────
-    // v0.18.3 — eliminar también roleplay entre COMILLAS (recta/curly/single/
-    // guillemets) y guiones bajos. Ashley usa comillas para describir
-    // acciones físicas ("se ríe suave", "levanta una ceja") que no se deben
-    // vocalizar — son stage directions, no diálogo.
+    // v0.18.3 — eliminaba también roleplay entre COMILLAS asumiendo que
+    // Ashley usaba comillas para acciones físicas tipo "se ríe suave".
     //
-    // v0.18.4 — IMPORTANTE: el flujo principal ya NO pasa por aquí porque
-    // _extractSpeechText (abajo) extrae texto del DOM excluyendo <em>/<i>
-    // (ahí van *roleplay* y _roleplay_ tras pasar por rx.markdown). Este
-    // limpiador sigue activo como red de seguridad para:
-    //   - Llamadas testSpeak() con texto crudo
-    //   - Comillas que markdown NO procesa: "..." "..." '...' «...»
-    //   - Tags [mood:...] / [action:...] que se filtran al backend pero
-    //     pueden colarse en algún edge case
+    // v0.19.25 — REVERTIDO: en la práctica Ashley usa comillas para
+    // títulos de canciones, nombres propios, citas, anglicismos, etc.
+    // ("Manchild", "Espresso", "Please Please Please" cuando habla de
+    // Sabrina Carpenter, "Hola jefe" cuando cita algo del user, etc.).
+    // El roleplay real ya va entre asteriscos *así* y los walker DOM
+    // (_extractSpeechText) salta <em>/<i> donde markdown lo convierte.
+    // Mantener los regex de comillas hacía que TTS se saltara los
+    // títulos → user no oía qué canción puso, qué nombre dijo, etc.
     _cleanForSpeech(text) {
       return (text || '')
         .replace(/\[mood:[^\]]+\]/gi, '')
@@ -524,14 +522,7 @@
         .replace(/\*[^*\n]{2,120}\*/g, '')
         // Roleplay entre guiones bajos _acción_ (texto crudo, fallback)
         .replace(/_[^_\n]{2,120}_/g, '')
-        // Roleplay entre comillas dobles rectas "acción"
-        .replace(/"[^"\n]{2,120}"/g, '')
-        // Roleplay entre comillas dobles curly "acción"
-        .replace(/"[^"\n]{2,120}"/g, '')
-        // Roleplay entre comillas simples curly 'acción'
-        .replace(/'[^'\n]{2,120}'/g, '')
-        // Roleplay entre guillemets españoles «acción»
-        .replace(/«[^»\n]{2,120}»/g, '')
+        // v0.19.25 — NO eliminar contenido entre comillas. TTS las lee.
         // Caracteres markdown sueltos restantes
         .replace(/[*_`~]+/g, '')
         // Whitespace normalizado
