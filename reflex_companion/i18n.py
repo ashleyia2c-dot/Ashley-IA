@@ -159,6 +159,7 @@ UI = {
         "mobile_pair_close":     "Close",
         "mobile_pair_help":      "No mobile yet? Download Ashley Mobile (.apk) from your purchase email.",
         "mobile_pair_security_warning": "⚠️ Don't share this QR. Anyone who scans it gets full access to your conversations with Ashley.",
+        "mobile_pair_generic_error": "Could not load mobile pairing info — try again in a moment.",
 
         # News feed (v0.13.3) — Ashley pone aquí sus descubrimientos
         "pill_news":         "News",
@@ -401,6 +402,7 @@ UI = {
         "mobile_pair_close":     "Cerrar",
         "mobile_pair_help":      "¿Aún sin móvil? Descarga Ashley Mobile (.apk) del correo de tu compra.",
         "mobile_pair_security_warning": "⚠️ No compartas este QR. Quien lo escanee tiene acceso total a tus conversaciones con Ashley.",
+        "mobile_pair_generic_error": "No pude cargar la info de emparejamiento — vuelve a intentarlo en un momento.",
 
         # News feed
         "pill_news":         "Noticias",
@@ -637,6 +639,7 @@ UI = {
         "mobile_pair_close":     "Fermer",
         "mobile_pair_help":      "Pas encore de mobile ? Télécharge Ashley Mobile (.apk) depuis l'email d'achat.",
         "mobile_pair_security_warning": "⚠️ Ne partage pas ce QR. Quiconque le scanne accède à toutes tes conversations avec Ashley.",
+        "mobile_pair_generic_error": "Impossible de charger les infos d'appairage — réessaye dans un instant.",
 
         # News feed
         "pill_news":         "Actus",
@@ -885,6 +888,7 @@ UI = {
         "mobile_pair_close":     "閉じる",
         "mobile_pair_help":      "まだモバイルがない?購入メールからAshley Mobile (.apk) をダウンロード。",
         "mobile_pair_security_warning": "⚠️ このQRを共有しないでください。スキャンした人はAshleyとのすべての会話に完全にアクセスできます。",
+        "mobile_pair_generic_error": "ペアリング情報を読み込めませんでした — しばらくしてからもう一度試してください。",
 
         # News feed
         "pill_news":         "ニュース",
@@ -1136,6 +1140,7 @@ UI = {
         "mobile_pair_close":     "Schließen",
         "mobile_pair_help":      "Noch kein Mobil? Lade Ashley Mobile (.apk) aus deiner Kauf-E-Mail.",
         "mobile_pair_security_warning": "⚠️ Teile diesen QR nicht. Wer ihn scannt, bekommt vollen Zugriff auf deine Gespräche mit Ashley.",
+        "mobile_pair_generic_error": "Pairing-Info konnte nicht geladen werden — versuch's gleich nochmal.",
 
         # News feed
         "pill_news":         "News",
@@ -1387,6 +1392,7 @@ UI = {
         "mobile_pair_close":     "Закрыть",
         "mobile_pair_help":      "Ещё нет мобильного? Скачай Ashley Mobile (.apk) из письма о покупке.",
         "mobile_pair_security_warning": "⚠️ Не делись этим QR. Любой, кто отсканирует, получит полный доступ к твоим разговорам с Ashley.",
+        "mobile_pair_generic_error": "Не удалось загрузить инфо о сопряжении — попробуй ещё раз.",
 
         # News feed
         "pill_news":         "Новости",
@@ -1638,6 +1644,7 @@ UI = {
         "mobile_pair_close":     "닫기",
         "mobile_pair_help":      "아직 모바일 없어? 구매 이메일에서 Ashley Mobile (.apk) 다운로드.",
         "mobile_pair_security_warning": "⚠️ 이 QR 공유하지 마. 스캔하는 사람은 Ashley와의 모든 대화에 접근 가능해.",
+        "mobile_pair_generic_error": "페어링 정보를 못 불러왔어 — 잠시 후 다시 시도해.",
 
         # News feed
         "pill_news":         "뉴스",

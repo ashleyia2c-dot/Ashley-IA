@@ -1413,22 +1413,58 @@
       pill.onclick = function () {
         if (installing) return;
         installing = true;
-        pill.textContent = 'Reiniciando...';
+        pill.textContent = _updateMsg('restarting');
         pill.style.cursor = 'wait';
         window.ashleyUpdate.installNow().catch(function (e) {
           console.error('[ashley-update] install failed:', e);
           installing = false;
-          pill.textContent = 'Error al instalar';
+          pill.textContent = _updateMsg('install_failed');
         });
       };
       document.body.appendChild(pill);
       return pill;
     }
 
+    // v0.19.24 - i18n del update notifier. Antes mezclaba EN+ES.
+    var _UPDATE_MSGS = {
+      restarting: {
+        en: 'Restarting...', es: 'Reiniciando...',
+        fr: 'Redemarrage...', ja: '再起動中...',
+        de: 'Neustart...', ru: 'Перезапуск...',
+        ko: '재시작 중...',
+      },
+      install_failed: {
+        en: 'Install failed', es: 'Error al instalar',
+        fr: 'Echec installation', ja: 'インストール失敗',
+        de: 'Installation fehlgeschlagen',
+        ru: 'Ошибка установки',
+        ko: '설치 실패',
+      },
+      ready: {
+        en: '✨ Update{v} ready - click to restart',
+        es: '✨ Update{v} listo - Click para reiniciar',
+        fr: '✨ Mise a jour{v} prete - Cliquez pour redemarrer',
+        ja: '✨ アップデート{v} 準備完了 - クリックで再起動',
+        de: '✨ Update{v} bereit - Klick zum Neustart',
+        ru: '✨ Обновление{v} готово - Клик для перезапуска',
+        ko: '✨ 업데이트{v} 준비됨 - 클릭으로 재시작',
+      },
+    };
+    function _getUpdateLang() {
+      var el = document.getElementById('ashley-voice-state');
+      return (el && el.getAttribute('data-lang')) || 'en';
+    }
+    function _updateMsg(key, version) {
+      var lang = _getUpdateLang();
+      var d = _UPDATE_MSGS[key] || {};
+      var tmpl = d[lang] || d.en || key;
+      return tmpl.replace('{v}', version ? ' v' + version : '');
+    }
+
     window.ashleyUpdate.on('downloaded', function (info) {
       var p = ensurePill();
-      var v = (info && info.version) ? (' v' + info.version) : '';
-      p.textContent = '\u2728 Update' + v + ' listo — Click para reiniciar';
+      var v = (info && info.version) ? info.version : '';
+      p.textContent = _updateMsg('ready', v);
       p.style.display = 'block';
     });
 

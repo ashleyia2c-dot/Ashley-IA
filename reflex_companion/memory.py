@@ -174,7 +174,22 @@ def format_facts(facts: list[dict]) -> str:
     for f in facts:
         cat = f.get("categoria", "general")
         imp = f.get("importancia", "5")
-        by_cat.setdefault(cat, []).append((int(imp), f["hecho"]))
+        # v0.19.24 — E4 fix: si `importancia` viene corrupta (string
+        # textual tipo "alta", o None tras una corruption manual del
+        # JSON, o LLM bug), `int(imp)` tiraba ValueError y crasheaba
+        # TODA la construcción de prompt → cada mensaje del user moría
+        # con _handle_grok_error misleading. Ahora fallback silencioso
+        # a 5 (importancia media), que es el default razonable.
+        try:
+            imp_int = int(imp)
+        except (ValueError, TypeError):
+            import logging
+            logging.getLogger("ashley.memory").warning(
+                "format_facts: importancia corrupta %r en hecho %r → default 5",
+                imp, f.get("hecho", "?")[:40],
+            )
+            imp_int = 5
+        by_cat.setdefault(cat, []).append((imp_int, f["hecho"]))
     lines = []
     for cat, items in by_cat.items():
         lines.append(f"[{cat.upper()}]")
@@ -254,8 +269,24 @@ Devuelve SOLO un array JSON válido, sin texto extra ni bloques de código:
         end = raw.rfind("]") + 1
         raw = raw[start:end] if start != -1 else "[]"
 
+    # v0.19.24 — E3 fix: distinguir JSONDecodeError (silencioso, OK — el
+    # LLM no devolvió JSON válido, no es bug) de Exception general (bug
+    # real que rompía la extracción de facts SILENCIOSAMENTE → la memoria
+    # long-term del user se corrompía sin warning visible). Antes
+    # `except Exception: return []` lo tragaba todo.
     try:
         new_facts = json.loads(raw)
+    except json.JSONDecodeError:
+        # Caso normal — el LLM devolvió texto en vez de JSON
+        return []
+    except Exception as _e:
+        import logging
+        logging.getLogger("ashley.memory").warning(
+            "extract_facts: parse error inesperado: %s (raw=%r)",
+            _e, raw[:200],
+        )
+        return []
+    try:
         if not isinstance(new_facts, list):
             return []
         today = datetime.now().strftime("%Y-%m-%d")
@@ -267,7 +298,12 @@ Devuelve SOLO un array JSON válido, sin texto extra ni bloques de código:
             if "reemplaza" in f and not f["reemplaza"]:
                 del f["reemplaza"]
         return new_facts
-    except Exception:
+    except Exception as _e:
+        import logging
+        logging.getLogger("ashley.memory").warning(
+            "extract_facts: post-parse normalize falló: %s (facts=%r)",
+            _e, new_facts,
+        )
         return []
 
 

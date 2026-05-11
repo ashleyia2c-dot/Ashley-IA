@@ -62,6 +62,36 @@ def _cors_preflight():
 #  Whisper STT (unchanged)
 # ═══════════════════════════════════════════════════════════════════════
 
+# v0.19.24 — mensajes whisper i18n para los 7 idiomas. Antes solo EN/ES.
+_WHISPER_MSGS_ERROR = {
+    "en": "Speech recognition couldn't load. Please restart Ashley.",
+    "es": "El reconocimiento de voz no pudo cargarse. Reinicia Ashley.",
+    "fr": "La reconnaissance vocale n'a pas pu charger. Redémarre Ashley.",
+    "ja": "音声認識を読み込めませんでした。Ashleyを再起動してください。",
+    "de": "Spracherkennung konnte nicht laden. Bitte Ashley neu starten.",
+    "ru": "Распознавание речи не удалось загрузить. Перезапусти Ashley.",
+    "ko": "음성 인식 로드 못 했어. Ashley 재시작해.",
+}
+_WHISPER_MSGS_LOADING = {
+    "en": "Loading speech model from disk... ~10s, only once per session.",
+    "es": "Cargando modelo de voz desde disco... ~10s, solo la primera vez por sesión.",
+    "fr": "Chargement du modèle vocal depuis le disque... ~10s, une seule fois par session.",
+    "ja": "ディスクから音声モデルを読み込み中... ~10秒、セッションで一度だけ。",
+    "de": "Lade Sprachmodell von Disk... ~10s, nur einmal pro Session.",
+    "ru": "Загружаю голосовую модель с диска... ~10с, только раз за сессию.",
+    "ko": "디스크에서 음성 모델 로드 중... ~10초, 세션당 한 번만.",
+}
+_WHISPER_MSGS_DOWNLOAD = {
+    "en": "Downloading speech model (~245 MB)... This only happens once.",
+    "es": "Descargando modelo de voz (~245 MB)... Solo la primera vez.",
+    "fr": "Téléchargement du modèle vocal (~245 Mo)... Une seule fois.",
+    "ja": "音声モデルをダウンロード中(~245 MB)... 一度だけです。",
+    "de": "Lade Sprachmodell herunter (~245 MB)... Nur einmalig.",
+    "ru": "Скачиваю голосовую модель (~245 МБ)... Только один раз.",
+    "ko": "음성 모델 다운로드 중 (~245 MB)... 한 번만 발생해.",
+}
+
+
 async def _transcribe_endpoint(request):
     """POST /api/transcribe — recibe audio binario, devuelve {text}.
     Si el modelo aún no está descargado, devuelve {"status":"downloading"}
@@ -84,29 +114,33 @@ async def _transcribe_endpoint(request):
         # "downloading" eternamente al user.
         if not is_loaded():
             err = load_error()
+            # v0.19.24 — i18n para los 7 idiomas. Antes `message` (EN) +
+            # `message_es` (ES) → fr/ja/de/ru/ko caía a EN. Ahora devolvemos
+            # un dict `messages` con los 7 idiomas + el `message` por
+            # compatibilidad con clientes viejos. Frontend elige según lang.
             if err:
                 return _with_cors(_StarletteJSON({
                     "status": "error",
                     "error": err,
-                    "message": f"Whisper failed to load: {err}",
-                    "message_es": f"Whisper no pudo cargarse: {err}",
+                    "messages": _WHISPER_MSGS_ERROR,
+                    # Compat
+                    "message": _WHISPER_MSGS_ERROR["en"],
+                    "message_es": _WHISPER_MSGS_ERROR["es"],
                 }, status_code=503))
             if not is_loading():
                 warmup()  # iniciar carga en background
-            # v0.16.13 — distinguir "primera descarga real" vs "cargando del
-            # disco a RAM". Antes siempre mostrabamos 'Descargando 245 MB'
-            # aunque el modelo ya estuviera en disco — el user lo veía cada
-            # primera vez por sesión y se frustraba.
             if is_cached_on_disk():
                 return _with_cors(_StarletteJSON({
                     "status": "loading",
-                    "message": "Loading speech model from disk... ~10s, only once per session.",
-                    "message_es": "Cargando modelo de voz desde disco... ~10s, solo la primera vez por sesión.",
+                    "messages": _WHISPER_MSGS_LOADING,
+                    "message": _WHISPER_MSGS_LOADING["en"],
+                    "message_es": _WHISPER_MSGS_LOADING["es"],
                 }))
             return _with_cors(_StarletteJSON({
                 "status": "downloading",
-                "message": "Downloading speech model (~245 MB)... This only happens once.",
-                "message_es": "Descargando modelo de voz (~245 MB)... Solo la primera vez.",
+                "messages": _WHISPER_MSGS_DOWNLOAD,
+                "message": _WHISPER_MSGS_DOWNLOAD["en"],
+                "message_es": _WHISPER_MSGS_DOWNLOAD["es"],
             }))
         text = transcribe_bytes(body, language=lang)
         return _with_cors(_StarletteJSON({"text": text}))
@@ -649,17 +683,67 @@ def _is_rate_limited(token: str) -> bool:
 def _check_mobile_auth(request) -> bool:
     """True si el request lleva el token correcto en X-Ashley-Token Y
     no está rate-limited. Mismo error 401 ambos casos para no leakear
-    a un atacante si su problema es token mal vs rate limit."""
+    a un atacante si su problema es token mal vs rate limit.
+
+    v0.19.24 — además rate-limita por IP los failed attempts para que no
+    se pueda brute-forcear el token a velocidad infinita (antes wrong
+    token no contaba para el rate limit por-token, dejando una ventana
+    abierta — ahora cuenta por client.host).
+    """
     expected = _read_pairing_token()
     given = request.headers.get("x-ashley-token", "").strip()
+    client_ip = request.client.host if request.client else "unknown"
     if not (expected and given == expected):
+        # v0.19.24 — rate-limit los failed attempts por IP. Mismo bucket
+        # que el de tokens (60/min) pero keyed por IP. Sin esto un atacante
+        # podía probar 1M tokens distintos sin throttling porque el rate
+        # limit solo se aplicaba post-validación.
+        ip_bucket_key = f"_failed_ip_{client_ip}"
+        if _is_rate_limited(ip_bucket_key):
+            import logging
+            logging.getLogger("ashley.mobile").warning(
+                "auth brute-force suspect from IP %s (rate limited)", client_ip
+            )
         return False
-    # Token correcto — chequear rate limit
+    # Token correcto — chequear rate limit por token
     if _is_rate_limited(given):
         import logging
         logging.getLogger("ashley.mobile").warning(
             "rate-limit hit (token suffix=...%s)", given[-6:]
         )
+        return False
+    return True
+
+
+def _is_truly_localhost(request) -> bool:
+    """v0.19.24 — chequea localhost REAL, no solo client.host.
+
+    Bug original: cuando Cloudflare tunnel está activo, todos los
+    requests externos llegan al backend desde 127.0.0.1 (porque
+    cloudflared corre local y proxy). Eso bypaseaba `client.host in
+    ("127.0.0.1", ...)` → endpoints "localhost only" eran accesibles
+    via tunnel. Atacante podía pegarle a la URL pública del tunnel y
+    obtener el pairing token sin nada.
+
+    Esta función rechaza si:
+      • client.host no es localhost (caso obvio), O
+      • el request lleva header `cf-connecting-ip` (señal inequívoca
+        de que vino via cloudflared — ese header solo lo añade el
+        proxy de CF cuando reenvía).
+    """
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "localhost", "::1"):
+        return False
+    # cf-connecting-ip = lo añade Cloudflare cuando proxy. Si está
+    # presente, request vino del internet via tunnel — NO es localhost
+    # real aunque el TCP venga de 127.0.0.1.
+    if request.headers.get("cf-connecting-ip"):
+        return False
+    # Defensa adicional: cf-ray, x-forwarded-for de cloudflared también
+    # son señales de proxy. Cualquiera de ellos = not real localhost.
+    if request.headers.get("cf-ray"):
+        return False
+    if request.headers.get("x-forwarded-for"):
         return False
     return True
 
@@ -692,15 +776,16 @@ async def _mobile_status_endpoint(request):
 async def _mobile_pairing_token_endpoint(request):
     """GET /api/mobile/pairing_token — devuelve el token actual.
 
-    SOLO accesible desde localhost — el desktop UI lo muestra al user
-    (con QR code o texto) para que lo introduzca en su móvil. Móvil
-    NO debería llamar este endpoint nunca.
+    SOLO accesible desde localhost REAL (no via tunnel) — el desktop UI
+    lo muestra al user (con QR code o texto) para que lo introduzca en
+    su móvil. Móvil NO debería llamar este endpoint nunca.
+
+    v0.19.24 — usar _is_truly_localhost para bloquear bypass via
+    Cloudflare tunnel (ver C2 en el security audit).
     """
     if request.method == "OPTIONS":
         return _cors_preflight()
-    # Solo localhost — defensa básica
-    client_host = request.client.host if request.client else ""
-    if client_host not in ("127.0.0.1", "localhost", "::1"):
+    if not _is_truly_localhost(request):
         return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
     return _with_cors(_StarletteJSON({"token": _read_pairing_token()}))
 
@@ -790,8 +875,8 @@ async def _mobile_qr_payload_endpoint(request):
     """
     if request.method == "OPTIONS":
         return _cors_preflight()
-    client_host = request.client.host if request.client else ""
-    if client_host not in ("127.0.0.1", "localhost", "::1"):
+    # v0.19.24 — _is_truly_localhost bloquea bypass via tunnel (C2)
+    if not _is_truly_localhost(request):
         return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
 
     lan_ip = _detect_lan_ip()
@@ -827,8 +912,8 @@ async def _mobile_regen_token_endpoint(request):
     """
     if request.method == "OPTIONS":
         return _cors_preflight()
-    client_host = request.client.host if request.client else ""
-    if client_host not in ("127.0.0.1", "localhost", "::1"):
+    # v0.19.24 — _is_truly_localhost bloquea bypass via tunnel (C2)
+    if not _is_truly_localhost(request):
         return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
 
     import os
@@ -975,6 +1060,23 @@ async def _mobile_send_endpoint(request):
     text = (body.get("message") or "").strip()
     if not text:
         return _with_cors(_StarletteJSON({"error": "empty_message"}, status_code=400))
+
+    # v0.19.24 — H2 fix: cap el tamaño del mensaje a 4KB para evitar que
+    # un atacante con token leak (o un móvil pareado malicioso) drene la
+    # cuota xAI del user mandando mensajes de 50KB. 4KB cubre 99% de
+    # mensajes legítimos (chat normal, párrafos largos, screenshots
+    # convertidos a OCR text, etc.) — más que eso es comportamiento abuse.
+    MAX_MOBILE_MSG_CHARS = 4096
+    if len(text) > MAX_MOBILE_MSG_CHARS:
+        import logging
+        logging.getLogger("ashley.mobile").warning(
+            "mobile message rejected (size=%d > %d chars)",
+            len(text), MAX_MOBILE_MSG_CHARS,
+        )
+        return _with_cors(_StarletteJSON(
+            {"error": "message_too_long", "max_chars": MAX_MOBILE_MSG_CHARS},
+            status_code=413,
+        ))
 
     import os
     from datetime import datetime, timezone
@@ -1344,9 +1446,25 @@ async def _export_data_endpoint(request):
     Devuelve:
       Content-Type: application/zip
       Content-Disposition: attachment; filename="ashley-backup-YYYY-MM-DD_HHMM.zip"
+
+    v0.19.24 — SECURITY FIX (CRITICAL): este endpoint estaba SIN
+    autenticación + accesible vía Cloudflare tunnel cuando el móvil
+    estaba ON. Cualquiera que adivinara la URL del tunnel podía bajar
+    TODO el historial intimo del user (chat, facts, diary, mental
+    state, etc.). Ahora requiere localhost REAL (no via tunnel).
+    Como el endpoint solo se llama desde el desktop UI, esto no
+    rompe ningún flujo legítimo.
     """
     if request.method == "OPTIONS":
         return _cors_preflight()
+    if not _is_truly_localhost(request):
+        import logging
+        logging.getLogger("ashley.export").warning(
+            "export blocked: not from real localhost (client=%s, cf-ip=%s)",
+            request.client.host if request.client else "?",
+            request.headers.get("cf-connecting-ip", ""),
+        )
+        return _with_cors(_StarletteJSON({"error": "localhost_only"}, status_code=403))
     try:
         from .export import build_data_zip
         zip_bytes, filename = build_data_zip()
@@ -1363,8 +1481,9 @@ async def _export_data_endpoint(request):
     except Exception as e:
         import logging
         logging.getLogger("ashley.export").exception("export failed: %s", e)
+        # v0.19.24 — no leakear str(e) al cliente (puede tener paths/keys)
         return _with_cors(_StarletteJSON(
-            {"error": f"Export failed: {e}"},
+            {"error": "export_failed"},
             status_code=500,
         ))
 

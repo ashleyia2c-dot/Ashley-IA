@@ -729,7 +729,14 @@ class State(rx.State):
             logging.getLogger("ashley.mobile_pair").warning(
                 "load mobile pair data failed: %s", _e
             )
-            self.mobile_pair_error = str(_e)
+            # v0.19.24 — E8 fix: NO leakear str(_e) al UI. Antes mostraba
+            # paths internos, errno crudo, info técnica al user (e.g.
+            # "[Errno 13] Permission denied: '/path/to/data/dir'"). Ahora
+            # mensaje genérico — el detalle queda en el log para diagnóstico.
+            self.mobile_pair_error = i18n.ui(self.language).get(
+                "mobile_pair_generic_error",
+                "Could not load mobile pairing info — try again.",
+            )
         finally:
             self.mobile_pair_loading = False
 
@@ -757,7 +764,14 @@ class State(rx.State):
             logging.getLogger("ashley.mobile_pair").warning(
                 "regen_token failed: %s", _e
             )
-            self.mobile_pair_error = str(_e)
+            # v0.19.24 — E8 fix: NO leakear str(_e) al UI. Antes mostraba
+            # paths internos, errno crudo, info técnica al user (e.g.
+            # "[Errno 13] Permission denied: '/path/to/data/dir'"). Ahora
+            # mensaje genérico — el detalle queda en el log para diagnóstico.
+            self.mobile_pair_error = i18n.ui(self.language).get(
+                "mobile_pair_generic_error",
+                "Could not load mobile pairing info — try again.",
+            )
         # Refresh para mostrar el nuevo token + nuevo QR (también local)
         self._refresh_mobile_pair_data_local()
         yield
@@ -1323,7 +1337,7 @@ class State(rx.State):
 
         from . import license as lic
         try:
-            ok, friendly_msg = lic.activate_and_store(raw_key)
+            ok, friendly_msg = lic.activate_and_store(raw_key, lang=self.language)
         except ConnectionError:
             self.license_submitting = False
             self.license_error = self.t["license_error_network"]
@@ -1719,7 +1733,23 @@ class State(rx.State):
                 "save_history merge failed (writing self only): %s", _e
             )
 
-        save_json(CHAT_FILE, saveable)
+        # v0.19.24 — E1 fix: el save_json puede tirar OSError (disco lleno,
+        # permission denied tras Defender lock, archivo open en otro
+        # proceso). Antes la excepción burbujeaba hasta el outer try del
+        # send_message, disparaba _handle_grok_error → user veía
+        # "Algo falló con Grok" cuando en realidad fue su disco. Y perdía
+        # el msg porque el handler lo borró del state al "fallar".
+        # Ahora: log + warn pero no rompe el flow. Trade-off: si disco
+        # está lleno, msg vive solo en RAM hasta el siguiente save (o
+        # se pierde al reload). Aceptable porque el user ve el msg en
+        # el chat y puede actuar (vaciar disco antes de cerrar la app).
+        try:
+            save_json(CHAT_FILE, saveable)
+        except OSError as _e:
+            import logging
+            logging.getLogger("ashley").error(
+                "save_history disk write failed (msg solo en RAM): %s", _e
+            )
 
     # ─────────────────────────────────────────
     #  Error handling centralizado
@@ -1728,7 +1758,16 @@ class State(rx.State):
     def _handle_grok_error(self, e: Exception, context: str = ""):
         """Resetea el estado de streaming y añade mensaje de error al chat."""
         label = f" ({context})" if context else ""
-        print(f"[Grok Error{label}] {e}")
+        # v0.19.24 — E2 fix: usar logger en vez de print + sanitizar el
+        # error que se muestra al user. Antes filtrábamos `str(e)` crudo
+        # al chat, lo cual mostraba traces tipo
+        # `HTTPSConnectionPool(host='api.x.ai', port=443)...` y peor —
+        # podía leakear API keys si estaban en el error message del SDK.
+        # Ahora: detalle técnico solo a logger, mensaje genérico al user.
+        import logging
+        logging.getLogger("ashley.grok").error(
+            "Grok error%s: %s", label, e, exc_info=True
+        )
         self.is_thinking = False
         self.current_response = ""
         # Limpia los slots module-level keyed por id(self) — si la excepción
@@ -1739,10 +1778,17 @@ class State(rx.State):
         _TURN_CACHE_BY_STATE.pop(id(self), None)
         ts = now_iso()
         err_template = i18n.ui(self.language)["error_grok"]
+        # Sanitizar str(e): truncar a 80 chars + remover patrones que
+        # parezcan API key (sk-..., grok-..., 32+ chars de [a-zA-Z0-9]).
+        import re as _re
+        err_str = str(e)[:80]
+        err_str = _re.sub(r"\b(sk[-_][A-Za-z0-9_-]{20,}|grok[-_][A-Za-z0-9_-]{20,}|[A-Za-z0-9]{32,})\b",
+                          "[redacted]", err_str)
         self.messages.append({
             "role": "assistant",
-            "content": err_template.format(label=label, err=str(e)),
+            "content": err_template.format(label=label, err=err_str),
             "timestamp": ts, "id": f"e-{ts}", "image": "",
+            "ui_content": "",  # v0.19.23 schema consistency
         })
 
     # ─────────────────────────────────────────
@@ -5351,7 +5397,14 @@ class State(rx.State):
                 async with self:
                     self.is_thinking      = False
                     self.current_response = ""
-                print(f"[Discovery BG Error] {e}")
+                # v0.19.24 — E7 fix: print → logger.warning con stack trace
+                # para que los errores de discovery (e.g. provider mal
+                # configurado, bug en search_web) sean diagnosticables
+                # via stderr/log file en vez de perderse silenciosos.
+                import logging
+                logging.getLogger("ashley.discovery").warning(
+                    "Discovery BG error: %s", e, exc_info=True,
+                )
 
 
     # ─────────────────────────────────────────
@@ -5674,15 +5727,24 @@ def index():
         global_styles(),
 
         # ── Marker invisible para ashley_voice.js ─────────
-        # El JS lee data-lang, data-tts, data-el-key, data-voice-id
+        # El JS lee data-lang, data-tts, data-voice-id
         # y reacciona a sus cambios via MutationObserver.
+        # v0.19.24 — SECURITY: data-el-key removido. Antes la API key
+        # de ElevenLabs en plaintext en el DOM. JS la asignaba a
+        # this.elevenKey pero NUNCA la usaba (todo TTS pasa via
+        # /api/tts en el backend que lee la key de voice.json). Era
+        # leak gratis: extensions, devtools snapshot, screenshot
+        # "inspect element" → key visible. Ahora solo enviamos un flag
+        # booleano por si JS algún día necesita saber que existe.
         rx.box(
             id="ashley-voice-state",
             style={"display": "none"},
             custom_attrs={
                 "data-lang": State.language,
                 "data-tts": State.tts_marker_attr,
-                "data-el-key": State.elevenlabs_key,
+                "data-has-eleven-key": rx.cond(
+                    State.elevenlabs_key != "", "1", "0"
+                ),
                 "data-voice-id": State.voice_id,
                 "data-test-text": State.t["settings_test_text"],
                 "data-backend-port": State.backend_port_marker,

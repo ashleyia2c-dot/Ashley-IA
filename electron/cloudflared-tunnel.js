@@ -268,10 +268,13 @@ async function startTunnel({ localPort, tunnelUrlFile, log, timeoutMs = 30000 } 
     log(`✓ Túnel listo: ${url}`);
 
     // Persistir URL a disco para que el backend Python la lea
+    // v0.19.24 SECURITY — mode 0o600: SOLO el user actual puede leer.
+    // Antes era 0644 (default) → otros users locales del PC podían leer
+    // la URL del tunnel y atacarla. Mismo patrón que main.js usa para key.bin.
     if (tunnelUrlFile) {
       try {
         fs.mkdirSync(path.dirname(tunnelUrlFile), { recursive: true });
-        fs.writeFileSync(tunnelUrlFile, url, 'utf-8');
+        fs.writeFileSync(tunnelUrlFile, url, { encoding: 'utf-8', mode: 0o600 });
       } catch (e) {
         log(`(warn) no pude escribir tunnel_url.txt: ${e.message}`);
       }

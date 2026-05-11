@@ -343,20 +343,21 @@ def test_ensure_valid_on_startup_offline_grace_expired(monkeypatch):
 
 
 def test_friendly_error_unknown_key():
-    msg = lic._friendly_error({"error": "license_keys not found"})
+    # v0.19.24 — usar lang="es" para que el test compruebe el string ES
+    msg = lic._friendly_error({"error": "license_keys not found"}, lang="es")
     assert "no existe" in msg.lower() or "válida" in msg.lower()
 
 
 def test_friendly_error_disabled():
-    msg = lic._friendly_error({"error": "license key has been disabled"})
+    msg = lic._friendly_error({"error": "license key has been disabled"}, lang="es")
     assert "deshabilitada" in msg.lower() or "soporte" in msg.lower()
 
 
 def test_friendly_error_limit_exceeded():
-    msg = lic._friendly_error({"error": "activation limit reached"})
+    msg = lic._friendly_error({"error": "activation limit reached"}, lang="es")
     assert "desactiva" in msg.lower() or "pcs" in msg.lower() or "máximo" in msg.lower()
 
 
 def test_friendly_error_empty_payload_has_fallback():
-    msg = lic._friendly_error({})
+    msg = lic._friendly_error({}, lang="es")
     assert msg  # no vacío

@@ -125,7 +125,7 @@ def test_complete_goal_already_done_returns_empty_noop():
 
 def test_complete_goal_not_found_returns_message():
     goals_mod.add_goal("Real goal")
-    msg = goals_mod.complete_goal("nonexistent")
+    msg = goals_mod.complete_goal("nonexistent", lang="es")
     assert msg != ""
     assert "no encontr" in msg.lower()
 
@@ -154,7 +154,7 @@ def test_check_in_idempotent_within_6h():
 
 def test_check_in_not_found_returns_message():
     goals_mod.add_goal("Real")
-    msg = goals_mod.mark_check_in("nonexistent")
+    msg = goals_mod.mark_check_in("nonexistent", lang="es")
     assert msg != ""
     assert "no encontr" in msg.lower()
 

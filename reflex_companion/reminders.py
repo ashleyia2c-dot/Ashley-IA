@@ -52,10 +52,23 @@ def _save(path: str, data: list) -> None:
 
 
 def _parse_dt(dt_str: str) -> datetime:
-    """Parsea ISO datetime; devuelve datetime.max si no se puede (nunca vence)."""
+    """Parsea ISO datetime; devuelve datetime.max si no se puede (nunca vence).
+
+    v0.19.24 — E5 fix: antes esto fallaba SILENCIOSAMENTE. User pone
+    recordatorio crítico ("recuérdame el meeting con el cliente a las
+    9"), Ashley guarda con timestamp corrupto por bug del LLM, _parse_dt
+    devuelve datetime.max → reminder NUNCA dispara → user llega tarde
+    al meeting. Ahora logueamos warning para que al menos el dev pueda
+    diagnosticar via stderr/log file.
+    """
     try:
         return datetime.fromisoformat(dt_str)
-    except Exception:
+    except (ValueError, TypeError) as _e:
+        import logging
+        logging.getLogger("ashley.reminders").warning(
+            "_parse_dt: timestamp corrupto %r (%s) — reminder NO disparará",
+            dt_str, _e,
+        )
         return datetime.max
 
 
@@ -111,8 +124,9 @@ def load_reminders() -> list[dict]:
     return kept
 
 
-def add_reminder(text: str, dt_iso: str) -> str:
+def add_reminder(text: str, dt_iso: str, lang: str = "en") -> str:
     """Añade un recordatorio. Devuelve mensaje de confirmación."""
+    from .actions import _amsg
     reminders = load_reminders()
     entry = {
         "id": str(uuid.uuid4())[:8],
@@ -123,7 +137,7 @@ def add_reminder(text: str, dt_iso: str) -> str:
     }
     reminders.append(entry)
     _save(REMINDERS_FILE, reminders)
-    return f"Recordatorio guardado: '{text}' para el {_fmt_dt(dt_iso)}."
+    return _amsg(lang, "reminder_saved", text=text, when=_fmt_dt(dt_iso))
 
 
 def get_due_reminders() -> list[dict]:
@@ -148,8 +162,9 @@ def mark_reminder_fired(reminder_id: str) -> None:
     _save(REMINDERS_FILE, reminders)
 
 
-def delete_reminder(text_or_id: str) -> str:
+def delete_reminder(text_or_id: str, lang: str = "en") -> str:
     """Elimina un recordatorio por id o por texto parcial."""
+    from .actions import _amsg
     reminders = load_reminders()
     before = len(reminders)
     reminders = [
@@ -158,8 +173,8 @@ def delete_reminder(text_or_id: str) -> str:
     ]
     if len(reminders) < before:
         _save(REMINDERS_FILE, reminders)
-        return f"Recordatorio '{text_or_id}' eliminado."
-    return f"No encontré recordatorio '{text_or_id}'."
+        return _amsg(lang, "reminder_deleted", text=text_or_id)
+    return _amsg(lang, "reminder_not_found", text=text_or_id)
 
 
 def format_reminders_for_prompt(reminders: list[dict]) -> str:
@@ -179,20 +194,9 @@ def load_important() -> list[dict]:
     return _load(IMPORTANT_FILE)
 
 
-def add_important(text: str, due_date: str | None = None) -> str:
-    """Añade un elemento a la lista de importantes.
-
-    Args:
-        text: descripción del item (lo que el user quiere recordar).
-        due_date: ISO datetime opcional de cuándo vence el evento. Si se
-            provee, se usa para detectar items "stale" tras la fecha y
-            preguntar al user si los limpia.
-
-    Cuando Ashley emite el tag con fecha
-    `[action:add_important:YYYY-MM-DDTHH:MM:texto]`, la action layer
-    parsea la fecha y la pasa aquí. Sin fecha
-    (`[action:add_important:texto]`) sigue funcionando — backward compat.
-    """
+def add_important(text: str, due_date: str | None = None, lang: str = "en") -> str:
+    """Añade un elemento a la lista de importantes."""
+    from .actions import _amsg
     items = load_important()
     entry = {
         "id": str(uuid.uuid4())[:8],
@@ -204,28 +208,13 @@ def add_important(text: str, due_date: str | None = None) -> str:
         entry["due_date"] = due_date
     items.append(entry)
     _save(IMPORTANT_FILE, items)
-    if due_date:
-        return f"Añadido a importantes: '{text}' para {_fmt_dt(due_date)}."
-    return f"Añadido a importantes: '{text}'."
+    when = _fmt_dt(due_date) if due_date else "—"
+    return _amsg(lang, "important_added", text=text, when=when)
 
 
-def mark_important_done(text_or_id: str) -> str:
-    """Marca un importante como hecho por id o texto parcial.
-
-    Returns:
-        - "Marcado como hecho: '<texto>'." si encontró un item PENDIENTE y lo marcó.
-        - "" (string vacío) si el match fue contra un item que YA estaba hecho.
-          Es el "señal de no-op" — el caller debe suprimir notificación.
-        - "No encontré ..." si no hubo ningún match (ni done ni pendiente).
-
-    El string vacío como señal de no-op evita el bug v0.17.2 donde Ashley
-    re-emitía [action:done_important:X] varias veces sobre el mismo item y
-    el user veía 3-4 notificaciones "Marcado como hecho" idénticas.
-
-    Si hay múltiples items que matchean el mismo texto y algunos están
-    done y otros no, marcamos el primer pendiente. Solo devolvemos noop
-    si TODOS los matches estaban ya done.
-    """
+def mark_important_done(text_or_id: str, lang: str = "en") -> str:
+    """Marca un importante como hecho por id o texto parcial."""
+    from .actions import _amsg
     items = load_important()
     saw_done_match = False
     for item in items:
@@ -235,15 +224,13 @@ def mark_important_done(text_or_id: str) -> str:
             continue
         if item.get("done"):
             saw_done_match = True
-            continue  # skip done, busca match pendiente
-        # Primer match pendiente: marca y devuelve
+            continue
         item["done"] = True
         _save(IMPORTANT_FILE, items)
-        return f"Marcado como hecho: '{item['text']}'."
-    # No hubo match pendiente
+        return _amsg(lang, "important_done", text=item["text"])
     if saw_done_match:
-        return ""  # noop signal — caller suprime notificación
-    return f"No encontré '{text_or_id}' en la lista de importantes."
+        return ""  # noop signal
+    return _amsg(lang, "important_not_found", text=text_or_id)
 
 
 def format_important_for_prompt(items: list[dict]) -> str:

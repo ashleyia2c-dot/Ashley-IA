@@ -21,12 +21,13 @@ def _save(path, data):
 def load_tastes() -> list[dict]:
     return _load(TASTES_FILE)
 
-def add_taste(categoria: str, valor: str) -> str:
+def add_taste(categoria: str, valor: str, lang: str = "en") -> str:
+    from .actions import _amsg
     tastes = load_tastes()
     entry = {"id": str(uuid.uuid4())[:8], "categoria": categoria.lower().strip(), "valor": valor.strip(), "created_at": datetime.now().isoformat()}
     tastes.append(entry)
     _save(TASTES_FILE, tastes)
-    return f"Gusto guardado: [{categoria}] {valor}"
+    return _amsg(lang, "taste_saved", cat=categoria, value=valor)
 
 def delete_taste(taste_id: str) -> bool:
     tastes = load_tastes()
@@ -60,7 +61,10 @@ def should_run_discovery(min_hours: float = 1.0) -> bool:
     try:
         elapsed = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 3600
         return elapsed >= min_hours
-    except: return True
+    except (ValueError, TypeError):
+        # v0.19.24 — antes era bare `except:` que tragaba KeyboardInterrupt/
+        # SystemExit. Ahora solo capturamos ValueError/TypeError de parse.
+        return True
 
 def update_discovery_time():
     _save(DISCOVERY_FILE, {"last_run_at": datetime.now().isoformat()})

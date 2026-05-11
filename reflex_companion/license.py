@@ -300,16 +300,19 @@ def is_within_grace_period(last_validated_at: Optional[str], days: int = OFFLINE
 #  Flujo de alto nivel (para el State)
 # ─────────────────────────────────────────────
 
-def activate_and_store(license_key: str) -> tuple[bool, str]:
+def activate_and_store(license_key: str, lang: str = "en") -> tuple[bool, str]:
     """Activa la key y persiste todo. Devuelve (ok, mensaje-user-friendly).
 
     El mensaje está pensado para mostrar directamente al usuario — ya
     traducido a algo comprensible (no el string raw de LS).
+
+    v0.19.24 — acepta `lang` para devolver el mensaje de error en el
+    idioma del user. Antes el mensaje friendly era SIEMPRE ES.
     """
     instance_name = generate_instance_name()
     ok, payload = activate(license_key, instance_name)
     if not ok:
-        return False, _friendly_error(payload)
+        return False, _friendly_error(payload, lang=lang)
 
     instance = payload.get("instance") or {}
     meta = payload.get("meta") or {}
@@ -386,20 +389,90 @@ def ensure_valid_on_startup() -> tuple[bool, str]:
     return False, "license_invalid"
 
 
-def _friendly_error(payload: dict) -> str:
-    """Traduce el error de LS a algo legible para el user."""
+_LICENSE_ERROR_MSGS = {
+    # v0.19.24 — i18n para errores de licencia. Antes era ES-only hardcoded.
+    "empty": {
+        "en": "Couldn't activate the license. Make sure you pasted the full key.",
+        "es": "La licencia no se pudo activar. Verifica que pegaste la key completa.",
+        "fr": "Impossible d'activer la licence. Vérifie que tu as collé la clé complète.",
+        "ja": "ライセンスを有効化できませんでした。キーを完全に貼り付けたか確認してください。",
+        "de": "Lizenz konnte nicht aktiviert werden. Prüfe, ob du den kompletten Key eingefügt hast.",
+        "ru": "Не удалось активировать лицензию. Проверь, что вставил ключ полностью.",
+        "ko": "라이선스 활성화 못 했어. 키 전체 붙여넣었는지 확인해.",
+    },
+    "invalid": {
+        "en": "That license key doesn't exist or is invalid.",
+        "es": "Esa license key no existe o no es válida.",
+        "fr": "Cette clé de licence n'existe pas ou est invalide.",
+        "ja": "そのライセンスキーは存在しないか無効です。",
+        "de": "Dieser Lizenzschlüssel existiert nicht oder ist ungültig.",
+        "ru": "Этот ключ лицензии не существует или недействителен.",
+        "ko": "그 라이선스 키 없거나 유효하지 않아.",
+    },
+    "disabled": {
+        "en": "This license was disabled. Contact support.",
+        "es": "Esta licencia fue deshabilitada. Contacta con soporte.",
+        "fr": "Cette licence a été désactivée. Contacte le support.",
+        "ja": "このライセンスは無効化されました。サポートに連絡してください。",
+        "de": "Diese Lizenz wurde deaktiviert. Wende dich an den Support.",
+        "ru": "Эта лицензия была отключена. Свяжись с поддержкой.",
+        "ko": "이 라이선스 비활성화됐어. 지원에 연락해.",
+    },
+    "limit": {
+        "en": "You've already activated this license on the maximum number of PCs. Deactivate one from another PC before continuing.",
+        "es": "Ya activaste esta licencia en el número máximo de PCs. Desactiva uno desde otro PC antes de continuar.",
+        "fr": "Tu as déjà activé cette licence sur le maximum de PC. Désactive-en un depuis un autre PC avant de continuer.",
+        "ja": "このライセンスは既に最大数のPCで有効化されています。続行する前に別のPCで1つ無効化してください。",
+        "de": "Du hast diese Lizenz bereits auf der maximalen Anzahl von PCs aktiviert. Deaktiviere einen von einem anderen PC, bevor du fortfährst.",
+        "ru": "Ты уже активировал эту лицензию на максимальном количестве ПК. Деактивируй один с другого ПК, чтобы продолжить.",
+        "ko": "이 라이선스 최대 PC 수에 이미 활성화됐어. 계속하려면 다른 PC에서 하나 비활성화해.",
+    },
+    "expired": {
+        "en": "This license has expired.",
+        "es": "Esta licencia ha expirado.",
+        "fr": "Cette licence a expiré.",
+        "ja": "このライセンスは期限切れです。",
+        "de": "Diese Lizenz ist abgelaufen.",
+        "ru": "Срок лицензии истёк.",
+        "ko": "이 라이선스 만료됐어.",
+    },
+    "generic": {
+        "en": "We couldn't activate the license. Please try again or contact support.",
+        "es": "No pudimos activar la licencia. Inténtalo de nuevo o contacta con soporte.",
+        "fr": "Nous n'avons pas pu activer la licence. Réessaie ou contacte le support.",
+        "ja": "ライセンスを有効化できませんでした。もう一度試すかサポートに連絡してください。",
+        "de": "Wir konnten die Lizenz nicht aktivieren. Versuche es erneut oder kontaktiere den Support.",
+        "ru": "Не удалось активировать лицензию. Попробуй снова или свяжись с поддержкой.",
+        "ko": "라이선스 활성화 못 했어. 다시 시도하거나 지원에 연락해.",
+    },
+}
+
+
+def _friendly_error(payload: dict, lang: str = "en") -> str:
+    """Traduce el error de LS a algo legible para el user.
+
+    v0.19.24 — ahora soporta los 7 idiomas. Antes era ES-only y todos
+    los users non-español veían mensajes de error en español.
+    """
+    def _msg(key: str) -> str:
+        d = _LICENSE_ERROR_MSGS.get(key, {})
+        return d.get(lang) or d.get("en") or key
+
     err = (payload.get("error") or "").lower()
     if not err:
-        return "La licencia no se pudo activar. Verifica que pegaste la key completa."
+        return _msg("empty")
     if "not found" in err or "invalid" in err:
-        return "Esa license key no existe o no es válida."
+        return _msg("invalid")
     if "disabled" in err:
-        return "Esta licencia fue deshabilitada. Contacta con soporte."
+        return _msg("disabled")
     if "limit" in err or "maximum" in err:
-        return (
-            "Ya activaste esta licencia en el número máximo de PCs. "
-            "Desactiva uno desde otro PC antes de continuar."
-        )
+        return _msg("limit")
     if "expired" in err:
-        return "Esta licencia ha expirado."
-    return f"No pudimos activar la licencia: {payload.get('error')}"
+        return _msg("expired")
+    # v0.19.24 — antes leakeábamos `payload.get('error')` raw al user.
+    # Ahora msg genérico + log del error real.
+    import logging
+    logging.getLogger("ashley.license").warning(
+        "_friendly_error: unmapped error key: %r", payload.get("error")
+    )
+    return _msg("generic")

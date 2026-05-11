@@ -209,8 +209,9 @@ def test_mark_important_done_returns_empty_on_already_done():
     reminders.add_important("Task X")
     entry = reminders.load_important()[0]
 
-    # Primer call: marca y devuelve mensaje
-    msg1 = reminders.mark_important_done(entry["id"])
+    # Primer call: marca y devuelve mensaje (v0.19.24 — usamos lang=es
+    # explícito para que el test no dependa del default EN tras i18n)
+    msg1 = reminders.mark_important_done(entry["id"], lang="es")
     assert msg1 != "", "Primer call debería devolver mensaje no-vacío"
     assert "hecho" in msg1.lower()
 
@@ -230,30 +231,24 @@ def test_mark_important_done_partial_text_idempotent():
     """Idempotencia también funciona con match parcial por texto."""
     reminders.add_important("Buy groceries on Monday")
 
-    # Marcar primera vez
-    msg1 = reminders.mark_important_done("groceries")
+    # Marcar primera vez — v0.19.24 lang=es para test localizado
+    msg1 = reminders.mark_important_done("groceries", lang="es")
     assert "hecho" in msg1.lower()
 
     # Re-emit: debe ser noop
-    msg2 = reminders.mark_important_done("groceries")
+    msg2 = reminders.mark_important_done("groceries", lang="es")
     assert msg2 == ""
 
     # Y otra forma de match (más texto): también noop
-    msg3 = reminders.mark_important_done("Buy groceries on Monday")
+    msg3 = reminders.mark_important_done("Buy groceries on Monday", lang="es")
     assert msg3 == ""
 
 
 def test_mark_important_done_picks_pending_over_done():
-    """Si hay items done Y pending matching, marca el pending (no devuelve noop).
-
-    Caso edge: usuario tiene "Buy milk" (done de la semana pasada) y
-    crea "Buy milk" otra vez (nuevo). Ashley emite done_important:milk.
-    Esperado: marca el segundo (pendiente), no el primero (done) ni
-    devuelve noop pensando que ya estaba hecho.
-    """
+    """Si hay items done Y pending matching, marca el pending (no devuelve noop)."""
     reminders.add_important("Buy milk")
     first = reminders.load_important()[0]
-    reminders.mark_important_done(first["id"])  # mark first as done
+    reminders.mark_important_done(first["id"], lang="es")  # mark first as done
 
     reminders.add_important("Buy milk")  # second one, pending
     items_after = reminders.load_important()
@@ -262,7 +257,7 @@ def test_mark_important_done_picks_pending_over_done():
     assert items_after[1]["done"] is False
 
     # Now Ashley re-emits done_important:milk → should mark the PENDING one
-    msg = reminders.mark_important_done("milk")
+    msg = reminders.mark_important_done("milk", lang="es")
     assert msg != "", "Debería marcar el pendiente, no devolver noop"
     assert "hecho" in msg.lower()
 
@@ -276,7 +271,7 @@ def test_mark_important_done_not_found_still_returns_not_found():
     """No-match (nada con ese texto) NO debe devolver noop — debe devolver
     el mensaje 'No encontré' para que Ashley sepa que algo va mal."""
     reminders.add_important("Real task")
-    msg = reminders.mark_important_done("totally_unrelated")
+    msg = reminders.mark_important_done("totally_unrelated", lang="es")
     assert msg != "", "No-match no es noop, debería devolver mensaje 'no encontré'"
     assert "no encontr" in msg.lower()
 

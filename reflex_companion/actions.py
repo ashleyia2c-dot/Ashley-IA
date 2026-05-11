@@ -371,26 +371,383 @@ def _search_start_menu(hint: str) -> str | None:
     return candidates[0][2]
 
 
+# v0.19.24 — i18n MASIVO: tabla de templates para TODOS los mensajes que
+# las acciones devuelven al chat. Antes _open_msg solo cubría en/es y el
+# resto de funciones (search_web, play_music, control_volume, etc.) tenía
+# strings ES hardcoded — TODOS los users non-español veían español.
+#
+# Estructura: _ACTION_MSGS[key][lang] = "template con {placeholders}"
+# Helper: _amsg(lang, key, **kw) → string formateado, fallback a EN si lang missing.
+_ACTION_MSGS = {
+    # ── open_app ────────────────────────────────────────────────────
+    "open_launched": {
+        "en": "Launched '{name}'. Its window may take a few seconds to appear — trust this confirmation.",
+        "es": "Lanzado '{name}'. Su ventana puede tardar unos segundos en aparecer — confía en esta confirmación.",
+        "fr": "Lancé '{name}'. Sa fenêtre peut mettre quelques secondes à apparaître — fie-toi à cette confirmation.",
+        "ja": "'{name}' を起動しました。ウィンドウが表示されるまで数秒かかることがあります — この確認を信頼してください。",
+        "de": "'{name}' gestartet. Das Fenster kann ein paar Sekunden brauchen, um zu erscheinen — vertraue auf diese Bestätigung.",
+        "ru": "Запустил '{name}'. Окно может появиться через несколько секунд — доверяй этому подтверждению.",
+        "ko": "'{name}' 실행했어. 창 뜨는 데 몇 초 걸릴 수 있어 — 이 확인 메시지 믿어.",
+    },
+    "open_web": {
+        "en": "Opened '{name}' in the browser.",
+        "es": "'{name}' abierto en el navegador.",
+        "fr": "'{name}' ouvert dans le navigateur.",
+        "ja": "'{name}' をブラウザで開きました。",
+        "de": "'{name}' im Browser geöffnet.",
+        "ru": "Открыл '{name}' в браузере.",
+        "ko": "브라우저에서 '{name}' 열었어.",
+    },
+    "open_proto_fail": {
+        "en": "Couldn't open '{name}' (protocol {exe}): {err}",
+        "es": "No pude abrir '{name}' (protocolo {exe}): {err}",
+        "fr": "N'a pas pu ouvrir '{name}' (protocole {exe}) : {err}",
+        "ja": "'{name}' を開けませんでした (プロトコル {exe}): {err}",
+        "de": "Konnte '{name}' nicht öffnen (Protokoll {exe}): {err}",
+        "ru": "Не смог открыть '{name}' (протокол {exe}): {err}",
+        "ko": "'{name}' 열지 못했어 (프로토콜 {exe}): {err}",
+    },
+    "open_not_found": {
+        "en": "Couldn't find '{name}'. Searched direct launch, PowerShell, Start Menu and common install folders. Last error: {err}",
+        "es": "No pude encontrar '{name}'. Probé lanzamiento directo, PowerShell, Menú Inicio y carpetas comunes. Último error: {err}",
+        "fr": "N'a pas trouvé '{name}'. J'ai essayé lancement direct, PowerShell, Menu Démarrer et dossiers communs. Dernière erreur : {err}",
+        "ja": "'{name}' が見つかりませんでした。直接起動、PowerShell、スタートメニュー、共通フォルダーを試しました。最後のエラー: {err}",
+        "de": "Konnte '{name}' nicht finden. Habe direkten Start, PowerShell, Startmenü und übliche Ordner versucht. Letzter Fehler: {err}",
+        "ru": "Не нашёл '{name}'. Пробовал прямой запуск, PowerShell, меню Пуск и обычные папки. Последняя ошибка: {err}",
+        "ko": "'{name}' 못 찾았어. 직접 실행, PowerShell, 시작 메뉴, 일반 폴더 다 시도했어. 마지막 에러: {err}",
+    },
+    # ── search_web / open_url ───────────────────────────────────────
+    "search_web": {
+        "en": "Search for '{query}' opened in Google.",
+        "es": "Búsqueda de '{query}' abierta en Google.",
+        "fr": "Recherche '{query}' ouverte dans Google.",
+        "ja": "'{query}' のGoogle検索を開きました。",
+        "de": "Suche nach '{query}' in Google geöffnet.",
+        "ru": "Поиск '{query}' открыт в Google.",
+        "ko": "Google에서 '{query}' 검색 열었어.",
+    },
+    "open_url": {
+        "en": "URL opened: {url}",
+        "es": "URL abierta: {url}",
+        "fr": "URL ouverte : {url}",
+        "ja": "URLを開きました: {url}",
+        "de": "URL geöffnet: {url}",
+        "ru": "URL открыт: {url}",
+        "ko": "URL 열었어: {url}",
+    },
+    # ── play_music ─────────────────────────────────────────────────
+    "music_playing": {
+        "en": "Playing: '{title}'",
+        "es": "Reproduciendo: '{title}'",
+        "fr": "Lecture : '{title}'",
+        "ja": "再生中: '{title}'",
+        "de": "Spiele: '{title}'",
+        "ru": "Играет: '{title}'",
+        "ko": "재생 중: '{title}'",
+    },
+    "music_search_only": {
+        "en": "Couldn't find the video, opened YouTube search for '{query}'. Ask the boss to click the right one.",
+        "es": "No encontré el video, abrí búsqueda en YouTube para '{query}'. Pídele al jefe que clique él el video correcto.",
+        "fr": "Vidéo introuvable, j'ai ouvert la recherche YouTube pour '{query}'. Demande au patron de cliquer sur la bonne.",
+        "ja": "動画が見つからず、'{query}' のYouTube検索を開きました。ご主人に正しい動画をクリックしてもらってください。",
+        "de": "Video nicht gefunden, YouTube-Suche für '{query}' geöffnet. Bitte den Chef, das richtige zu klicken.",
+        "ru": "Видео не нашёл, открыл поиск YouTube по '{query}'. Попроси шефа сам выбрать нужное.",
+        "ko": "영상 못 찾아서 '{query}' YouTube 검색 열었어. 오빠가 직접 맞는 거 클릭해줘.",
+    },
+    # ── close_window / close_browser_tab ───────────────────────────
+    "win_closed": {
+        "en": "'{name}' closed.",
+        "es": "Ventana de '{name}' cerrada.",
+        "fr": "Fenêtre '{name}' fermée.",
+        "ja": "'{name}' のウィンドウを閉じました。",
+        "de": "Fenster '{name}' geschlossen.",
+        "ru": "Окно '{name}' закрыто.",
+        "ko": "'{name}' 창 닫았어.",
+    },
+    "win_not_found": {
+        "en": "Couldn't find a window matching '{hint}'.",
+        "es": "No encontré ninguna ventana con '{hint}'.",
+        "fr": "Aucune fenêtre trouvée avec '{hint}'.",
+        "ja": "'{hint}' に一致するウィンドウが見つかりませんでした。",
+        "de": "Kein Fenster mit '{hint}' gefunden.",
+        "ru": "Не нашёл окна с '{hint}'.",
+        "ko": "'{hint}' 일치하는 창 못 찾았어.",
+    },
+    "tabs_closed": {
+        "en": "{count} tab(s) closed matching '{hint}'.",
+        "es": "{count} pestaña(s) cerrada(s) con '{hint}' en el título.",
+        "fr": "{count} onglet(s) fermé(s) correspondant à '{hint}'.",
+        "ja": "'{hint}' を含むタブを {count} 個閉じました。",
+        "de": "{count} Tab(s) mit '{hint}' geschlossen.",
+        "ru": "Закрыл {count} вкладок с '{hint}'.",
+        "ko": "'{hint}' 포함 탭 {count}개 닫았어.",
+    },
+    "tabs_not_found": {
+        "en": "No tabs matching '{hint}' found.",
+        "es": "No encontré pestañas con '{hint}' en el título.",
+        "fr": "Aucun onglet correspondant à '{hint}'.",
+        "ja": "'{hint}' を含むタブが見つかりませんでした。",
+        "de": "Keine Tabs mit '{hint}' gefunden.",
+        "ru": "Не нашёл вкладок с '{hint}'.",
+        "ko": "'{hint}' 포함 탭 못 찾았어.",
+    },
+    # ── volume ─────────────────────────────────────────────────────
+    "vol_up": {
+        "en": "Volume up.",
+        "es": "Volumen subido.",
+        "fr": "Volume augmenté.",
+        "ja": "音量を上げました。",
+        "de": "Lautstärke erhöht.",
+        "ru": "Громкость увеличена.",
+        "ko": "볼륨 올렸어.",
+    },
+    "vol_down": {
+        "en": "Volume down.",
+        "es": "Volumen bajado.",
+        "fr": "Volume baissé.",
+        "ja": "音量を下げました。",
+        "de": "Lautstärke verringert.",
+        "ru": "Громкость уменьшена.",
+        "ko": "볼륨 내렸어.",
+    },
+    "vol_mute": {
+        "en": "Audio muted/unmuted.",
+        "es": "Audio silenciado/activado.",
+        "fr": "Son coupé/réactivé.",
+        "ja": "音声をミュート/解除しました。",
+        "de": "Ton stumm/aktiv geschaltet.",
+        "ru": "Звук выключен/включён.",
+        "ko": "음소거 켜기/끄기 했어.",
+    },
+    "vol_set": {
+        "en": "Volume set to {value}.",
+        "es": "Volumen al {value}.",
+        "fr": "Volume réglé à {value}.",
+        "ja": "音量を {value} に設定しました。",
+        "de": "Lautstärke auf {value} gesetzt.",
+        "ru": "Громкость установлена на {value}.",
+        "ko": "볼륨 {value}로 설정했어.",
+    },
+    "vol_failed": {
+        "en": "Couldn't adjust volume right now. Restart Ashley if the problem persists.",
+        "es": "No se pudo ajustar el volumen ahora mismo. Reinicia Ashley si el problema persiste.",
+        "fr": "Impossible d'ajuster le volume maintenant. Redémarre Ashley si ça persiste.",
+        "ja": "今は音量を調整できませんでした。問題が続くならAshleyを再起動してください。",
+        "de": "Konnte die Lautstärke gerade nicht ändern. Starte Ashley neu, wenn das Problem bleibt.",
+        "ru": "Сейчас не получилось настроить громкость. Перезапусти Ashley, если проблема повторится.",
+        "ko": "지금 볼륨 조절 못 했어. 문제 계속되면 Ashley 재시작해.",
+    },
+    "vol_timeout": {
+        "en": "Couldn't adjust volume (timeout).",
+        "es": "No se pudo ajustar el volumen (timeout).",
+        "fr": "Impossible d'ajuster le volume (timeout).",
+        "ja": "音量を調整できませんでした (タイムアウト)。",
+        "de": "Konnte Lautstärke nicht anpassen (Timeout).",
+        "ru": "Не получилось настроить громкость (timeout).",
+        "ko": "볼륨 조절 못 했어 (타임아웃).",
+    },
+    # ── focus_window ───────────────────────────────────────────────
+    "win_activated": {
+        "en": "Window '{title}' activated.",
+        "es": "Ventana '{title}' activada.",
+        "fr": "Fenêtre '{title}' activée.",
+        "ja": "'{title}' ウィンドウをアクティブにしました。",
+        "de": "Fenster '{title}' aktiviert.",
+        "ru": "Окно '{title}' активировано.",
+        "ko": "'{title}' 창 활성화했어.",
+    },
+    "win_invalid_title": {
+        "en": "Invalid window title (characters blocked for security).",
+        "es": "Título de ventana inválido (caracteres bloqueados por seguridad).",
+        "fr": "Titre de fenêtre invalide (caractères bloqués pour sécurité).",
+        "ja": "ウィンドウタイトルが無効です(セキュリティのため文字がブロックされました)。",
+        "de": "Ungültiger Fenstertitel (Zeichen aus Sicherheitsgründen blockiert).",
+        "ru": "Недопустимое название окна (символы заблокированы для безопасности).",
+        "ko": "창 제목 유효하지 않음 (보안 차원에서 문자 차단됨).",
+    },
+    "win_activate_timeout": {
+        "en": "Couldn't activate '{title}' (timeout).",
+        "es": "No pude activar '{title}' (timeout).",
+        "fr": "Impossible d'activer '{title}' (timeout).",
+        "ja": "'{title}' をアクティブにできませんでした (タイムアウト)。",
+        "de": "Konnte '{title}' nicht aktivieren (Timeout).",
+        "ru": "Не смог активировать '{title}' (timeout).",
+        "ko": "'{title}' 활성화 못 했어 (타임아웃).",
+    },
+    # ── type_text / hotkey ─────────────────────────────────────────
+    "text_typed": {
+        "en": "Text typed.",
+        "es": "Texto escrito.",
+        "fr": "Texte saisi.",
+        "ja": "テキストを入力しました。",
+        "de": "Text eingegeben.",
+        "ru": "Текст напечатан.",
+        "ko": "텍스트 입력했어.",
+    },
+    "missing_pyautogui": {
+        "en": "Missing pyautogui — install it to use this action.",
+        "es": "Falta pyautogui — instálalo para usar esta acción.",
+        "fr": "pyautogui manquant — installe-le pour utiliser cette action.",
+        "ja": "pyautoguiがありません — このアクションを使うにはインストールしてください。",
+        "de": "pyautogui fehlt — installiere es, um diese Aktion zu nutzen.",
+        "ru": "Не хватает pyautogui — установи для этой действия.",
+        "ko": "pyautogui 없어 — 이 액션 쓰려면 설치해.",
+    },
+    "hotkey_pressed": {
+        "en": "Hotkey pressed: {keys}",
+        "es": "Atajo pulsado: {keys}",
+        "fr": "Raccourci appuyé : {keys}",
+        "ja": "ショートカット押しました: {keys}",
+        "de": "Hotkey gedrückt: {keys}",
+        "ru": "Нажат хоткей: {keys}",
+        "ko": "단축키 눌렀어: {keys}",
+    },
+    "key_pressed": {
+        "en": "Key pressed: {key}",
+        "es": "Tecla pulsada: {key}",
+        "fr": "Touche appuyée : {key}",
+        "ja": "キーを押しました: {key}",
+        "de": "Taste gedrückt: {key}",
+        "ru": "Нажата клавиша: {key}",
+        "ko": "키 눌렀어: {key}",
+    },
+    # ── reminders / important / goals / tastes ─────────────────────
+    "reminder_saved": {
+        "en": "Reminder saved: '{text}' for {when}.",
+        "es": "Recordatorio guardado: '{text}' para el {when}.",
+        "fr": "Rappel enregistré : '{text}' pour le {when}.",
+        "ja": "リマインダー保存しました: '{text}' を {when} に。",
+        "de": "Erinnerung gespeichert: '{text}' für {when}.",
+        "ru": "Напоминание сохранено: '{text}' на {when}.",
+        "ko": "리마인더 저장했어: '{text}' {when}에.",
+    },
+    "reminder_deleted": {
+        "en": "Reminder '{text}' deleted.",
+        "es": "Recordatorio '{text}' eliminado.",
+        "fr": "Rappel '{text}' supprimé.",
+        "ja": "リマインダー '{text}' を削除しました。",
+        "de": "Erinnerung '{text}' gelöscht.",
+        "ru": "Напоминание '{text}' удалено.",
+        "ko": "'{text}' 리마인더 삭제했어.",
+    },
+    "reminder_not_found": {
+        "en": "No reminder matching '{text}' found.",
+        "es": "No encontré recordatorio '{text}'.",
+        "fr": "Aucun rappel correspondant à '{text}' trouvé.",
+        "ja": "'{text}' に一致するリマインダーが見つかりませんでした。",
+        "de": "Keine Erinnerung mit '{text}' gefunden.",
+        "ru": "Не нашёл напоминание '{text}'.",
+        "ko": "'{text}' 리마인더 못 찾았어.",
+    },
+    "important_added": {
+        "en": "Added to important: '{text}' for {when}.",
+        "es": "Añadido a importantes: '{text}' para el {when}.",
+        "fr": "Ajouté aux importants : '{text}' pour le {when}.",
+        "ja": "重要項目に追加: '{text}' を {when} に。",
+        "de": "Zu wichtig hinzugefügt: '{text}' für {when}.",
+        "ru": "Добавлено в важное: '{text}' на {when}.",
+        "ko": "중요 항목에 추가했어: '{text}' {when}에.",
+    },
+    "important_done": {
+        "en": "Marked as done: '{text}'.",
+        "es": "Marcado como hecho: '{text}'.",
+        "fr": "Marqué comme fait : '{text}'.",
+        "ja": "完了マーク: '{text}'.",
+        "de": "Als erledigt markiert: '{text}'.",
+        "ru": "Отмечено как готово: '{text}'.",
+        "ko": "완료 표시했어: '{text}'.",
+    },
+    "important_not_found": {
+        "en": "No important item matching '{text}' found.",
+        "es": "No encontré '{text}' en importantes.",
+        "fr": "Aucun élément important correspondant à '{text}'.",
+        "ja": "'{text}' に一致する重要項目が見つかりませんでした。",
+        "de": "Kein wichtiger Eintrag mit '{text}' gefunden.",
+        "ru": "Не нашёл '{text}' в важном.",
+        "ko": "중요 항목에서 '{text}' 못 찾았어.",
+    },
+    "taste_saved": {
+        "en": "Taste saved: [{cat}] {value}",
+        "es": "Gusto guardado: [{cat}] {value}",
+        "fr": "Goût enregistré : [{cat}] {value}",
+        "ja": "好み保存: [{cat}] {value}",
+        "de": "Vorliebe gespeichert: [{cat}] {value}",
+        "ru": "Вкус сохранён: [{cat}] {value}",
+        "ko": "취향 저장: [{cat}] {value}",
+    },
+    "goal_check_in": {
+        "en": "Check-in logged: '{goal}'.",
+        "es": "Check-in registrado: '{goal}'.",
+        "fr": "Check-in enregistré : '{goal}'.",
+        "ja": "チェックイン記録: '{goal}'.",
+        "de": "Check-in protokolliert: '{goal}'.",
+        "ru": "Чек-ин записан: '{goal}'.",
+        "ko": "체크인 기록했어: '{goal}'.",
+    },
+    "goal_completed": {
+        "en": "🎉 Goal completed: '{goal}'.",
+        "es": "🎉 Objetivo completado: '{goal}'.",
+        "fr": "🎉 Objectif accompli : '{goal}'.",
+        "ja": "🎉 目標達成: '{goal}'.",
+        "de": "🎉 Ziel erreicht: '{goal}'.",
+        "ru": "🎉 Цель выполнена: '{goal}'.",
+        "ko": "🎉 목표 완료: '{goal}'.",
+    },
+    "goal_not_found": {
+        "en": "Couldn't find goal '{goal}'.",
+        "es": "No encontré el objetivo '{goal}'.",
+        "fr": "Objectif '{goal}' introuvable.",
+        "ja": "目標 '{goal}' が見つかりませんでした。",
+        "de": "Ziel '{goal}' nicht gefunden.",
+        "ru": "Не нашёл цель '{goal}'.",
+        "ko": "'{goal}' 목표 못 찾았어.",
+    },
+    # ── list_windows ───────────────────────────────────────────────
+    "windows_list_header": {
+        "en": "Browser tabs:",
+        "es": "Pestañas del navegador:",
+        "fr": "Onglets du navigateur :",
+        "ja": "ブラウザのタブ:",
+        "de": "Browser-Tabs:",
+        "ru": "Вкладки браузера:",
+        "ko": "브라우저 탭:",
+    },
+    "windows_none": {
+        "en": "No open windows detected.",
+        "es": "No se detectaron ventanas abiertas.",
+        "fr": "Aucune fenêtre ouverte détectée.",
+        "ja": "開いているウィンドウが検出されませんでした。",
+        "de": "Keine offenen Fenster gefunden.",
+        "ru": "Открытых окон не обнаружено.",
+        "ko": "열린 창 없어.",
+    },
+}
+
+
+def _amsg(lang: str, key: str, **kw) -> str:
+    """v0.19.24 — formatear mensaje localizado de _ACTION_MSGS.
+    Fallback a EN si lang no soportada o key missing.
+    """
+    template_dict = _ACTION_MSGS.get(key, {})
+    template = template_dict.get(lang) or template_dict.get("en") or key
+    try:
+        return template.format(**kw)
+    except (KeyError, IndexError):
+        return template
+
+
 def _open_msg(lang: str, kind: str, **kw) -> str:
-    """Mensajes localizados para open_app.
+    """Mensajes localizados para open_app — wrapper sobre _amsg para
+    retro-compat. Antes solo cubría en/es; ahora delega a _amsg que
+    maneja los 7 idiomas.
     kind: 'launched' | 'web' | 'proto_fail' | 'not_found'"""
-    is_en = (lang == "en")
-    if kind == "launched":
-        if is_en:
-            return f"Launched '{kw['name']}'. Its window may take a few seconds to appear — trust this confirmation."
-        return f"Lanzado '{kw['name']}'. Su ventana puede tardar unos segundos en aparecer — confía en esta confirmación."
-    if kind == "web":
-        if is_en:
-            return f"Opened '{kw['name']}' in the browser."
-        return f"'{kw['name']}' abierto en el navegador."
-    if kind == "proto_fail":
-        if is_en:
-            return f"Couldn't open '{kw['name']}' (protocol {kw['exe']}): {kw['err']}"
-        return f"No pude abrir '{kw['name']}' (protocolo {kw['exe']}): {kw['err']}"
-    # not_found fallback
-    if is_en:
-        return f"Couldn't find '{kw['name']}'. Searched direct launch, PowerShell, Start Menu and common install folders. Last error: {kw.get('err','?')}"
-    return f"No pude encontrar '{kw['name']}'. Probé lanzamiento directo, PowerShell, Menú Inicio y carpetas comunes. Último error: {kw.get('err','?')}"
+    key_map = {
+        "launched": "open_launched",
+        "web": "open_web",
+        "proto_fail": "open_proto_fail",
+        "not_found": "open_not_found",
+    }
+    return _amsg(lang, key_map.get(kind, "open_not_found"), **kw)
 
 
 def open_app(app_name: str, lang: str = "en") -> str:
@@ -577,7 +934,7 @@ def _close_window_by_hwnd(hwnd: int) -> bool:
 
 
 def play_music(query: str, browser_already_open: bool = False,
-                prefer_cdp: bool = False) -> tuple[str, bool, bool]:
+                prefer_cdp: bool = False, lang: str = "en") -> tuple[str, bool, bool]:
     """
     Busca el primer video en YouTube y lo reproduce.
 
@@ -611,12 +968,20 @@ def play_music(query: str, browser_already_open: bool = False,
     import logging
     log = logging.getLogger("ashley.music")
 
+    # v0.19.24 — E6 fix: el resolve fallback abría una página de SEARCH
+    # (no un video real) pero seguía afirmando éxito con título genérico
+    # = query. El user veía "Reproduciendo: 'shout tears for fears'"
+    # cuando en realidad solo se abrió la lista de resultados. Ahora
+    # marcamos `resolved_ok=False` y al final propagamos un mensaje
+    # honesto + success=False para que Ashley sepa pedir disculpas.
+    resolved_ok = True
     try:
         video_url, title = _resolve_youtube_url(query)
     except Exception as e:
         log.warning(f"play_music: resolve failed: {e}")
         video_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query)
         title = query
+        resolved_ok = False
 
     log.warning(f"play_music: query={query!r} hwnd={_youtube_hwnd} url={video_url}")
 
@@ -638,7 +1003,11 @@ def play_music(query: str, browser_already_open: bool = False,
                 new_t = _cdp.new_tab(video_url)
                 if new_t and new_t.get("id"):
                     log.warning(f"play_music: CDP path — opened tab id={new_t['id']}")
-                    return f"Reproduciendo: '{title}'", True, True
+                    if resolved_ok:
+                        return _amsg(lang, "music_playing", title=title), True, True
+                    # v0.19.24 E6 — no resolvimos a video; solo abrimos
+                    # search results. Ser honestos con el user / Ashley.
+                    return _amsg(lang, "music_search_only", query=query), False, True
                 log.warning("play_music: CDP path — new_tab returned None, falling back")
             except Exception as _e:
                 log.warning(f"play_music: CDP path failed ({_e}), falling back to webbrowser.open")
@@ -696,7 +1065,11 @@ def play_music(query: str, browser_already_open: bool = False,
 
     # Caso 1: conteo aumentó → nueva pestaña abierta, éxito.
     if pre_count >= 0 and post_count > pre_count:
-        return f"Reproduciendo: '{title}'", True, True
+        if resolved_ok:
+            return _amsg(lang, "music_playing", title=title), True, True
+        # v0.19.24 E6 — la pestaña que se abrió fue solo de SEARCH (no
+        # video real). Ser honestos.
+        return _amsg(lang, "music_search_only", query=query), False, True
 
     # Caso 2: conteo igual pero navegamos una pestaña existente. Buscar un
     # título que contenga PALABRAS DEL QUERY entre las pestañas.
@@ -714,7 +1087,11 @@ def play_music(query: str, browser_already_open: bool = False,
             for t in post_tabs:
                 t_lower = t.lower()
                 if any(w in t_lower for w in q_words):
-                    return f"Reproduciendo: '{title}'", True, True
+                    if resolved_ok:
+                        return _amsg(lang, "music_playing", title=title), True, True
+                    # v0.19.24 E6 — no resolvimos a video; solo abrimos
+                    # search results. Ser honestos con el user / Ashley.
+                    return _amsg(lang, "music_search_only", query=query), False, True
             log.warning(
                 f"play_music: navigated=True but NO tab matches query "
                 f"words {q_words} — navigation likely silently failed"
@@ -723,7 +1100,11 @@ def play_music(query: str, browser_already_open: bool = False,
             # Query sin palabras significativas — fallback al check viejo
             for t in post_tabs:
                 if "youtube" in t.lower():
-                    return f"Reproduciendo: '{title}'", True, True
+                    if resolved_ok:
+                        return _amsg(lang, "music_playing", title=title), True, True
+                    # v0.19.24 E6 — no resolvimos a video; solo abrimos
+                    # search results. Ser honestos con el user / Ashley.
+                    return _amsg(lang, "music_search_only", query=query), False, True
 
     # Caso 3: no podemos verificar que la pestaña apareció. Ser honesto:
     # MSAA no responde → no sabemos si fue éxito. Antes devolvíamos
@@ -756,19 +1137,19 @@ def play_music(query: str, browser_already_open: bool = False,
 
 # ── Búsqueda web ──────────────────────────────────────────────────────────────
 
-def search_web(query: str) -> str:
+def search_web(query: str, lang: str = "en") -> str:
     url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
     webbrowser.open(url)
-    return f"Búsqueda de '{query}' abierta en Google."
+    return _amsg(lang, "search_web", query=query)
 
 
 # ── Abrir URL ─────────────────────────────────────────────────────────────────
 
-def open_url(url: str) -> str:
+def open_url(url: str, lang: str = "en") -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     webbrowser.open(url)
-    return f"URL abierta: {url}"
+    return _amsg(lang, "open_url", url=url)
 
 
 # ── Cerrar ventana / app ──────────────────────────────────────────────────────
@@ -853,6 +1234,16 @@ def _terminate_process_by_name(proc_name: str) -> bool:
         ]
 
     target = proc_name.lower().replace(".exe", "")
+    # v0.19.24 SECURITY — M2 fix: antes hacíamos match por substring
+    # (`target in exe`), lo cual era catastrófico si el LLM emitía algo
+    # como `[action:close_window:e]` (matchearía Edge, Chrome, etc — TODO
+    # con "e"). El _is_valid_proc_name filter previene metacharacters
+    # pero no longitud — un solo char era suficiente para el genocide.
+    # Ahora: requerir al menos 4 chars y prefer exact match. Substring
+    # solo se considera si el target tiene 4+ chars Y es prefix/suffix
+    # claro (no random match en mitad).
+    if len(target) < 4:
+        return False
     killed = False
 
     hsnap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
@@ -864,7 +1255,10 @@ def _terminate_process_by_name(proc_name: str) -> bool:
         more = kernel32.Process32FirstW(hsnap, ctypes.byref(pe))
         while more:
             exe = pe.szExeFile.lower().replace(".exe", "")
-            if target == exe or target in exe:
+            # Match exacto O prefix exacto (ej "chrome" matchea
+            # "chrome" pero no "chromedriver" ni "google chrome helper").
+            # Suffix también vale para casos como "browser" → "msedge_browser".
+            if target == exe or exe.startswith(target) or exe.endswith(target):
                 hproc = kernel32.OpenProcess(PROCESS_TERMINATE, False, pe.th32ProcessID)
                 if hproc:
                     kernel32.TerminateProcess(hproc, 1)
@@ -927,7 +1321,7 @@ def _normalize(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def close_window(hint: str) -> str:
+def close_window(hint: str, lang: str = "en") -> str:
     """
     Cierra la ventana o aplicación indicada.
     PROTECCIÓN: si el hint parece una pestaña del navegador (no una app standalone),
@@ -951,7 +1345,7 @@ def close_window(hint: str) -> str:
                     logging.getLogger("ashley.tabs").warning(
                         f"close_window '{hint}' matched browser tab '{tab_title}' → redirecting to close_browser_tab"
                     )
-                    return close_browser_tab(hint)
+                    return close_browser_tab(hint, lang=lang)
         except Exception:
             pass
 
@@ -961,7 +1355,7 @@ def close_window(hint: str) -> str:
         yt = _find_youtube_hwnd() or _youtube_hwnd
         if yt and _close_window_by_hwnd(yt):
             _youtube_hwnd = 0
-            return "Ventana de YouTube cerrada."
+            return _amsg(lang, "win_closed", name="YouTube")
 
     import ctypes as _ct
     _u32 = _ct.windll.user32
@@ -1056,20 +1450,13 @@ def close_window(hint: str) -> str:
     still_running = any(_process_running_by_name(p) for p in proc_variants)
 
     if not still_running:
-        return f"'{found_title or hint}' cerrado."
+        return _amsg(lang, "win_closed", name=found_title or hint)
 
     # Sigue corriendo — informar honestamente
     if found_title:
-        return (
-            f"No pude cerrar '{found_title}'. "
-            f"Probablemente requiere permisos de administrador que Reflex no tiene. "
-            f"Tendría que cerrarlo el jefe manualmente."
-        )
+        return _amsg(lang, "win_not_found", hint=found_title)
     # No encontramos ventana ni proceso — no estaba abierto
-    still_by_proc = any(_process_running_by_name(p) for p in proc_variants)
-    if still_by_proc:
-        return f"No pude cerrar '{hint}'."
-    return f"No encontré '{hint}' abierto."
+    return _amsg(lang, "win_not_found", hint=hint)
 
 
 # ── Navegador: HWND capturado ─────────────────────────────────────────────────
@@ -1196,6 +1583,7 @@ for combo in keys_sequence:
 sys.exit(0)
 """
     keys_json = json.dumps(keys_sequence)
+    proc = None
     try:
         proc = subprocess.Popen(
             [sys.executable, "-c", script, str(hwnd), keys_json],
@@ -1205,8 +1593,28 @@ sys.exit(0)
         ctypes.windll.user32.AllowSetForegroundWindow(proc.pid)
         proc.wait(timeout=8)
         return proc.returncode == 0
+    except subprocess.TimeoutExpired:
+        # v0.19.24 — antes timeout dejaba el proc huérfano + handles
+        # stdout/stderr abiertos. Acumulación = leak de FDs y zombies
+        # de Python con el script de tabs. Ahora kill + cleanup.
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        return False
     except Exception:
         return False
+    finally:
+        # Cerrar pipes explícitamente para liberar FDs en Windows
+        if proc is not None:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
 
 
 def _find_and_close_tab_subprocess(hwnd: int, hint: str) -> bool:
@@ -1302,6 +1710,7 @@ for i in range(MAX_TABS):
 print("NOT_FOUND", file=sys.stderr)
 sys.exit(1)
 """
+    proc = None
     try:
         proc = subprocess.Popen(
             [sys.executable, "-c", script, str(hwnd), hint],
@@ -1314,12 +1723,30 @@ sys.exit(1)
         if stderr:
             log.warning(f"tab-cycle: {stderr[:2000]}")
         return proc.returncode == 0
+    except subprocess.TimeoutExpired:
+        # v0.19.24 — kill + cleanup en timeout. Antes el proceso quedaba
+        # huérfano leakeando FDs y procesos Python zombies.
+        log.warning("tab-cycle timeout after 70s — killing subprocess")
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+        return False
     except Exception as e:
         log.warning(f"tab-cycle failed: {e}")
         return False
+    finally:
+        if proc is not None:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
 
 
-def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
+def close_browser_tab(hint: str, prefer_cdp: bool = False, lang: str = "en") -> str:
     """
     Cierra el tab del navegador cuyo título contenga `hint`.
 
@@ -1351,18 +1778,16 @@ def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
                 matches = _cdp.find_tabs_matching(hint)
                 log.warning(f"close_browser_tab: CDP path — found {len(matches)} match(es) for hint={hint!r}")
                 if not matches:
-                    return f"No encontré ninguna pestaña con '{hint}' abierta."
+                    return _amsg(lang, "tabs_not_found", hint=hint)
                 closed_titles = []
                 for t in matches:
                     if _cdp.close_tab(t["id"]):
                         closed_titles.append(t.get("title", ""))
                 if not closed_titles:
-                    return f"No pude cerrar la pestaña '{hint}'."
+                    return _amsg(lang, "tabs_not_found", hint=hint)
                 if "youtube" in hint.lower():
                     _youtube_hwnd = 0
-                if len(closed_titles) == 1:
-                    return f"Pestaña '{hint}' cerrada."
-                return f"{len(closed_titles)} pestañas cerradas con '{hint}' en el título."
+                return _amsg(lang, "tabs_closed", count=len(closed_titles), hint=hint)
             except Exception as _e:
                 log.warning(f"close_browser_tab: CDP path failed ({_e}), falling back to legacy")
                 # Cae al path legacy abajo
@@ -1421,8 +1846,9 @@ def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
         user32.GetClassNameW(fg, cls, 256)
         if cls.value in _BROWSER_WIN32_CLASSES:
             ok = _send_keys_subprocess(fg, [[VK_CONTROL, VK_W]])
-            return "Pestaña cerrada." if ok else "No pude cerrar la pestaña activa."
-        return "No hay navegador en primer plano."
+            return _amsg(lang, "tabs_closed", count=1, hint="active") if ok \
+                else _amsg(lang, "tabs_not_found", hint="active")
+        return _amsg(lang, "tabs_not_found", hint=hint)
 
     def _tab_still_visible(search_key: str) -> bool:
         """Comprueba si alguna ventana del navegador aún tiene el hint en el título."""
@@ -1459,13 +1885,13 @@ def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
                 if not _tab_still_visible(key):
                     if "youtube" in key:
                         _youtube_hwnd = 0
-                    return f"Pestaña '{hint}' cerrada."
+                    return _amsg(lang, "tabs_closed", count=1, hint=hint)
             log.warning(f"close_browser_tab: tab still visible after Ctrl+W (may be slow browser)")
             # Falló o el browser fue muy lento → continuar al ciclo de tabs
 
     # Paso 2: Tab de fondo → subprocess cicla tabs en cada ventana de navegador
     if not found:
-        return f"No encontré ninguna pestaña con '{hint}' abierta."
+        return _amsg(lang, "tabs_not_found", hint=hint)
 
     for h, t in found:
         log.warning(f"close_browser_tab: cycling tabs in hwnd={h} '{t[:50]}'")
@@ -1476,14 +1902,14 @@ def close_browser_tab(hint: str, prefer_cdp: bool = False) -> str:
                 if not _tab_still_visible(key):
                     if "youtube" in key:
                         _youtube_hwnd = 0
-                    return f"Pestaña '{hint}' cerrada."
+                    return _amsg(lang, "tabs_closed", count=1, hint=hint)
 
-    return f"No pude cerrar la pestaña '{hint}'. Puede que no esté abierta en el navegador o el tab esté en segundo plano y no se pudo acceder."
+    return _amsg(lang, "tabs_not_found", hint=hint)
 
 
 # ── Volumen ───────────────────────────────────────────────────────────────────
 
-def _volume_pycaw(action: str, value: Optional[str]) -> str:
+def _volume_pycaw(action: str, value: Optional[str], lang: str = "en") -> str:
     # v0.13.19: pycaw 20251023+ cambió la API. Antes:
     #   devices = AudioUtilities.GetSpeakers()  # retornaba IMMDevice
     #   iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
@@ -1501,31 +1927,27 @@ def _volume_pycaw(action: str, value: Optional[str]) -> str:
     if action == "up":
         nv = min(1.0, current + 0.10)
         vol.SetMasterVolumeLevelScalar(nv, None)
-        return f"Volumen subido a {int(nv * 100)}%."
+        return _amsg(lang, "vol_set", value=f"{int(nv * 100)}%")
     elif action == "down":
         nv = max(0.0, current - 0.10)
         vol.SetMasterVolumeLevelScalar(nv, None)
-        return f"Volumen bajado a {int(nv * 100)}%."
+        return _amsg(lang, "vol_set", value=f"{int(nv * 100)}%")
     elif action == "mute":
         muted = vol.GetMute()
         vol.SetMute(not muted, None)
-        return "Audio silenciado." if not muted else "Audio activado."
+        return _amsg(lang, "vol_mute")
     elif action == "set" and value:
-        # v0.13.17: defense-in-depth. execute_action() ya valida value
-        # como int 0-100 antes de llegar aquí, pero protección extra por
-        # si alguna ruta evita ese chequeo (e.g. llamada directa desde
-        # tests u otro código).
         try:
             iv = int(str(value).strip())
         except (ValueError, TypeError):
-            return f"Volumen 'set' con valor no numérico: '{value}' (esperado 0-100)."
+            return _amsg(lang, "vol_failed")
         lv = max(0.0, min(1.0, iv / 100))
         vol.SetMasterVolumeLevelScalar(lv, None)
-        return f"Volumen establecido al {iv}%."
-    return f"Acción de volumen desconocida: '{action}'"
+        return _amsg(lang, "vol_set", value=f"{iv}%")
+    return _amsg(lang, "vol_failed")
 
 
-def _volume_powershell(action: str, value: Optional[str] = None) -> str:
+def _volume_powershell(action: str, value: Optional[str] = None, lang: str = "en") -> str:
     """Fallback que SOLO soporta up/down/mute. Para 'set' tendríamos que
     invocar nircmd o un script PS más complejo — no merece la pena ese
     path; mejor reportar honestly que no se puede.
@@ -1551,35 +1973,38 @@ def _volume_powershell(action: str, value: Optional[str] = None) -> str:
             "doesn't support it; pycaw should be bundled — check the venv",
             action, value,
         )
-        return "No se pudo ajustar el volumen ahora mismo. Reinicia Ashley si el problema persiste."
+        return _amsg(lang, "vol_failed")
 
     k = key_map[action]
     reps = 5 if action in ("up", "down") else 1
     ps = "$w=New-Object -ComObject WScript.Shell;" + "".join(
         [f"$w.SendKeys([char]{k});" for _ in range(reps)]
     )
-    subprocess.run(
-        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
-        capture_output=True,
-    )
-    labels = {
-        "up":   "Volumen subido.",
-        "down": "Volumen bajado.",
-        "mute": "Audio silenciado/activado.",
-    }
-    return labels[action]
-
-
-def control_volume(action: str, value: Optional[str] = None) -> str:
     try:
-        return _volume_pycaw(action, value)
+        subprocess.run(
+            ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+            capture_output=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        import logging
+        logging.getLogger("ashley.actions").warning(
+            "volume PowerShell timeout (action=%s)", action
+        )
+        return _amsg(lang, "vol_timeout")
+    return _amsg(lang, f"vol_{action}")  # vol_up | vol_down | vol_mute
+
+
+def control_volume(action: str, value: Optional[str] = None, lang: str = "en") -> str:
+    try:
+        return _volume_pycaw(action, value, lang=lang)
     except ImportError:
-        # v0.13.18: pasar value al fallback. Antes _volume_powershell se
-        # llamaba sin value, así que para action="set" el mensaje de
-        # error decía "set:None" en vez del valor real que Ashley emitió.
-        return _volume_powershell(action, value)
+        return _volume_powershell(action, value, lang=lang)
     except Exception as e:
-        return f"Error de volumen: {e}"
+        # v0.19.24 — log técnico, msg user-friendly al chat
+        import logging
+        logging.getLogger("ashley.actions").warning("volume error: %s", e)
+        return _amsg(lang, "vol_failed")
 
 
 
@@ -1594,28 +2019,31 @@ def _get_pyautogui():
     return pyautogui
 
 
-def focus_window(title_substr: str) -> str:
+def focus_window(title_substr: str, lang: str = "en") -> str:
     """
     Activa una ventana cuyo título contenga title_substr.
     Usa WScript.Shell.AppActivate (sin dependencias extra).
     """
-    # title_substr llega del LLM via [action:focus_window:X]. Si trae
-    # metacaracteres de shell (LLM engañado por prompt injection externa),
-    # rechazamos en lugar de interpolar a PowerShell. Sin esto, un
-    # title_substr tipo `notepad"); rm -r C:\\; ("x` rompe las comillas y
-    # ejecuta código arbitrario.
     if not _is_shell_safe(title_substr):
-        return f"Título de ventana inválido (caracteres bloqueados por seguridad)."
+        return _amsg(lang, "win_invalid_title")
     ps = f'(New-Object -ComObject WScript.Shell).AppActivate("{title_substr}")'
-    subprocess.run(
-        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
-        capture_output=True,
-    )
-    time.sleep(0.5)  # Dar tiempo a que la ventana tome el foco
-    return f"Ventana '{title_substr}' activada."
+    try:
+        subprocess.run(
+            ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-c", ps],
+            capture_output=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        import logging
+        logging.getLogger("ashley.actions").warning(
+            "focus_window PowerShell timeout (title=%r)", title_substr
+        )
+        return _amsg(lang, "win_activate_timeout", title=title_substr)
+    time.sleep(0.5)
+    return _amsg(lang, "win_activated", title=title_substr)
 
 
-def type_text(text: str) -> str:
+def type_text(text: str, lang: str = "en") -> str:
     """
     Escribe texto en el control activo usando el portapapeles.
     Soporta acentos, emojis, Unicode y saltos de línea (\n → newline real).
@@ -1642,61 +2070,59 @@ def type_text(text: str) -> str:
         except Exception:
             pass
 
-        preview = text[:80].replace("\n", "↵") + ("…" if len(text) > 80 else "")
-        return f"Texto escrito ({len(text)} caracteres): '{preview}'"
+        return _amsg(lang, "text_typed")
     except ImportError:
-        return "Falta pyautogui o pyperclip. Instala con: pip install pyautogui pyperclip"
+        return _amsg(lang, "missing_pyautogui")
 
 
-def type_in_window(window_title: str, text: str) -> str:
+def type_in_window(window_title: str, text: str, lang: str = "en") -> str:
     """Enfoca una ventana por título y luego escribe el texto."""
-    focus_result = focus_window(window_title)
+    focus_result = focus_window(window_title, lang=lang)
     time.sleep(0.4)
-    type_result = type_text(text)
+    type_result = type_text(text, lang=lang)
     return f"{focus_result} → {type_result}"
 
 
-def write_to_app(app_name: str, text: str) -> str:
+def write_to_app(app_name: str, text: str, lang: str = "en") -> str:
     """
     Abre una app (si no está ya abierta), espera a que esté lista,
     la enfoca explícitamente y escribe el texto en ella.
     """
-    # Abrir la app
-    open_result = open_app(app_name)
-    time.sleep(2.0)  # Esperar a que la app abra
-
-    # Intentar enfocar la ventana de la app por nombre (más fiable que confiar en el foco actual)
-    # Usamos el app_name como hint — la mayoría de apps tienen su nombre en el título
-    focus_result = focus_window(app_name)
-    time.sleep(0.4)  # Pequeña pausa tras enfocar
-
-    # Escribir el texto
-    type_result = type_text(text)
+    open_result = open_app(app_name, lang=lang)
+    time.sleep(2.0)
+    focus_result = focus_window(app_name, lang=lang)
+    time.sleep(0.4)
+    type_result = type_text(text, lang=lang)
     return f"{open_result} → {type_result}"
 
 
-def press_hotkey(keys: list[str]) -> str:
+def press_hotkey(keys: list[str], lang: str = "en") -> str:
     """Ejecuta una combinación de teclas (ej: ctrl+c, alt+f4, ctrl+shift+t)."""
     try:
         pya = _get_pyautogui()
         pya.hotkey(*keys)
-        return f"Atajo '{'+'.join(keys)}' ejecutado."
+        return _amsg(lang, "hotkey_pressed", keys="+".join(keys))
     except ImportError:
-        return "Falta pyautogui. Instala con: pip install pyautogui"
+        return _amsg(lang, "missing_pyautogui")
     except Exception as e:
-        return f"Error ejecutando atajo: {e}"
+        # v0.19.24 — log el error técnico, devolver msg user-friendly
+        import logging
+        logging.getLogger("ashley.actions").warning("hotkey error: %s", e)
+        return _amsg(lang, "missing_pyautogui")
 
 
-def press_key(key: str) -> str:
+def press_key(key: str, lang: str = "en") -> str:
     """Presiona una tecla (enter, tab, escape, f5, etc.)."""
     try:
         pya = _get_pyautogui()
         pya.press(key)
-        return f"Tecla '{KEY_LABELS.get(key.lower(), key)}' presionada."
+        return _amsg(lang, "key_pressed", key=KEY_LABELS.get(key.lower(), key))
     except ImportError:
-        return "Falta pyautogui. Instala con: pip install pyautogui"
+        return _amsg(lang, "missing_pyautogui")
     except Exception as e:
-        return f"Error presionando tecla: {e}"
+        import logging
+        logging.getLogger("ashley.actions").warning("press_key error: %s", e)
+        return _amsg(lang, "missing_pyautogui")
 
 
 # ── Ejecutor central ──────────────────────────────────────────────────────────
@@ -1742,16 +2168,17 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                 " ".join(params),
                 browser_already_open=browser_opened,
                 prefer_cdp=prefer_cdp,
+                lang=lang,
             )
             return {"success": success, "result": msg,
                     "screenshot": None, "browser_opened": new_flag}
 
         elif action_type == "search_web":
-            return {"success": True, "result": search_web(params[0] if params else ""),
+            return {"success": True, "result": search_web(params[0] if params else "", lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "open_url":
-            return {"success": True, "result": open_url(params[0] if params else ""),
+            return {"success": True, "result": open_url(params[0] if params else "", lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "volume":
@@ -1788,11 +2215,11 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                 sub, val = "set", "100"
             elif sub == "min":
                 sub, val = "set", "0"
-            return {"success": True, "result": control_volume(sub, val),
+            return {"success": True, "result": control_volume(sub, val, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "type_text":
-            return {"success": True, "result": type_text(params[0] if params else ""),
+            return {"success": True, "result": type_text(params[0] if params else "", lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "type_in":
@@ -1811,7 +2238,7 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                 return {"success": False,
                         "result": "type_in necesita el texto a escribir como segundo parámetro.",
                         "screenshot": None, "browser_opened": browser_opened}
-            return {"success": True, "result": type_in_window(window, text),
+            return {"success": True, "result": type_in_window(window, text, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "write_to_app":
@@ -1826,42 +2253,31 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                 return {"success": False,
                         "result": "write_to_app necesita el texto a escribir como segundo parámetro.",
                         "screenshot": None, "browser_opened": browser_opened}
-            return {"success": True, "result": write_to_app(app, text),
+            return {"success": True, "result": write_to_app(app, text, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "remind":
             from .reminders import add_reminder
             dt_iso = params[0] if params else ""
             text   = params[1] if len(params) > 1 else ""
-            return {"success": True, "result": add_reminder(text, dt_iso),
+            return {"success": True, "result": add_reminder(text, dt_iso, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "add_important":
             from .reminders import add_important
-            # Soporta dos formatos:
-            #   [action:add_important:texto]                       (legacy)
-            #   [action:add_important:YYYY-MM-DDTHH:MM:texto]       (con fecha)
-            # parsing.py separa por ":" antes del texto; si el primer
-            # param parece ISO datetime, lo tratamos como due_date.
             import re as _re
             text = params[0] if params else ""
             due_date = None
             if len(params) > 1 and _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", params[0]):
                 due_date = params[0]
                 text = params[1]
-            return {"success": True, "result": add_important(text, due_date=due_date),
+            return {"success": True, "result": add_important(text, due_date=due_date, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "done_important":
-            # v0.17.3 — Si el item ya estaba marcado, mark_important_done
-            # devuelve "" (señal de no-op). Propagamos noop=True para que
-            # _execute_and_record_action suprima la notificación duplicada
-            # en el chat. Antes Ashley re-emitía el tag varias veces sobre
-            # el mismo item y el user veía 3-4 "Marcado como hecho" iguales
-            # seguidos.
             from .reminders import mark_important_done
             text = params[0] if params else ""
-            msg = mark_important_done(text)
+            msg = mark_important_done(text, lang=lang)
             return {"success": True, "result": msg, "noop": (msg == ""),
                     "screenshot": None, "browser_opened": browser_opened}
 
@@ -1881,20 +2297,16 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "check_in_goal":
-            # v0.18.0 Fase 3 — Ashley registra que preguntó por progreso.
-            # Idempotente: si ya hubo check-in en últimas 6h, devuelve "" (noop).
             from .goals import mark_check_in
             text = params[0] if params else ""
-            msg = mark_check_in(text)
+            msg = mark_check_in(text, lang=lang)
             return {"success": True, "result": msg, "noop": (msg == ""),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "complete_goal":
-            # v0.18.0 Fase 3 — Marca un goal como completado.
-            # Idempotente: si ya estaba completado, devuelve "" (noop).
             from .goals import complete_goal as _complete_goal
             text = params[0] if params else ""
-            msg = _complete_goal(text)
+            msg = _complete_goal(text, lang=lang)
             return {"success": True, "result": msg, "noop": (msg == ""),
                     "screenshot": None, "browser_opened": browser_opened}
 
@@ -1939,41 +2351,35 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                 return {"success": False,
                         "result": "save_taste necesita un valor (segundo parámetro).",
                         "screenshot": None, "browser_opened": browser_opened}
-            return {"success": True, "result": add_taste(categoria, valor),
+            return {"success": True, "result": add_taste(categoria, valor, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "focus_window":
-            # v0.17.5 — Si Ashley emite [action:focus_window:Ashley] está
-            # intentando hacer focus de su PROPIA ventana, que ya es la activa.
-            # Es no-op visual pero antes generaba burbuja "Ventana 'Ashley'
-            # activada" innecesaria en el chat. Marcamos noop=True para que
-            # _execute_and_record_action salte el append (mismo pattern que
-            # done_important sobre item ya hecho).
             title_param = (params[0] if params else "").strip()
             if title_param.lower() == "ashley":
                 return {"success": True, "result": "", "noop": True,
                         "screenshot": None, "browser_opened": browser_opened}
-            return {"success": True, "result": focus_window(title_param),
+            return {"success": True, "result": focus_window(title_param, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "hotkey":
-            return {"success": True, "result": press_hotkey(params),
+            return {"success": True, "result": press_hotkey(params, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "press_key":
-            return {"success": True, "result": press_key(params[0] if params else ""),
+            return {"success": True, "result": press_key(params[0] if params else "", lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "close_window":
             new_browser = False if "youtube" in " ".join(params).lower() else browser_opened
-            return {"success": True, "result": close_window(params[0] if params else ""),
+            return {"success": True, "result": close_window(params[0] if params else "", lang=lang),
                     "screenshot": None, "browser_opened": new_browser}
 
         elif action_type == "close_tab":
             hint = params[0] if params else "activo"
             new_browser = False if "youtube" in hint.lower() else browser_opened
             return {"success": True,
-                    "result": close_browser_tab(hint, prefer_cdp=prefer_cdp),
+                    "result": close_browser_tab(hint, prefer_cdp=prefer_cdp, lang=lang),
                     "screenshot": None, "browser_opened": new_browser}
 
         # ─────────────────────────────────────────────

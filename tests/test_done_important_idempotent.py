@@ -92,7 +92,9 @@ def test_execute_action_done_important_unknown_item_not_noop():
     """Item desconocido: NO es noop — muestra 'No encontré' al user."""
     reminders.add_important("Real task")
 
-    result = execute_action("done_important", ["totally_unrelated"])
+    # v0.19.24 — execute_action ahora soporta lang param. Test usa "es"
+    # para verificar el string ES del mensaje "no encontré".
+    result = execute_action("done_important", ["totally_unrelated"], lang="es")
     assert result["success"] is True
     assert result["result"] != ""
     assert "no encontr" in result["result"].lower()

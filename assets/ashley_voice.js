@@ -22,7 +22,11 @@
     // ─── State ──────────────────────────────────────────────
     lang: 'en',
     ttsEnabled: false,
-    elevenKey: '',
+    // v0.19.24 SECURITY: la API key de ElevenLabs YA NO viaja al DOM.
+    // Antes data-el-key la exponía en plaintext sin razón (no se usaba
+    // en JS, todo TTS pasa por /api/tts que tiene la key server-side).
+    // hasElevenKey solo informa si está configurada, sin leakear el valor.
+    hasElevenKey: false,
     voiceId: ELEVEN_DEFAULT_VOICE,
     // v0.12: voice provider — 'webspeech' (default) | 'elevenlabs' | 'kokoro' | 'voicevox'
     // Everything except webspeech is handled server-side via /api/tts;
@@ -64,8 +68,28 @@
       try { alert(msg); } catch {}
     },
 
-    _i18n(enMsg, esMsg) {
-      return this.lang === 'es' ? esMsg : enMsg;
+    // v0.19.24 — antes solo cubría EN/ES. Ahora soporta los 7 idiomas
+    // con un dict opcional. Llamadas legacy con (enMsg, esMsg) siguen
+    // funcionando — caen al fallback de EN para los otros 5 idiomas.
+    _i18n(enMsg, esMsg, extras) {
+      // Backward compat: 2-arg call → solo EN/ES
+      if (!extras || typeof extras !== 'object') {
+        return this.lang === 'es' ? esMsg : enMsg;
+      }
+      // Modo nuevo: dict completo con los 7 idiomas
+      // extras = {fr: '...', ja: '...', de: '...', ru: '...', ko: '...'}
+      if (extras[this.lang]) return extras[this.lang];
+      if (this.lang === 'es') return esMsg;
+      return enMsg;
+    },
+
+    // v0.19.24 — helper para leer la lista de mensajes del backend
+    // (whisper_status response devuelve `messages: {en,es,fr,...}`).
+    _pickI18nMsg(obj) {
+      if (!obj || typeof obj !== 'object') return '';
+      if (obj[this.lang]) return obj[this.lang];
+      if (obj.en) return obj.en;
+      return '';
     },
 
     // ─── STT — MediaRecorder + Whisper local ────────────────
@@ -365,23 +389,39 @@
         // Antes solo había 'downloading' aunque el modelo ya estuviera
         // descargado, lo que confundía al user en cada primera vez por sesión.
         if (data.status === 'downloading' || data.status === 'loading') {
-          const msg = this._i18n(
-            data.message || (data.status === 'loading' ? 'Loading...' : 'Downloading...'),
-            data.message_es || (data.status === 'loading' ? 'Cargando...' : 'Descargando...'),
-          );
+          // v0.19.24 — prefer i18n dict del backend si está, sino fallback EN/ES
+          const msg = this._pickI18nMsg(data.messages)
+            || this._i18n(
+              data.message || (data.status === 'loading' ? 'Loading...' : 'Downloading...'),
+              data.message_es || (data.status === 'loading' ? 'Cargando...' : 'Descargando...'),
+            );
           this._showDownloadBanner(msg);
           log('Model ' + data.status + ' — polling /api/whisper/status until ready...');
           const ready = await this._waitForModelReady();
           this._hideDownloadBanner();
           if (ready) {
             log('Model ready — retrying transcription');
-            return this._transcribe(blob);  // reintentar con el audio original
+            return this._transcribe(blob);
           } else {
+            // v0.19.24 — extras dict cubre los 5 idiomas no-EN/ES
             this._alert(this._i18n(
               'Model ' + data.status + ' failed or timed out. Please restart Ashley and try again.',
               (data.status === 'loading'
                 ? 'La carga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.'
-                : 'La descarga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.')
+                : 'La descarga del modelo falló o tardó demasiado. Reinicia Ashley e intenta otra vez.'),
+              data.status === 'loading' ? {
+                fr: 'Le chargement du modèle a échoué ou pris trop de temps. Redémarre Ashley.',
+                ja: 'モデルの読み込みが失敗またはタイムアウトしました。Ashleyを再起動してください。',
+                de: 'Modellladen fehlgeschlagen oder Timeout. Bitte Ashley neu starten.',
+                ru: 'Загрузка модели не удалась или превысила лимит. Перезапусти Ashley.',
+                ko: '모델 로드 실패 또는 타임아웃. Ashley 재시작해.',
+              } : {
+                fr: 'Le téléchargement du modèle a échoué ou pris trop de temps. Redémarre Ashley.',
+                ja: 'モデルのダウンロードが失敗またはタイムアウトしました。Ashleyを再起動してください。',
+                de: 'Modell-Download fehlgeschlagen oder Timeout. Bitte Ashley neu starten.',
+                ru: 'Скачивание модели не удалось или превысило лимит. Перезапусти Ashley.',
+                ko: '모델 다운로드 실패 또는 타임아웃. Ashley 재시작해.',
+              }
             ));
             return;
           }
@@ -799,7 +839,8 @@
       const prevProvider = this.voiceProvider;
       this.lang = el.getAttribute('data-lang') || 'en';
       this.ttsEnabled = (el.getAttribute('data-tts') || 'off') === 'on';
-      this.elevenKey = el.getAttribute('data-el-key') || '';
+      // v0.19.24 SECURITY — solo el flag, no la key
+      this.hasElevenKey = (el.getAttribute('data-has-eleven-key') || '0') === '1';
       this.voiceId = el.getAttribute('data-voice-id') || ELEVEN_DEFAULT_VOICE;
       // v0.12: which backend voices Ashley? Defaults to webspeech if missing.
       const provider = (el.getAttribute('data-voice-provider') || '').toLowerCase();

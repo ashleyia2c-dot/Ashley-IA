@@ -134,7 +134,7 @@ def _find_goal(text_or_id: str, items: list[dict]) -> Optional[dict]:
     return None
 
 
-def mark_check_in(text_or_id: str) -> str:
+def mark_check_in(text_or_id: str, lang: str = "en") -> str:
     """Ashley confirma que acaba de preguntar al jefe por progreso de un goal.
 
     Actualiza last_check_in al timestamp actual. Esto evita que el goal
@@ -146,10 +146,11 @@ def mark_check_in(text_or_id: str) -> str:
         burbuja duplicada en chat — mismo pattern que done_important).
       - "No encontré ..." si no hubo match.
     """
+    from .actions import _amsg
     items = load_goals()
     item = _find_goal(text_or_id, items)
     if item is None:
-        return f"No encontré '{text_or_id}' en los objetivos activos."
+        return _amsg(lang, "goal_not_found", goal=text_or_id)
 
     # Idempotente: si ya hay check-in hoy, no spam
     if item.get("last_check_in"):
@@ -158,17 +159,23 @@ def mark_check_in(text_or_id: str) -> str:
             if last.tzinfo is None:
                 last = last.replace(tzinfo=timezone.utc)
             now = datetime.now(timezone.utc)
-            if (now - last).total_seconds() < 3600 * 6:  # < 6h ago = mismo "session emocional"
+            if (now - last).total_seconds() < 3600 * 6:
                 return ""  # noop signal
-        except Exception:
-            pass
+        except (ValueError, TypeError) as _e:
+            # v0.19.24 — antes era except Exception:pass silente. Si el
+            # timestamp last_check_in está corrupto, ahora logueamos.
+            import logging
+            logging.getLogger("ashley.goals").warning(
+                "mark_check_in: last_check_in corrupto %r: %s",
+                item.get("last_check_in"), _e,
+            )
 
     item["last_check_in"] = now_iso()
     save_goals(items)
-    return f"Check-in registrado: '{item['goal']}'."
+    return _amsg(lang, "goal_check_in", goal=item["goal"])
 
 
-def complete_goal(text_or_id: str) -> str:
+def complete_goal(text_or_id: str, lang: str = "en") -> str:
     """Marca un goal como completado.
 
     Returns:
@@ -176,22 +183,22 @@ def complete_goal(text_or_id: str) -> str:
       - "" si ya estaba completado (noop signal)
       - "No encontré ..." si no hubo match
     """
+    from .actions import _amsg
     items = load_goals()
     item = _find_goal(text_or_id, items)
     if item is None:
-        # Buscar también en completados — puede que Ashley intente re-marcar
         for it in items:
             if it.get("completed") and (
                 it.get("id") == text_or_id
                 or text_or_id.strip().lower() in (it.get("goal") or "").lower()
             ):
-                return ""  # ya estaba — noop
-        return f"No encontré '{text_or_id}' en los objetivos."
+                return ""  # noop
+        return _amsg(lang, "goal_not_found", goal=text_or_id)
 
     item["completed"] = True
     item["completed_at"] = now_iso()
     save_goals(items)
-    return f"🎉 Objetivo completado: '{item['goal']}'."
+    return _amsg(lang, "goal_completed", goal=item["goal"])
 
 
 # ─────────────────────────────────────────────
