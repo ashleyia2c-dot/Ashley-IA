@@ -30,8 +30,7 @@ from .parsing import (
     extract_mood as _extract_mood_fn,
     extract_action as _extract_action_fn,
     extract_affection as _extract_affection_fn,
-    _SAFE_ACTIONS, _TERMINAL_ACTIONS,
-    _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
+    _SAFE_ACTIONS, _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
 )
 from . import i18n
 
@@ -3480,51 +3479,34 @@ class State(rx.State):
             yield
             return  # plan abortado por toggle OFF; nada que continuar
 
-        # ── Agentic continuation (v0.14.4) ──────────────────────────
-        # Si el user pidió multi-step (varios verbos de acción en su
-        # mensaje) y Ashley solo ejecutó 1 acción exitosa, probablemente
-        # el plan no terminó. Le damos un follow-up automático para que
-        # vea el [system_result] y emita el siguiente paso.
-        # Cap: 2 iteraciones extras (3 turns total) por mensaje del user.
-        # Señal puramente numérica — sin parser de texto del user.
-        # Si Ashley ejecutó EXACTAMENTE 1 acción exitosa, le damos un
-        # turno extra para que VEA el [system_result] y decida si el
-        # plan está completo o falta algo. El LLM mismo es la
-        # heurística: si emite tag, ejecutamos; si solo texto, listo.
-        # Cuando emite 2+ acciones de una, asumimos plan ya cubierto.
+        # ── Agentic continuation — DISABLED en v0.19.32 ─────────────
+        # Histórico:
+        #   v0.14.4 — Introducida. Si Ashley ejecutaba 1 acción, se
+        #   disparaba un follow-up turn pensando "quizás el plan tenía
+        #   más pasos y el LLM se olvidó del 2º".
+        #   v0.18.5 — Skip si single action fue safe/conversational
+        #   (causaba bubble vacía tras check_in_goal).
+        #   v0.19.31 — Skip si single action fue terminal (play_music,
+        #   screenshot, list_windows, read_page) por bug 2-tabs-mismo-video.
         #
-        # v0.18.5 — NO continuar si la única acción ejecutada fue
-        # conversacional/safe (save_taste, check_in_goal, save_goal, etc.).
-        # Estas tags son parte del flujo natural de conversación: Ashley
-        # dijo lo suyo Y emitió el tag en el mismo mensaje. No hay "plan
-        # multi-step" que continuar — al continuar, el LLM no tiene nada
-        # que añadir y produce una respuesta vacía → bubble vacío en UI.
-        # Bug reportado tras emitir [check_in_goal:...]: aparecía burbuja
-        # vacía después del system message del check-in.
-        any_failed = any(not r["result"].get("success", True) for r in executed_results)
-        executed_count = len(executed_results)
-        all_safe_conversational = all(
-            r.get("action", {}).get("type") in _SAFE_ACTIONS
-            for r in executed_results
-        )
-        # v0.19.31 — NO continuar si la única acción fue terminal
-        # (play_music, screenshot, list_windows, read_page). Estas
-        # acciones cubren la petición entera del user en sí mismas; al
-        # forzar un follow-up turn, el LLM tiende a re-emitir la misma
-        # acción con ligeras variaciones (bug producción: 2 tabs idénticas
-        # del mismo video tras "pon música X").
-        all_terminal = all(
-            r.get("action", {}).get("type") in _TERMINAL_ACTIONS
-            for r in executed_results
-        )
-        should_continue = (
-            executed_count == 1
-            and not any_failed  # failures ya disparan apology (también itera)
-            and not all_safe_conversational  # ← v0.18.5
-            and not all_terminal  # ← v0.19.31
-            and self._auto_iter_count < 1  # cap 1 follow-up = 2 turns max
-        )
-        if should_continue:
+        # v0.19.32 — DESACTIVADA por completo. El user reportó que la
+        # continuation causaba duplicados en CUALQUIER acción, no solo
+        # en las terminales. El LLM tiende a re-emitir la misma acción
+        # con ligeras variaciones cuando el follow-up le pregunta "¿plan
+        # completo o falta paso?".
+        #
+        # Filosofía nueva: si el user pide UNA cosa, hacerla UNA vez. Si
+        # pide multi-step ("abre X y haz Y"), Ashley debe emitir AMBOS
+        # tags en la MISMA respuesta — extract_all_actions soporta esto
+        # desde v0.13.5. Los casos donde Ashley "olvida" el segundo paso
+        # se manejan mejor con prompt engineering que con auto-replay.
+        #
+        # El código de _stream_action_continuation se mantiene por si
+        # algún día queremos re-habilitarla con un trigger más restrictivo
+        # (p.ej. solo si el mensaje del user contiene 2+ verbos de acción
+        # detectados por _USER_ACTION_VERBS).
+        should_continue = False
+        if should_continue:  # pragma: no cover (dead code, see comment above)
             self._auto_iter_count += 1
             yield from self._stream_action_continuation(executed_results)
 

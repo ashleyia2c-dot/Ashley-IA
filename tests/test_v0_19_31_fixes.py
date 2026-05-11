@@ -132,84 +132,52 @@ class TestCDPWizardI18n:
 
 
 # ════════════════════════════════════════════════════════════════════════
-#  Agentic continuation — terminal actions skip
+#  Agentic continuation — DISABLED en v0.19.32
+# ════════════════════════════════════════════════════════════════════════
+#
+# Bug producción reportado por el user:
+#   "TIENE QUE SER UNA SOLA VEZ PARA TODO ok? si el user pide cualquier
+#    cosa una sola vez, pues es una sola vez, no solo musica"
+#
+# v0.19.32 desactiva la continuation por completo. La justificación
+# completa está en el comment del código de _finalize_response.
 # ════════════════════════════════════════════════════════════════════════
 
 
-class TestAgenticContinuationSkipsTerminalActions:
-    """play_music ejecutado UNA VEZ no debe disparar un follow-up turn
-    donde Ashley re-emite play_music con la misma URL."""
+class TestAgenticContinuationDisabled:
+    """v0.19.32 — La agentic continuation auto-replay quedó desactivada.
+    Si el user pide UNA cosa, Ashley la hace UNA vez. Si pide multi-step,
+    Ashley emite múltiples tags en LA MISMA respuesta (extract_all_actions
+    soporta eso desde v0.13.5)."""
 
-    def test_terminal_actions_set_exists_and_includes_play_music(self):
-        from reflex_companion.parsing import _TERMINAL_ACTIONS
-        assert "play_music" in _TERMINAL_ACTIONS, (
-            "play_music DEBE estar en _TERMINAL_ACTIONS — bug producción "
-            "v0.19.30: 2 tabs idénticas tras 'pon música'"
+    def test_should_continue_is_hardcoded_false(self):
+        """should_continue = False debe estar literal en el código."""
+        src = RC_FILE.read_text(encoding="utf-8")
+        idx = src.find("should_continue = ")
+        assert idx != -1, "should_continue no encontrado"
+        # Mirar la asignación en sí
+        block = src[idx:idx + 100]
+        assert "should_continue = False" in block, (
+            "should_continue debe ser False literal en v0.19.32+ — "
+            "evita que Ashley re-emita acciones tras single-action requests"
         )
 
-    def test_terminal_actions_includes_other_self_contained(self):
-        from reflex_companion.parsing import _TERMINAL_ACTIONS
-        # Estas también son atómicas y no deben triggear continuation
-        for action in ["screenshot", "list_windows", "read_page"]:
-            assert action in _TERMINAL_ACTIONS, (
-                f"{action!r} debe estar en _TERMINAL_ACTIONS"
+    def test_no_executed_count_eq_1_check_active(self):
+        """El check viejo `executed_count == 1` ya no debe estar activo."""
+        src = RC_FILE.read_text(encoding="utf-8")
+        # Si aparece, debe ser solo en comments (líneas que empiezan con #)
+        for ln in src.split("\n"):
+            stripped = ln.strip()
+            if stripped.startswith("#"):
+                continue
+            assert "executed_count == 1" not in ln, (
+                f"`executed_count == 1` activo en línea: {ln!r}. "
+                f"v0.19.32 desactiva la continuation, este check ya no aplica."
             )
 
-    def test_terminal_actions_excludes_open_url(self):
-        """open_url NO debe ser terminal — multi-step legítimo: 'abre YT
-        y busca X' necesita el follow-up turn para emitir search_web."""
+    def test_terminal_actions_set_still_defined(self):
+        """_TERMINAL_ACTIONS se mantiene en parsing.py por si algún día
+        se re-habilita la continuation con trigger más restrictivo. NO
+        eliminar el set (rompe import)."""
         from reflex_companion.parsing import _TERMINAL_ACTIONS
-        assert "open_url" not in _TERMINAL_ACTIONS, (
-            "open_url no debe ser terminal (rompe flujo multi-step)"
-        )
-
-    def test_terminal_actions_excludes_search_web(self):
-        from reflex_companion.parsing import _TERMINAL_ACTIONS
-        assert "search_web" not in _TERMINAL_ACTIONS, (
-            "search_web no debe ser terminal (rompe flujo multi-step)"
-        )
-
-    def test_terminal_actions_excludes_open_app(self):
-        """open_app puede estar al inicio de un plan ('abre Spotify y pon
-        canción X'). Mantenerlo NO terminal."""
-        from reflex_companion.parsing import _TERMINAL_ACTIONS
-        assert "open_app" not in _TERMINAL_ACTIONS
-
-    def test_should_continue_skips_when_only_action_is_terminal(self):
-        """El check de should_continue en _finalize_response debe excluir
-        casos donde la única acción ejecutada es terminal."""
-        src = RC_FILE.read_text(encoding="utf-8")
-        # Localiza el inicio del bloque should_continue y mira los
-        # próximos ~600 chars (contiene el bloque entero).
-        idx = src.find("should_continue = (")
-        assert idx != -1, "should_continue no encontrado"
-        block = src[idx:idx + 600]
-        assert "not all_terminal" in block, (
-            "should_continue debe verificar `not all_terminal` para "
-            "skipear el follow-up cuando la única acción fue terminal"
-        )
-
-    def test_finalize_response_imports_terminal_actions(self):
-        """El import de _TERMINAL_ACTIONS debe estar al top del archivo."""
-        src = RC_FILE.read_text(encoding="utf-8")
-        # Buscar en los primeros 100 lines
-        head = "\n".join(src.split("\n")[:100])
-        assert "_TERMINAL_ACTIONS" in head, (
-            "Import de _TERMINAL_ACTIONS desde .parsing debe estar al top"
-        )
-
-    def test_all_terminal_check_uses_executed_results(self):
-        """Verifica el patrón: all(r.get("action",{}).get("type") in
-        _TERMINAL_ACTIONS for r in executed_results)"""
-        src = RC_FILE.read_text(encoding="utf-8")
-        # Buscar en una ventana razonable cerca de should_continue
-        idx = src.find("all_terminal")
-        assert idx != -1
-        # Mirar 300 chars antes para ver la asignación
-        block = src[max(0, idx - 50):idx + 400]
-        assert "_TERMINAL_ACTIONS" in block, (
-            "El check all_terminal debe usar _TERMINAL_ACTIONS"
-        )
-        assert "executed_results" in block, (
-            "El check all_terminal debe iterar sobre executed_results"
-        )
+        assert "play_music" in _TERMINAL_ACTIONS

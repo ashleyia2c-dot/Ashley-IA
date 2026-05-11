@@ -1,30 +1,25 @@
 """Tests para v0.18.5 — Burbuja vacía después de acciones safe/conversacionales.
 
-Bug reportado por user (con screenshot): después de que Ashley dijo
-"¿Qué tal si hoy me cuentas cómo va ese goal de mejorar mi voz? Me intriga
-de verdad. 💕" y emitió `[action:check_in_goal:mejorar voz Ashley]`, el
-sistema mostraba:
+Bug histórico (v0.18.5): después de que Ashley emitía
+`[action:check_in_goal:...]` aparecía una burbuja vacía después del
+system message del check-in.
 
-  [Ashley message con texto + corazoncito]
-  [✿ Check-in registrado: 'mejorar voz Ashley'.]
-  [BURBUJA VACÍA de Ashley]  ← BUG
+Causa raíz: la "agentic continuation" (v0.14.4) disparaba un follow-up
+turn para CUALQUIER ejecución single-action, incluso conversacionales
+(check_in_goal, save_taste, save_goal). El LLM, al ser preguntado "¿algo
+más?", respondía "no, ya está" → texto vacío → bubble vacía.
 
-Causa raíz: la "agentic continuation" (v0.14.4) se diseñó para planes
-multi-step donde Ashley ejecuta una system action (open_app, etc.) y
-luego necesita ver el [system_result] para emitir el siguiente paso. Esa
-heurística (`executed_count == 1 and not any_failed`) disparaba la
-continuación incluso para acciones safe/conversacionales como
-`check_in_goal`, `save_taste`, `save_goal`, etc., donde Ashley YA dijo
-todo lo que tenía que decir en su mensaje principal. El LLM, al ser
-preguntado "¿algo más?", correctamente respondía "no, ya está" → texto
-vacío → bubble vacía en UI.
+NOTA v0.19.32: la agentic continuation se desactivó por completo (ver
+test_v0_19_31_fixes.py::TestAgenticContinuationDisabled). El bug original
+de bubble vacía YA NO PUEDE OCURRIR porque la continuation jamás se
+dispara — los tests del root cause se eliminaron por obsoletos.
 
-Doble fix:
-1. Skipear `_stream_action_continuation` si TODAS las acciones ejecutadas
-   fueron safe/conversacionales (root cause).
-2. Defensa en profundidad: en los 3 paths que appendean assistant message
-   tras strippear tags (continuation, blocked-followup, apology),
-   verificar que el contenido limpio no esté vacío antes de appendear.
+Lo que SÍ permanece útil: las defensas en profundidad que verifican que
+los 3 paths que appendean assistant message tras strippear tags
+(continuation, blocked-followup, apology) no appendeen contenido vacío.
+Aunque la continuation no se dispare, el código sigue ahí (por si se
+re-habilita) y los otros 2 paths (blocked-followup, apology) se siguen
+ejecutando — sus guardas siguen valiendo.
 """
 
 import re
@@ -40,42 +35,6 @@ RC_FILE = REPO_ROOT / "reflex_companion" / "reflex_companion.py"
 @pytest.fixture(scope="module")
 def rc_source() -> str:
     return RC_FILE.read_text(encoding="utf-8")
-
-
-# ════════════════════════════════════════════════════════════════════════
-#  ROOT CAUSE: Continuation skippeada para safe actions
-# ════════════════════════════════════════════════════════════════════════
-
-
-class TestContinuationSkipsSafeActions:
-    def test_should_continue_checks_safe_actions(self, rc_source):
-        """should_continue debe excluir el caso donde todas las acciones
-        ejecutadas son SAFE (conversacionales)."""
-        assert "all_safe_conversational" in rc_source, (
-            "Falta el chequeo `all_safe_conversational` en should_continue. "
-            "Sin esto, la agentic continuation se dispara para acciones "
-            "puramente conversacionales (check_in_goal, save_taste, etc.) "
-            "y produce burbujas vacías cuando el LLM correctamente decide "
-            "no añadir nada."
-        )
-
-    def test_uses_safe_actions_set(self, rc_source):
-        """El chequeo debe consultar `_SAFE_ACTIONS` (no una lista hardcoded
-        local que se desincroniza)."""
-        # Buscamos el patrón exacto del chequeo
-        assert "_SAFE_ACTIONS" in rc_source, (
-            "El chequeo de all_safe_conversational debe usar el set "
-            "_SAFE_ACTIONS importado de parsing.py."
-        )
-
-    def test_check_excludes_continuation(self, rc_source):
-        """should_continue debe tener la condición `not all_safe_conversational`
-        — si está pero no se usa, no protege."""
-        assert "not all_safe_conversational" in rc_source, (
-            "should_continue debe tener `not all_safe_conversational` como "
-            "una de sus condiciones AND. Sin esto, el chequeo se calcula "
-            "pero no impide la continuación → bubble vacío sigue."
-        )
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -130,29 +89,3 @@ class TestNoEmptyMessageAppend:
         )
 
 
-# ════════════════════════════════════════════════════════════════════════
-#  Smoke test: la lógica all_safe_conversational opera sobre lista correcta
-# ════════════════════════════════════════════════════════════════════════
-
-
-class TestSafeConversationalLogic:
-    """Verifica que la implementación use el campo correcto del dict
-    executed_results (cada entry es {"action": {...}, "result": {...}})."""
-
-    def test_extracts_action_type_correctly(self, rc_source):
-        """El chequeo debe extraer `r.get("action", {}).get("type")` —
-        coincide con el shape definido en el código que appendea a
-        executed_results."""
-        # Patrón flexible — permite diferentes estilos pero debe acceder
-        # a action.type de cada result.
-        assert re.search(
-            r'r\.get\("action".*?\)\.get\("type"\)',
-            rc_source,
-        ) or re.search(
-            r"r\['action'\]\['type'\]",
-            rc_source,
-        ), (
-            "El chequeo de all_safe_conversational debe extraer el "
-            "action type de cada entry. El shape de executed_results es "
-            "[{\"action\": {\"type\": ...}, \"result\": ...}, ...]."
-        )
