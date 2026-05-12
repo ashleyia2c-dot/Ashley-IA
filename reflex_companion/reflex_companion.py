@@ -30,7 +30,8 @@ from .parsing import (
     extract_mood as _extract_mood_fn,
     extract_action as _extract_action_fn,
     extract_affection as _extract_affection_fn,
-    _SAFE_ACTIONS, _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
+    _SAFE_ACTIONS, _LONG_RUNNING_ACTIONS,
+    _USER_ACTION_VERBS, _ASHLEY_FAKE_HINTS,
 )
 from . import i18n
 
@@ -2081,6 +2082,7 @@ class State(rx.State):
                 # NO la marcamos como dispatched así finalize la procesa.
                 continue
 
+
             # Reservar slot inmediatamente para evitar dispatch duplicado
             # en el siguiente chunk de stream (parsing es idempotente).
             result_holder: dict = {"result": None}
@@ -3327,13 +3329,29 @@ class State(rx.State):
                 key = (current_action["type"], tuple(current_action.get("params") or []))
                 spec = specs.get(key)
                 if spec is not None:
-                    # Pre-dispatched durante stream — esperar brevemente.
-                    # 1s es suficiente: si el thread llevaba 2-3s
-                    # ejecutándose en paralelo al stream y aún no terminó,
-                    # algo va mal y mejor caemos al fallback.
+                    # Pre-dispatched durante stream.
+                    #
+                    # v0.19.44 — timeout dinámico por tipo de acción.
+                    # Antes (v0.14.1+): join(timeout=1.0) para todo.
+                    # Eso provocaba el bug exacto del user: speculative
+                    # de play_music tarda hasta 20s (8s scrape + 3s CDP
+                    # + 10s poll), tras 1s thread aún corriendo →
+                    # pre_result is None → fallback a
+                    # _execute_and_record_action → play_music SE
+                    # EJECUTABA OTRA VEZ → 2 tabs del mismo video.
+                    #
+                    # Ahora: 30s para acciones long-running, 1.5s para
+                    # las demás. Note: speculative corre DURANTE stream
+                    # (3-5s) — el speculative tiene ese head start, así
+                    # que en práctica nunca llegamos a esperar 30s.
                     thread, holder = spec
                     if thread is not None:
-                        thread.join(timeout=1.0)
+                        spec_timeout = (
+                            30.0
+                            if current_action["type"] in _LONG_RUNNING_ACTIONS
+                            else 1.5
+                        )
+                        thread.join(timeout=spec_timeout)
                     pre_result = holder.get("result")
                     if pre_result is not None:
                         # Reusar el resultado del thread + replicar el

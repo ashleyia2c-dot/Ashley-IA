@@ -48,6 +48,33 @@ _TERMINAL_ACTIONS = {
     "read_page",        # página ya leída a Ashley
 }
 
+
+# v0.19.44 — Acciones con polling INTERNO largo (hasta 10s para esperar
+# que el browser abra la tab via CDP) + HTTP scrape (hasta 8s para
+# resolver URL de YouTube). _finalize_response usa estas para decidir
+# CUÁNTO esperar al speculative thread antes de fallback.
+#
+# BUG raíz que arregla v0.19.44: speculative dispatch ejecutaba
+# play_music en thread DURING stream. _finalize_response hacía
+# `thread.join(timeout=1.0)` — pero play_music puede tardar hasta 20s
+# (8s scrape + 3s CDP + 10s poll). Tras 1s, thread aún corriendo →
+# `pre_result is None` → fallback a `_execute_and_record_action` →
+# play_music SE EJECUTABA OTRA VEZ → SEGUNDA TAB del mismo video.
+#
+# Fix: thread.join con timeout GENEROSO (30s) para estas acciones.
+# 30s cubre todos los timeouts internos sumados (8+3+10+buffer). En
+# 99% de casos, speculative termina antes que finalize empiece (corrió
+# durante stream que toma 3-5s).
+_LONG_RUNNING_ACTIONS = {
+    "play_music",       # HTTP scrape + CDP new_tab + poll hasta 20s
+    "open_url",         # CDP new_tab + poll hasta 10s
+    "search_web",       # mismo path que open_url
+}
+
+# Backward compat alias — código antiguo en algunas branches puede
+# referenciar el nombre viejo.
+_NO_SPECULATIVE_DISPATCH = _LONG_RUNNING_ACTIONS
+
 # Verbos del usuario que indican un pedido de acción (para fallback)
 _USER_ACTION_VERBS = (
     # Spanish
