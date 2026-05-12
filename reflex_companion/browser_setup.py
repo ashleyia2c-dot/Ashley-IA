@@ -44,6 +44,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time as _time
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +68,10 @@ CDP_FLAG = f"--remote-debugging-port={DEFAULT_CDP_PORT}"
 #
 # Bug reportado: user con dev projects en Desktop → 274K entries totales →
 # rglob nunca termina → "el toggle CDP carga hasta el infinito".
+# v0.19.37 — TODOS los nombres en lowercase. La comparación se hace
+# con name.lower() porque Windows es case-insensitive (Node_Modules ==
+# node_modules). Antes la comparación exacta dejaba pasar variantes con
+# mayúsculas distintas.
 _NOISE_DIRS = frozenset({
     # Node / web
     "node_modules", ".web", ".next", ".nuxt", ".cache", ".parcel-cache",
@@ -79,7 +85,9 @@ _NOISE_DIRS = frozenset({
     # IDE / tools
     ".vscode", ".idea", ".vs",
     # OS / library bundles
-    "Library", "vendor", "Pods",
+    "library", "vendor", "pods",
+    # Otros project bundles que pueden tener cientos de archivos
+    "packages", ".docker",
 })
 
 
@@ -218,7 +226,9 @@ def _iter_lnk_files(root: Path, max_depth: int = _MAX_LNK_SEARCH_DEPTH):
                     yield entry
             elif entry.is_dir():
                 name = entry.name
-                if name in _NOISE_DIRS:
+                # v0.19.37 — case-insensitive: Windows es case-insensitive,
+                # `Node_Modules` debe matchear `node_modules` en _NOISE_DIRS
+                if name.lower() in _NOISE_DIRS:
                     continue
                 # Skip dotfolders genéricos (.config, .docker, etc.)
                 if name.startswith("."):
@@ -241,45 +251,71 @@ def _ps_escape_single_quoted(s: str) -> str:
     return s.replace("'", "''")
 
 
-def _is_writable_dir(path: Path) -> bool:
+def _is_writable_dir(path: Path, timeout: float = 2.0) -> bool:
     """v0.19.19 — True si el proceso actual puede ESCRIBIR en path.
 
     Test = intento crear un archivo temporal con tempfile.mkstemp.
 
-    v0.19.34 (H1): antes usábamos `path / f".ashley-write-test-{getpid()}"`
-    + `unlink()` manual. Si un antivirus tomaba el archivo entre create
-    y unlink, quedaba archivo huérfano + PID podía ser reusado. tempfile
-    es atomic y resiste ese race.
+    v0.19.34 (H1): tempfile.mkstemp es atomic, no deja huérfanos por
+    race con antivirus.
+
+    v0.19.36: pre-check con os.access (rápido para la mayoría de no-write).
+
+    v0.19.37 (defensa adicional para PCs raras): hard timeout via thread.
+    Si mkstemp no responde en `timeout` segundos (network share lento,
+    antivirus particularmente agresivo, ACL hereditario raro, OneDrive
+    sync hold-up...), asumimos no writable. Sin esto, casos edge en PCs
+    no controladas pueden colgar el wizard CDP. El thread queda como
+    daemon y se limpia al exit del proceso.
 
     Razón: queremos saltarnos shortcuts en `C:\\ProgramData\\` cuando
-    Ashley corre como user (sin admin). Modificar esos `.lnk` requiere
-    elevation que no tenemos en perUser install. Sin este filter,
-    `find_browser_shortcuts()` los devuelve, `add_cdp_flag()` falla con
-    PermissionError, y el user ve "(1 fallaron)" sin entender por qué.
+    Ashley corre como user (sin admin), pero también cualquier path
+    rebelde. Modificar shortcuts protected requiere elevation que no
+    tenemos en perUser install.
     """
     if not path.exists():
         return False
-    # v0.19.36 — Fast pre-check con os.access. En la MAYORÍA de casos
-    # de paths sin write permission, esto devuelve False instantáneamente
-    # y evitamos el mkstemp lento. (No funciona para ProgramData con ACL
-    # heredado raro — para eso ya skipeamos esos paths upfront en
-    # _shortcut_locations cuando no somos admin.)
-    if not os.access(str(path), os.W_OK):
-        return False
+    # Fast pre-check con os.access. En la MAYORÍA de casos sin write
+    # permission devuelve False instantáneo. (No es 100% fiable en
+    # Windows con ACLs heredados — defensa con timeout abajo.)
     try:
-        # mkstemp crea + abre + devuelve fd. Es atomic. Cerramos fd y
-        # borramos el archivo. Si el unlink falla por antivirus, lo
-        # logueamos pero la función igual devuelve True (probamos que
-        # podemos escribir, que es lo que queríamos saber).
-        fd, tmppath = tempfile.mkstemp(prefix=".ashley-write-test-", dir=str(path))
-        os.close(fd)
-        try:
-            os.unlink(tmppath)
-        except OSError as _e:
-            _log.warning("No pude limpiar tempfile %s tras write-test: %s", tmppath, _e)
-        return True
-    except (PermissionError, OSError):
+        if not os.access(str(path), os.W_OK):
+            return False
+    except OSError:
         return False
+
+    # Real test con mkstemp, envuelto en thread con timeout.
+    result: list[bool] = [False]
+    done = threading.Event()
+
+    def _check():
+        try:
+            fd, tmppath = tempfile.mkstemp(prefix=".ashley-write-test-", dir=str(path))
+            os.close(fd)
+            try:
+                os.unlink(tmppath)
+            except OSError as _e:
+                _log.warning(
+                    "No pude limpiar tempfile %s tras write-test: %s", tmppath, _e,
+                )
+            result[0] = True
+        except (PermissionError, OSError):
+            result[0] = False
+        finally:
+            done.set()
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+    if done.wait(timeout):
+        return result[0]
+    # Timeout — algo raro pasa con este path (ACL, network share, AV).
+    # Asumir no writable. El thread sigue corriendo daemon en background;
+    # se limpia al exit del proceso.
+    _log.warning(
+        "_is_writable_dir timeout (%.1fs) para %s — asumiendo no writable",
+        timeout, path,
+    )
+    return False
 
 
 def _shortcut_locations() -> list[Path]:
@@ -402,6 +438,11 @@ def _read_lnks_batch(lnk_paths: list[str]) -> dict[str, dict]:
                 len(lnk_paths), timeout_seconds,
             )
             return {}
+        except FileNotFoundError:
+            # v0.19.37 — PowerShell no instalado / no en PATH (instalaciones
+            # Windows muy restringidas, sandboxes corporativos)
+            _log.warning("PowerShell no encontrado en PATH — CDP wizard no funciona")
+            return {}
         except Exception as _e:
             _log.warning("Batch lnk read exception (paths=%d): %s", len(lnk_paths), _e)
             return {}
@@ -495,6 +536,9 @@ def _read_lnk_via_ps(lnk_path: str) -> Optional[dict]:
     except subprocess.TimeoutExpired:
         _log.warning("PowerShell timeout leyendo .lnk %s (>5s)", lnk_path)
         return None
+    except FileNotFoundError:
+        _log.warning("PowerShell no encontrado leyendo .lnk %s", lnk_path)
+        return None
     except Exception as _e:
         _log.warning("PowerShell exception leyendo .lnk %s: %s", lnk_path, _e)
         return None
@@ -543,6 +587,9 @@ def _write_lnk_args_via_ps(lnk_path: str, new_args: str) -> bool:
         )
     except subprocess.TimeoutExpired:
         _log.warning("PowerShell timeout escribiendo .lnk %s (>5s)", lnk_path)
+        return False
+    except FileNotFoundError:
+        _log.warning("PowerShell no encontrado escribiendo .lnk %s", lnk_path)
         return False
     except Exception as _e:
         _log.warning("PowerShell exception escribiendo .lnk %s: %s", lnk_path, _e)
@@ -617,6 +664,15 @@ def find_browser_shortcuts() -> list[dict]:
 
     Resultado típico: ~3-5s en PCs pobladas (antes 30s+).
     """
+    # v0.19.37 — Cap absoluto de tiempo total. Defensa final si TODO lo
+    # demás falla en una PC rara: a los 60s abortamos y devolvemos lo que
+    # tengamos. El wizard no se colgará para siempre.
+    _OVERALL_TIMEOUT = 60.0
+    _start_time = _time.monotonic()
+
+    def _time_left() -> float:
+        return _OVERALL_TIMEOUT - (_time.monotonic() - _start_time)
+
     # ── Fase 1: recolectar paths .lnk únicos
     # v0.19.36 — usa _iter_lnk_files (depth limit + skip noise dirs)
     # en vez de rglob("*.lnk"). Antes el rglob entraba a node_modules,
@@ -625,6 +681,12 @@ def find_browser_shortcuts() -> list[dict]:
     all_lnk_paths: list[str] = []
     seen_paths: set[str] = set()
     for loc in _shortcut_locations():
+        if _time_left() <= 0:
+            _log.warning(
+                "find_browser_shortcuts overall timeout en fase 1 — "
+                "abort scan (procesado parcial)",
+            )
+            break
         if not loc.exists():
             continue
         try:
@@ -648,13 +710,26 @@ def find_browser_shortcuts() -> list[dict]:
     # Caemos al reader per-file que es más lento (~100ms × N) pero más
     # robusto. Sin esto, el wizard reportaría "no Chromium browsers found"
     # falsamente cuando solo es un fallo del batch.
+    #
+    # v0.19.37 — Limitamos el fallback a 100 paths máx para no crear
+    # un nuevo hang de 200×100ms = 20s+ en PCs con muchos shortcuts.
+    # 100 cubre el caso típico (Desktop + Start Menu < 100 paths
+    # legítimos tras filtrar noise dirs).
+    _FALLBACK_MAX_PATHS = 100
     if not info_by_path and all_lnk_paths:
+        fallback_paths = all_lnk_paths[:_FALLBACK_MAX_PATHS]
         _log.warning(
-            "Batch reader devolvió vacío para %d paths — fallback a per-file",
-            len(all_lnk_paths),
+            "Batch reader devolvió vacío para %d paths — fallback a per-file "
+            "(limitado a %d)", len(all_lnk_paths), len(fallback_paths),
         )
         info_by_path = {}
-        for lnk_str in all_lnk_paths:
+        for lnk_str in fallback_paths:
+            if _time_left() <= 0:
+                _log.warning(
+                    "Fallback per-file: overall timeout — abortando con %d/%d processed",
+                    len(info_by_path), len(fallback_paths),
+                )
+                break
             info = _read_lnk_via_ps(lnk_str)
             if info:
                 info_by_path[lnk_str] = info
