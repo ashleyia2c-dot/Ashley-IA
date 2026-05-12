@@ -3423,38 +3423,86 @@ class State(rx.State):
             yield
             try:
                 action_label = blocked_action.get("description", "") or blocked_action.get("type", "")
-                if (self.language or "en").startswith("es"):
+                # v0.19.40 — fix UI location: el botón ⚡ Actions está en
+                # la BARRA SUPERIOR junto a "Ashley | Memories | News |
+                # Actions | Mobile | Full Settings", NO "arriba a la derecha"
+                # (que es donde están help/mute/fullscreen/affection).
+                # Mejor describirlo por su posición relativa al sidebar de
+                # botones de la app — más estable a cambios de UI futuros.
+                _lang = (self.language or "en").lower()
+                if _lang.startswith("es"):
                     blocked_trigger = (
-                        f"[ACCIÓN BLOQUEADA — el toggle ⚡ Actions del "
-                        f"header está APAGADO, así que tu tag "
+                        f"[ACCIÓN BLOQUEADA — el toggle ⚡ Actions de la "
+                        f"barra superior está APAGADO, así que tu tag "
                         f"'{action_label}' NO se ejecutó.]\n\n"
                         f"Reacciona EN TU PERSONALIDAD: dile al jefe que "
                         f"para que puedas hacerlo tiene que encender el "
-                        f"toggle ⚡ Actions del header (arriba a la "
-                        f"derecha). 1-2 frases, voz natural Ashley. NO "
-                        f"menciones términos técnicos ni nombres de "
-                        f"funciones, solo el toggle visible en la UI."
+                        f"botón ⚡ Actions de la barra superior (al lado "
+                        f"de Memories y News). 1-2 frases, voz natural "
+                        f"Ashley. NO menciones términos técnicos ni "
+                        f"nombres de funciones, solo el botón visible en la UI."
                     )
-                elif (self.language or "en").startswith("fr"):
+                elif _lang.startswith("fr"):
                     blocked_trigger = (
-                        f"[ACTION BLOQUÉE — le toggle ⚡ Actions du "
-                        f"header est ÉTEINT, donc ton tag "
+                        f"[ACTION BLOQUÉE — le toggle ⚡ Actions de la "
+                        f"barre supérieure est ÉTEINT, donc ton tag "
                         f"'{action_label}' n'a PAS été exécuté.]\n\n"
                         f"Réagis DANS TA VOIX : dis au patron que pour "
                         f"que tu puisses le faire, il doit activer le "
-                        f"toggle ⚡ Actions du header (en haut à droite). "
-                        f"1-2 phrases, ton Ashley naturel."
+                        f"bouton ⚡ Actions de la barre supérieure (à "
+                        f"côté de Memories et News). 1-2 phrases, ton "
+                        f"Ashley naturel."
+                    )
+                elif _lang.startswith("ja"):
+                    blocked_trigger = (
+                        f"[アクションブロック — 上部バーの⚡Actionsトグルが"
+                        f"OFFになってるから、君のタグ"
+                        f"「{action_label}」は実行されなかったよ。]\n\n"
+                        f"君のキャラクターで反応してね：実行してほしいなら、"
+                        f"上部バーの⚡Actionsボタン（Memories・Newsの隣）を"
+                        f"オンにしてって伝えて。1-2文、自然なAshley調で。"
+                        f"技術用語は使わず、UI上の見えるボタンだけ言及。"
+                    )
+                elif _lang.startswith("de"):
+                    blocked_trigger = (
+                        f"[AKTION BLOCKIERT — der ⚡ Actions-Toggle in der "
+                        f"oberen Leiste ist AUS, also wurde dein Tag "
+                        f"'{action_label}' NICHT ausgeführt.]\n\n"
+                        f"Reagiere IN DEINER STIMME: sag dem Chef, dass er "
+                        f"den ⚡ Actions-Knopf in der oberen Leiste (neben "
+                        f"Memories und News) einschalten muss, damit du es "
+                        f"tun kannst. 1-2 Sätze, natürlicher Ashley-Ton."
+                    )
+                elif _lang.startswith("ru"):
+                    blocked_trigger = (
+                        f"[ДЕЙСТВИЕ ЗАБЛОКИРОВАНО — переключатель ⚡ Actions "
+                        f"в верхней панели ВЫКЛЮЧЕН, поэтому твой тег "
+                        f"'{action_label}' НЕ был выполнен.]\n\n"
+                        f"Отреагируй В СВОЁМ СТИЛЕ: скажи шефу, что для "
+                        f"выполнения нужно включить кнопку ⚡ Actions в "
+                        f"верхней панели (рядом с Memories и News). 1-2 "
+                        f"фразы, естественный тон Ashley."
+                    )
+                elif _lang.startswith("ko"):
+                    blocked_trigger = (
+                        f"[액션 차단 — 상단 바의 ⚡Actions 토글이 꺼져 있어서 "
+                        f"네 태그 '{action_label}'가 실행되지 않았어.]\n\n"
+                        f"네 캐릭터로 반응해줘: 오빠한테 상단 바의 ⚡Actions "
+                        f"버튼(Memories랑 News 옆에 있어)을 켜줘야 한다고 "
+                        f"말해. 1-2문장, 자연스러운 Ashley 톤으로. 기술 "
+                        f"용어 말고 UI에 보이는 버튼만 언급."
                     )
                 else:
                     blocked_trigger = (
                         f"[ACTION BLOCKED — the ⚡ Actions toggle in the "
-                        f"header is OFF, so your tag '{action_label}' "
+                        f"top bar is OFF, so your tag '{action_label}' "
                         f"did NOT execute.]\n\n"
                         f"React IN YOUR VOICE: tell the boss that for "
                         f"you to do it he needs to turn on the ⚡ Actions "
-                        f"toggle in the header (top-right). 1-2 sentences, "
-                        f"natural Ashley tone. NO technical terms or "
-                        f"function names, just the visible UI toggle."
+                        f"button in the top bar (next to Memories and "
+                        f"News). 1-2 sentences, natural Ashley tone. NO "
+                        f"technical terms or function names, just the "
+                        f"visible UI button."
                     )
 
                 yield from self._stream_with_trigger(blocked_trigger)
