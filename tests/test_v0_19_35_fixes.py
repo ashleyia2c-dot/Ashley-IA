@@ -140,8 +140,10 @@ class TestReadLnksBatch:
             assert result == {}
             assert not mock_run.called
 
-    def test_subprocess_called_with_stdin_input(self):
-        """El batch reader debe pasar paths via stdin (no via cmdline)."""
+    def test_subprocess_uses_temp_file_for_paths(self):
+        """v0.19.36 — El batch reader pasa paths via temp file (no via stdin
+        ni cmdline). PowerShell 5.1 default Windows tiene problemas con
+        stdin redirigido — temp file con Get-Content es robusto."""
         from reflex_companion import browser_setup
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -150,13 +152,19 @@ class TestReadLnksBatch:
         with patch("reflex_companion.browser_setup.subprocess.run",
                    return_value=mock_result) as mock_run:
             browser_setup._read_lnks_batch(["A.lnk", "B.lnk", "C.lnk"])
-            call_kwargs = mock_run.call_args[1]
-            # stdin debe contener los paths separados por newlines
-            assert "input" in call_kwargs
-            stdin_data = call_kwargs["input"]
-            assert "A.lnk" in stdin_data
-            assert "B.lnk" in stdin_data
-            assert "C.lnk" in stdin_data
+            call_args = mock_run.call_args
+            # NO debe pasar paths via stdin (input=)
+            assert call_args[1].get("input") is None, (
+                "v0.19.36: paths van via temp file, NO stdin "
+                "(stdin redirigido tiene problemas con PS 5.1)"
+            )
+            # El cmdline debe tener PowerShell + script con Get-Content
+            cmdline = call_args[0][0]
+            assert "powershell" in cmdline[0].lower()
+            ps_script = cmdline[-1]
+            assert "Get-Content" in ps_script, (
+                "Script PowerShell debe usar Get-Content de temp file"
+            )
 
     def test_timeout_returns_empty_dict(self):
         from reflex_companion import browser_setup

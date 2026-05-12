@@ -58,6 +58,40 @@ _log = logging.getLogger("ashley.browser_setup")
 CDP_FLAG = f"--remote-debugging-port={DEFAULT_CDP_PORT}"
 
 
+# v0.19.36 — Carpetas que NUNCA contienen browser shortcuts pero pueden
+# tener decenas de miles de archivos cada una (proyectos de dev que el
+# user tenga en el Desktop). Sin este skip, rglob entraba en
+# `Desktop/reflex-companion/.web/node_modules/` y similares y escaneaba
+# 100K+ archivos buscando .lnk — el wizard CDP se colgaba indefinidamente.
+#
+# Bug reportado: user con dev projects en Desktop → 274K entries totales →
+# rglob nunca termina → "el toggle CDP carga hasta el infinito".
+_NOISE_DIRS = frozenset({
+    # Node / web
+    "node_modules", ".web", ".next", ".nuxt", ".cache", ".parcel-cache",
+    # Python
+    "venv", ".venv", "env", "__pycache__", "site-packages", ".pytest_cache",
+    ".tox", ".mypy_cache", ".ruff_cache",
+    # Git / VCS
+    ".git", ".svn", ".hg",
+    # Build / dist
+    "dist", "build", "out", "obj", "bin", "target", ".gradle",
+    # IDE / tools
+    ".vscode", ".idea", ".vs",
+    # OS / library bundles
+    "Library", "vendor", "Pods",
+})
+
+
+# v0.19.36 — Profundidad máxima de búsqueda recursiva en cada location.
+# Browser .lnk típicamente están a profundidad 0-2:
+#   • Desktop: directamente o en "Browsers/" (depth 0-1)
+#   • Start Menu: "Programs/Chrome.lnk" o "Programs/Google Chrome/Chrome.lnk" (depth 0-1)
+#   • Quick Launch / TaskBar: flat (depth 0)
+# Ponemos 4 como límite generoso.
+_MAX_LNK_SEARCH_DEPTH = 4
+
+
 # v0.19.34 (C3) — Status codes estables que devuelve add_cdp_flag /
 # remove_cdp_flag. configure_all_shortcuts agrupa por status sin tener
 # que parsear los mensajes humanos (que están en español y podrían
@@ -129,6 +163,71 @@ def _migrate_legacy_backup(lnk_path: str) -> None:
             _log.warning("Copy+del legacy backup %s también falló: %s", legacy, _e2)
 
 
+def _is_admin() -> bool:
+    """v0.19.36 — True si el proceso corre como admin Windows.
+
+    Sin admin no podemos modificar shortcuts de C:\\ProgramData\\ de todos
+    modos (modificarlos requiere elevation que un installer perUser no
+    tiene). Saltarse esos paths cuando no eres admin evita un bug
+    catastrófico:
+
+    Bug observado v0.19.35: `tempfile.mkstemp(dir=ProgramData)` puede
+    COLGARSE durante minutos en Windows con antivirus activo, en lugar
+    de fallar inmediatamente con PermissionError. `os.access(W_OK)` da
+    falso positivo en estos paths (devuelve True por ACL inheritance pero
+    el mkstemp real falla/cuelga). El wizard CDP se quedaba colgado en
+    el spinner para siempre.
+
+    Pragmatic skip: si no eres admin, no toques ProgramData paths. Los
+    shortcuts de ProgramData son casi siempre duplicados de los
+    shortcuts del user en Start Menu del Roaming AppData.
+    """
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _iter_lnk_files(root: Path, max_depth: int = _MAX_LNK_SEARCH_DEPTH):
+    """v0.19.36 — Iterador de .lnk con depth limit + skip de noise dirs.
+
+    Reemplaza `Path.rglob("*.lnk")` que recorría TODA la jerarquía sin
+    límite. Bug que arregla: user con dev projects en Desktop (ej.
+    `Desktop/myproject/node_modules/` con 100K+ files) hacía que el wizard
+    CDP se colgase eternamente esperando que rglob terminara.
+
+    Skipea:
+      • Carpetas en _NOISE_DIRS (node_modules, .git, venv, etc.)
+      • Cualquier carpeta cuyo nombre empiece con "." (dotfolder genérico)
+      • Más allá de max_depth niveles de profundidad
+
+    Resiliente: PermissionError/OSError en una carpeta → skipea esa carpeta
+    sin abortar el scan entero.
+    """
+    if max_depth < 0:
+        return
+    try:
+        entries = list(root.iterdir())
+    except (PermissionError, OSError):
+        return
+    for entry in entries:
+        try:
+            if entry.is_file():
+                if entry.suffix.lower() == ".lnk":
+                    yield entry
+            elif entry.is_dir():
+                name = entry.name
+                if name in _NOISE_DIRS:
+                    continue
+                # Skip dotfolders genéricos (.config, .docker, etc.)
+                if name.startswith("."):
+                    continue
+                yield from _iter_lnk_files(entry, max_depth - 1)
+        except (PermissionError, OSError):
+            continue
+
+
 def _ps_escape_single_quoted(s: str) -> str:
     """v0.19.34 (C2) — Escape para insertar `s` dentro de un string
     PowerShell single-quoted ('...').
@@ -159,6 +258,13 @@ def _is_writable_dir(path: Path) -> bool:
     PermissionError, y el user ve "(1 fallaron)" sin entender por qué.
     """
     if not path.exists():
+        return False
+    # v0.19.36 — Fast pre-check con os.access. En la MAYORÍA de casos
+    # de paths sin write permission, esto devuelve False instantáneamente
+    # y evitamos el mkstemp lento. (No funciona para ProgramData con ACL
+    # heredado raro — para eso ya skipeamos esos paths upfront en
+    # _shortcut_locations cuando no somos admin.)
+    if not os.access(str(path), os.W_OK):
         return False
     try:
         # mkstemp crea + abre + devuelve fd. Es atomic. Cerramos fd y
@@ -206,7 +312,11 @@ def _shortcut_locations() -> list[Path]:
         # (legacy Quick Launch path; algunos pins de Win10/11 NO están
         # aquí, pero los más antiguos sí — ver M4 en audit notes).
         candidates.append(Path(appdata) / "Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar")
-    if progdata:
+    # v0.19.36 — Solo añadir ProgramData si somos admin. Sin admin no
+    # podemos modificar esos shortcuts de todos modos, y peor aún:
+    # `tempfile.mkstemp` en ProgramData puede COLGARSE durante minutos
+    # bajo antivirus en lugar de fallar rápido. Skip = wizard funciona.
+    if progdata and _is_admin():
         candidates.append(Path(progdata) / "Microsoft/Windows/Start Menu/Programs")
 
     return [p for p in candidates if _is_writable_dir(p)]
@@ -220,9 +330,15 @@ def _read_lnks_batch(lnk_paths: list[str]) -> dict[str, dict]:
     pobladas (300+ shortcuts en Start Menu) eso eran 30-60s con la UI
     bloqueada en el spinner del wizard CDP.
 
-    Ahora: 1 PowerShell process que recibe TODOS los paths via stdin
-    (evita los 32KB del límite de command-line de Windows) y los procesa
-    con un loop interno. Latencia: ~3-5s para 200 .lnk vs ~30s antes.
+    Ahora: 1 PowerShell process que recibe TODOS los paths leyéndolos
+    de un archivo temporal (Get-Content) y los procesa con un loop
+    interno. Latencia: ~3-5s para 200 .lnk vs ~30s antes.
+
+    v0.19.36 (HOTFIX): cambié de stdin (`[Console]::In.ReadLine`) a
+    temp file. PowerShell 5.1 (default Windows) tiene soporte
+    inconsistente para leer stdin redirigido vía subprocess — el script
+    podía colgarse esperando input que ya estaba "consumido". Get-Content
+    de un archivo es más robusto y agnóstico de versión.
 
     Cada .lnk individual se envuelve en try/catch dentro del script —
     un .lnk corrupto NO rompe el batch entero, solo se omite.
@@ -234,57 +350,77 @@ def _read_lnks_batch(lnk_paths: list[str]) -> dict[str, dict]:
     if not lnk_paths:
         return {}
 
-    # PowerShell script: lee paths de stdin, escribe metadata por cada uno.
-    # Separador "---" entre entries para parsing seguro.
-    ps_script = (
-        '$shell = New-Object -ComObject WScript.Shell\n'
-        'while ($p = [Console]::In.ReadLine()) {\n'
-        '    Write-Output ("PATH=" + $p)\n'
-        '    try {\n'
-        '        $sc = $shell.CreateShortcut($p)\n'
-        '        Write-Output ("TARGET=" + $sc.TargetPath)\n'
-        '        Write-Output ("ARGS=" + $sc.Arguments)\n'
-        '        Write-Output ("WD=" + $sc.WorkingDirectory)\n'
-        '    } catch {\n'
-        '        Write-Output ("ERROR=" + $_.Exception.Message)\n'
-        '    }\n'
-        '    Write-Output "---"\n'
-        '}\n'
-    )
-
-    # Pasamos paths via stdin separados por newlines. Una entrada por línea.
-    # Esto evita el límite de ~32KB del command-line argument de Windows.
-    stdin_input = "\n".join(lnk_paths) + "\n"
-
-    # Timeout escala con el batch size: base 8s + 50ms por path.
-    # 200 .lnk = 18s timeout cap.
-    timeout_seconds = 8.0 + len(lnk_paths) * 0.05
-
+    # Escribimos los paths a un archivo temp UTF-8. Get-Content luego los
+    # lee uno por uno. Usamos temp file en vez de stdin porque PowerShell
+    # 5.1 (default Windows) tiene problemas con [Console]::In cuando stdin
+    # viene redirigido via subprocess.
+    paths_file: Optional[str] = None
     try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-            input=stdin_input,
-            capture_output=True, text=True,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired:
-        _log.warning(
-            "Batch lnk read timeout (paths=%d, timeout=%.1fs)",
-            len(lnk_paths), timeout_seconds,
-        )
-        return {}
-    except Exception as _e:
-        _log.warning("Batch lnk read exception (paths=%d): %s", len(lnk_paths), _e)
-        return {}
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".ashley-lnk-paths.txt",
+            delete=False,
+            encoding="utf-8",
+        ) as f:
+            paths_file = f.name
+            f.write("\n".join(lnk_paths))
 
-    if result.returncode != 0:
-        _log.warning(
-            "Batch lnk read failed: rc=%d, stderr=%r",
-            result.returncode, (result.stderr or "").strip()[:200],
-        )
-        return {}
+        # Escape del path del temp file para PowerShell single-quoted
+        safe_paths_file = _ps_escape_single_quoted(paths_file)
 
-    return _parse_batch_lnk_output(result.stdout)
+        ps_script = (
+            "$shell = New-Object -ComObject WScript.Shell\n"
+            f"Get-Content -LiteralPath '{safe_paths_file}' -Encoding UTF8 | "
+            "ForEach-Object {\n"
+            "    $p = $_\n"
+            '    Write-Output ("PATH=" + $p)\n'
+            "    try {\n"
+            "        $sc = $shell.CreateShortcut($p)\n"
+            '        Write-Output ("TARGET=" + $sc.TargetPath)\n'
+            '        Write-Output ("ARGS=" + $sc.Arguments)\n'
+            '        Write-Output ("WD=" + $sc.WorkingDirectory)\n'
+            "    } catch {\n"
+            '        Write-Output ("ERROR=" + $_.Exception.Message)\n'
+            "    }\n"
+            '    Write-Output "---"\n'
+            "}\n"
+        )
+
+        # Timeout escala con el batch size: base 8s + 50ms por path.
+        # 200 .lnk = 18s timeout cap.
+        timeout_seconds = 8.0 + len(lnk_paths) * 0.05
+
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                capture_output=True, text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            _log.warning(
+                "Batch lnk read timeout (paths=%d, timeout=%.1fs)",
+                len(lnk_paths), timeout_seconds,
+            )
+            return {}
+        except Exception as _e:
+            _log.warning("Batch lnk read exception (paths=%d): %s", len(lnk_paths), _e)
+            return {}
+
+        if result.returncode != 0:
+            _log.warning(
+                "Batch lnk read failed: rc=%d, stderr=%r",
+                result.returncode, (result.stderr or "").strip()[:200],
+            )
+            return {}
+
+        return _parse_batch_lnk_output(result.stdout)
+    finally:
+        # Cleanup del temp file siempre, incluso si subprocess crashea
+        if paths_file:
+            try:
+                os.unlink(paths_file)
+            except OSError as _e:
+                _log.warning("No pude limpiar temp paths file %s: %s", paths_file, _e)
 
 
 def _parse_batch_lnk_output(stdout: str) -> dict[str, dict]:
@@ -482,19 +618,23 @@ def find_browser_shortcuts() -> list[dict]:
     Resultado típico: ~3-5s en PCs pobladas (antes 30s+).
     """
     # ── Fase 1: recolectar paths .lnk únicos
+    # v0.19.36 — usa _iter_lnk_files (depth limit + skip noise dirs)
+    # en vez de rglob("*.lnk"). Antes el rglob entraba a node_modules,
+    # .git, venv, etc. en proyectos del Desktop → escaneaba 100K+ files
+    # → wizard se colgaba eternamente.
     all_lnk_paths: list[str] = []
     seen_paths: set[str] = set()
     for loc in _shortcut_locations():
         if not loc.exists():
             continue
         try:
-            for lnk in loc.rglob("*.lnk"):
+            for lnk in _iter_lnk_files(loc):
                 lnk_str = str(lnk)
                 if lnk_str not in seen_paths:
                     seen_paths.add(lnk_str)
                     all_lnk_paths.append(lnk_str)
         except Exception as _e:
-            _log.warning("rglob falló en %s: %s", loc, _e)
+            _log.warning("scan falló en %s: %s", loc, _e)
             continue
 
     if not all_lnk_paths:
@@ -502,6 +642,22 @@ def find_browser_shortcuts() -> list[dict]:
 
     # ── Fase 2: batch read (1 subprocess para TODOS los paths)
     info_by_path = _read_lnks_batch(all_lnk_paths)
+
+    # v0.19.36 — FALLBACK: si el batch devolvió vacío pero TENÍAMOS paths,
+    # algo salió mal con PowerShell (timeout, syntax error, COM issue).
+    # Caemos al reader per-file que es más lento (~100ms × N) pero más
+    # robusto. Sin esto, el wizard reportaría "no Chromium browsers found"
+    # falsamente cuando solo es un fallo del batch.
+    if not info_by_path and all_lnk_paths:
+        _log.warning(
+            "Batch reader devolvió vacío para %d paths — fallback a per-file",
+            len(all_lnk_paths),
+        )
+        info_by_path = {}
+        for lnk_str in all_lnk_paths:
+            info = _read_lnk_via_ps(lnk_str)
+            if info:
+                info_by_path[lnk_str] = info
 
     # ── Fase 3: filtrar a browsers Chromium y construir resultado
     found: list[dict] = []
