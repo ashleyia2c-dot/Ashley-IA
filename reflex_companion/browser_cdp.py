@@ -52,10 +52,14 @@ service_worker, browser) son internals que no nos interesan.
 """
 
 import json
+import logging
 import urllib.request
 import urllib.parse
 import urllib.error
 from typing import Optional
+
+
+_log = logging.getLogger("ashley.browser_cdp")
 
 
 # Puerto default del flag --remote-debugging-port. El user (o un setup
@@ -66,6 +70,18 @@ DEFAULT_CDP_PORT = 9222
 # Timeout para todas las llamadas. CDP responde en sub-100ms cuando todo
 # va bien — 1.5s de cap es safety neta, no afecta UX en happy path.
 _DEFAULT_TIMEOUT = 1.5
+
+
+# v0.19.34 (H5) — Lista de marcas de browser que esperamos en el campo
+# "Browser" del endpoint /json/version. Si responde algo que NO matchea
+# ninguna de estas, asumimos que NO es un Chromium real (alguna otra app
+# está squatteando el puerto 9222) y devolvemos is_cdp_available=False.
+# Sin esto, cualquier servicio random en :9222 hacía que las llamadas
+# CDP siguientes fallaran con errores raros que confundían al user.
+_CHROMIUM_BROWSER_MARKERS = (
+    "Chrome", "Chromium", "Edge", "Brave", "Opera", "Vivaldi",
+    "HeadlessChrome",
+)
 
 
 def _get_json(url: str, timeout: float = _DEFAULT_TIMEOUT):
@@ -84,15 +100,31 @@ def _get_json(url: str, timeout: float = _DEFAULT_TIMEOUT):
 
 
 def is_cdp_available(port: int = DEFAULT_CDP_PORT) -> bool:
-    """¿Hay un browser corriendo con CDP en este puerto?
+    """¿Hay un browser CHROMIUM corriendo con CDP en este puerto?
 
     Llama al endpoint /json/version que devuelve metadata del browser.
-    Si responde 200 con JSON válido → CDP activo. Si timeout o connection
-    refused → CDP no activo (probablemente el browser arrancó sin el flag
-    o no hay browser corriendo).
+    Si responde 200 con JSON válido Y el campo "Browser" matchea uno de
+    los marcadores Chromium conocidos → CDP activo. Si timeout, connection
+    refused, o el responder NO es Chromium → False.
+
+    v0.19.34 (H5): antes solo verificábamos que ALGO respondiera en el
+    puerto. Si otra app (Docker, otro IDE) estaba squatteando :9222,
+    devolvíamos True optimistamente y luego las llamadas CDP fallaban
+    con errores raros. Ahora exigimos que la respuesta venga de un
+    browser Chromium real.
     """
     info = _get_json(f"http://127.0.0.1:{port}/json/version")
-    return info is not None
+    if info is None:
+        return False
+    browser = str(info.get("Browser") or "")
+    if not any(marker in browser for marker in _CHROMIUM_BROWSER_MARKERS):
+        _log.warning(
+            "Puerto %d responde pero NO es Chromium (Browser=%r). "
+            "Otra app está usando este puerto; CDP no está disponible.",
+            port, browser,
+        )
+        return False
+    return True
 
 
 def get_browser_info(port: int = DEFAULT_CDP_PORT) -> Optional[dict]:
