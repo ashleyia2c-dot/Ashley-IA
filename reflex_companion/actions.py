@@ -435,6 +435,17 @@ _ACTION_MSGS = {
         "ru": "URL открыт: {url}",
         "ko": "URL 열었어: {url}",
     },
+    # v0.19.42 — cuando dedupe CDP detecta que la URL ya está abierta y
+    # solo activa esa tab (no abre otra)
+    "url_already_open": {
+        "en": "Switched to existing tab: {url}",
+        "es": "Cambiado a la pestaña existente: {url}",
+        "fr": "Basculé vers l'onglet existant : {url}",
+        "ja": "既存のタブに切り替えました: {url}",
+        "de": "Zu vorhandenem Tab gewechselt: {url}",
+        "ru": "Переключился на существующую вкладку: {url}",
+        "ko": "기존 탭으로 전환했어: {url}",
+    },
     # ── play_music ─────────────────────────────────────────────────
     "music_playing": {
         "en": "Playing: '{title}'",
@@ -1315,20 +1326,168 @@ def play_music(query: str, browser_already_open: bool = False,
     return _amsg(lang, "music_open_failed", title=title), False, False
 
 
+# ── Helper: abrir URL via CDP con la lógica defensiva v0.19.41 ────────────────
+
+def _normalize_url_for_match(url: str) -> str:
+    """Normaliza una URL para comparar tabs existentes con dedupe.
+
+    Quita fragments (#section) y trailing slash. URLs no se case-lowerean
+    porque path/query SON case-sensitive según HTTP spec.
+    """
+    if not url:
+        return ""
+    url = url.split("#")[0]
+    if url.endswith("/"):
+        url = url[:-1]
+    return url
+
+
+def _open_url_cdp_safe(
+    url: str,
+    prefer_cdp: bool = False,
+    dedupe: bool = True,
+) -> tuple[bool, bool]:
+    """v0.19.42 — Abre una URL con la misma lógica defensiva que play_music
+    v0.19.41:
+
+    1. Pre-action dedupe (si dedupe=True y CDP disponible):
+       Si una tab existente tiene la MISMA URL (normalizada), la activa
+       en vez de abrir otra. Returns (already_open=True, opened_ok=True).
+
+    2. CDP path (si prefer_cdp=True y CDP disponible):
+       - new_tab() devuelve dict con id → success
+       - new_tab() devuelve None → polea hasta 10s buscando la URL en
+         las tabs (fast 1s + slow 9s para PCs lentos). Si aparece →
+         success. Si no aparece tras 10s → return success optimista
+         (la HTTP request ya se envió, no abrir otra para evitar
+         duplicar en PCs lentos).
+       - CDP throws excepción → fallback a webbrowser.open
+
+    3. Fallback (si CDP no disponible o threw):
+       webbrowser.open directo (no dedupe posible).
+
+    Returns (already_open: bool, opened_ok: bool):
+      - (True, True): tab existente activada, no se abrió otra
+      - (False, True): se abrió tab nueva (vía CDP o webbrowser)
+      - (False, False): falló (raro, log con detalle)
+    """
+    import logging
+    log = logging.getLogger("ashley.url")
+
+    target_norm = _normalize_url_for_match(url)
+
+    # ── Phase 1: dedupe via CDP ──────────────────────────────────────────
+    if prefer_cdp and dedupe:
+        try:
+            from . import browser_cdp as _cdp
+            if _cdp.is_cdp_available():
+                all_tabs = _cdp.list_tabs()
+                for t in all_tabs:
+                    tab_url_norm = _normalize_url_for_match(t.get("url") or "")
+                    if tab_url_norm == target_norm:
+                        log.warning(
+                            "open_url: %s already in tab %s, activating instead "
+                            "of re-opening", url, t.get("id"),
+                        )
+                        # Activar la tab existente (traerla al frente)
+                        try:
+                            _cdp.activate_tab(t["id"])
+                        except Exception as _e:
+                            log.warning("activate_tab failed: %s", _e)
+                        return True, True
+        except Exception as _e:
+            log.warning(f"open_url: dedupe check failed ({_e}), continuing")
+
+    # ── Phase 2: CDP path con poll defensivo ─────────────────────────────
+    if prefer_cdp:
+        try:
+            from . import browser_cdp as _cdp
+            if _cdp.is_cdp_available():
+                new_t = _cdp.new_tab(url)
+                if new_t and new_t.get("id"):
+                    log.warning(f"open_url: CDP opened tab id={new_t['id']}")
+                    return False, True
+
+                # new_tab returned None — poll URL-based (no fallback double-open)
+                log.warning(
+                    "open_url: CDP new_tab=None for %s, polling up to 10s "
+                    "(NO fallback a webbrowser.open)", url,
+                )
+
+                def _tab_appeared() -> bool:
+                    try:
+                        all_tabs = _cdp.list_tabs()
+                    except Exception:
+                        return False
+                    for t in all_tabs:
+                        if _normalize_url_for_match(t.get("url") or "") == target_norm:
+                            return True
+                    return False
+
+                # Phase 1: 4 polls × 250ms = 1s (PCs rápidos)
+                for attempt in range(4):
+                    if attempt > 0:
+                        time.sleep(0.25)
+                    if _tab_appeared():
+                        log.warning(
+                            "open_url: tab apareció en poll rápido (attempt %d)",
+                            attempt + 1,
+                        )
+                        return False, True
+
+                # Phase 2: 12 polls × 750ms = 9s (PCs lentos / cold browser)
+                for attempt in range(12):
+                    time.sleep(0.75)
+                    if _tab_appeared():
+                        log.warning(
+                            "open_url: tab apareció en poll lento (attempt %d)",
+                            attempt + 1,
+                        )
+                        return False, True
+
+                # 10s sin tab visible. Asumir optimista (mejor que duplicar).
+                log.warning(
+                    "open_url: tab no apareció en 10s — asumiendo browser "
+                    "la abrirá (NO duplicar con webbrowser.open)"
+                )
+                return False, True
+        except Exception as _e:
+            log.warning(
+                f"open_url: CDP path THREW ({_e}), fallback to webbrowser.open"
+            )
+
+    # ── Phase 3: fallback webbrowser.open ─────────────────────────────────
+    log.warning(f"open_url: usando webbrowser.open para {url}")
+    try:
+        webbrowser.open(url)
+        return False, True
+    except Exception as _e:
+        log.warning(f"open_url: webbrowser.open failed: {_e}")
+        return False, False
+
+
 # ── Búsqueda web ──────────────────────────────────────────────────────────────
 
-def search_web(query: str, lang: str = "en") -> str:
+def search_web(query: str, prefer_cdp: bool = False, lang: str = "en") -> str:
+    """v0.19.42 — Acepta prefer_cdp para usar el path CDP (rápido, sin
+    foco visible). NO dedupe porque cada búsqueda Google puede querer
+    resultados frescos."""
     url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
-    webbrowser.open(url)
+    _open_url_cdp_safe(url, prefer_cdp=prefer_cdp, dedupe=False)
     return _amsg(lang, "search_web", query=query)
 
 
 # ── Abrir URL ─────────────────────────────────────────────────────────────────
 
-def open_url(url: str, lang: str = "en") -> str:
+def open_url(url: str, prefer_cdp: bool = False, lang: str = "en") -> str:
+    """v0.19.42 — Acepta prefer_cdp para usar el path CDP. Con dedupe:
+    si la URL ya está abierta en otra tab, activa esa tab en vez de
+    abrir otra (evita acumulación de duplicados)."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    webbrowser.open(url)
+    already_open, _ok = _open_url_cdp_safe(url, prefer_cdp=prefer_cdp, dedupe=True)
+    if already_open:
+        return _amsg(lang, "url_already_open", url=url)
     return _amsg(lang, "open_url", url=url)
 
 
@@ -2354,11 +2513,19 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
                     "screenshot": None, "browser_opened": new_flag}
 
         elif action_type == "search_web":
-            return {"success": True, "result": search_web(params[0] if params else "", lang=lang),
+            # v0.19.42 — pasa prefer_cdp para usar el path CDP cuando esté
+            # activo (rápido + sin foco visible).
+            return {"success": True,
+                    "result": search_web(params[0] if params else "",
+                                         prefer_cdp=prefer_cdp, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "open_url":
-            return {"success": True, "result": open_url(params[0] if params else "", lang=lang),
+            # v0.19.42 — pasa prefer_cdp para usar el path CDP con dedupe
+            # (si ya está abierta esa URL, activa esa tab en vez de duplicar).
+            return {"success": True,
+                    "result": open_url(params[0] if params else "",
+                                       prefer_cdp=prefer_cdp, lang=lang),
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "volume":
