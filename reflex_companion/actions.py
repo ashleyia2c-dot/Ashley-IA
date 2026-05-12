@@ -1038,7 +1038,53 @@ def play_music(query: str, browser_already_open: bool = False,
                     # v0.19.24 E6 — no resolvimos a video; solo abrimos
                     # search results. Ser honestos con el user / Ashley.
                     return _amsg(lang, "music_search_only", query=query), False, True
-                log.warning("play_music: CDP path — new_tab returned None, falling back")
+
+                # v0.19.38 — BUG FIX CRÍTICO: si new_tab() devuelve None
+                # (típicamente porque el HTTP response de CDP tardó >3s),
+                # NO podemos asumir que el browser no abrió la tab. Opera
+                # en particular suele abrir la tab pero responder lento.
+                # Antes caíamos directo a webbrowser.open → SEGUNDO TAB.
+                # Ahora poleamos brevemente para verificar si la tab apareció.
+                log.warning(
+                    "play_music: CDP path — new_tab returned None, "
+                    "polling tabs to verify before fallback"
+                )
+                import re as _re
+                vid_match = _re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', video_url)
+                target_vid = vid_match.group(1) if vid_match else None
+                # 4 attempts × 250ms = 1s max polling
+                tab_appeared = False
+                for attempt in range(4):
+                    if attempt > 0:
+                        time.sleep(0.25)
+                    try:
+                        current_tabs = _cdp.find_tabs_matching("youtube")
+                    except Exception:
+                        current_tabs = []
+                    for t in current_tabs:
+                        tab_url = t.get("url") or ""
+                        # Match por videoId si lo tenemos (URL canónica),
+                        # o por URL exacta si no
+                        if target_vid and target_vid in tab_url:
+                            tab_appeared = True
+                            break
+                        if not target_vid and video_url in tab_url:
+                            tab_appeared = True
+                            break
+                    if tab_appeared:
+                        log.warning(
+                            "play_music: CDP tab appeared on poll attempt %d "
+                            "(new_tab response was slow but request worked)",
+                            attempt + 1,
+                        )
+                        if resolved_ok:
+                            return _amsg(lang, "music_playing", title=title), True, True
+                        return _amsg(lang, "music_search_only", query=query), False, True
+
+                log.warning(
+                    "play_music: CDP request returned None AND no tab "
+                    "appeared after polling — falling back to webbrowser.open"
+                )
             except Exception as _e:
                 log.warning(f"play_music: CDP path failed ({_e}), falling back to webbrowser.open")
 
@@ -1080,6 +1126,45 @@ def play_music(query: str, browser_already_open: bool = False,
     if captured:
         _youtube_hwnd = captured
     log.warning(f"play_music: captured hwnd={_youtube_hwnd}")
+
+    # v0.19.38 — Belt-and-suspenders dedupe: si CDP está disponible Y
+    # encontramos 2+ tabs con el mismo videoId, cerramos los extras.
+    # Defensa contra cualquier path donde webbrowser.open + algún otro
+    # mecanismo abren tabs duplicadas del mismo video (ej. race con el
+    # CDP path arriba, browser extensions que auto-detectan URLs YT).
+    if prefer_cdp:
+        try:
+            from . import browser_cdp as _cdp
+            if _cdp.is_cdp_available():
+                import re as _re
+                vid_match = _re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', video_url)
+                if vid_match:
+                    target_vid = vid_match.group(1)
+                    # Dar tiempo a que el tab termine de cargar antes del sweep
+                    time.sleep(0.6)
+                    matching_tabs = []
+                    try:
+                        all_yt = _cdp.find_tabs_matching("youtube")
+                        for t in all_yt:
+                            if target_vid in (t.get("url") or ""):
+                                matching_tabs.append(t)
+                    except Exception:
+                        matching_tabs = []
+                    if len(matching_tabs) > 1:
+                        log.warning(
+                            "play_music: detected %d duplicate tabs with videoId %s "
+                            "— closing %d extras",
+                            len(matching_tabs), target_vid, len(matching_tabs) - 1,
+                        )
+                        # Mantenemos el primero (más reciente puede aún estar
+                        # cargando), cerramos los demás
+                        for extra in matching_tabs[1:]:
+                            try:
+                                _cdp.close_tab(extra["id"])
+                            except Exception as _e:
+                                log.warning("Failed closing duplicate tab: %s", _e)
+        except Exception as _e:
+            log.warning("play_music: dedupe sweep failed (%s) — non-critical", _e)
 
     # ── VERIFICACIÓN post-acción ────────────────────────────────────────
     # Esperar a que el browser procese + UIA refleje el cambio. Aumentado
