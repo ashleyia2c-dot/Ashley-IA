@@ -208,7 +208,7 @@ UI = {
         "settings_cdp_on":      "ON — Ashley controls the browser via CDP",
         "settings_cdp_off":     "OFF — Ashley uses keyboard simulation (legacy)",
         "settings_cdp_desc":    "When ON, Ashley talks directly to the browser through localhost:9222 (no keyboard simulation, no visible tab cycling, sub-100ms). Falls back to legacy mode automatically if the browser doesn't respond. Trade-off: any local app could connect to that port — risk is low for users without active malware.",
-        "settings_cdp_howto":   "Activating this toggle automatically modifies your browser's shortcuts (Chrome/Edge/Brave/Opera...) to add the required flag. Originals are backed up — turning OFF restores them exactly. After activating, close and reopen your browser for the change to take effect.",
+        "settings_cdp_howto":   "Activating this toggle automatically modifies your browser's shortcuts (Chrome/Edge/Brave/Opera...) to add the required flag. Originals are backed up — turning OFF restores them exactly. After activating, close and reopen your browser for the change to take effect. ⚠ If you usually open your browser from a taskbar pin, open it from the Start Menu or Desktop instead — taskbar pins on Windows 10/11 may bypass the wizard.",
 
         # Wake word (always-on listening, opt-in)
         "settings_wakeword_heading": "🎙 Wake word (always-on listening)",
@@ -457,7 +457,7 @@ UI = {
         "settings_cdp_on":      "ACTIVADO — Ashley controla el navegador vía CDP",
         "settings_cdp_off":     "DESACTIVADO — Ashley usa simulación de teclado (clásico)",
         "settings_cdp_desc":    "Cuando está ACTIVADO, Ashley se conecta directamente al navegador en localhost:9222 — sin simulación de teclas, sin pestañas cambiando visiblemente, sub-100ms. Cae automático al modo clásico si el navegador no responde. Trade-off: cualquier app local podría conectarse a ese puerto — riesgo bajo si no tienes malware activo.",
-        "settings_cdp_howto":   "Al activar este toggle Ashley modifica automáticamente los accesos directos de tu navegador (Chrome/Edge/Brave/Opera...) para añadir el flag necesario. Los originales se guardan en backup — al desactivar se restauran tal cual estaban. Después de activar, cierra y reabre tu navegador para que el cambio tenga efecto.",
+        "settings_cdp_howto":   "Al activar este toggle Ashley modifica automáticamente los accesos directos de tu navegador (Chrome/Edge/Brave/Opera...) para añadir el flag necesario. Los originales se guardan en backup — al desactivar se restauran tal cual estaban. Después de activar, cierra y reabre tu navegador para que el cambio tenga efecto. ⚠ Si normalmente abres el navegador desde un pin de la barra de tareas, ábrelo desde el Menú Inicio o el Escritorio — los pins del taskbar en Windows 10/11 pueden saltarse el wizard.",
 
         # Wake word (escucha siempre, opt-in)
         "settings_wakeword_heading": "🎙 Palabra clave (escucha siempre)",
@@ -702,7 +702,7 @@ UI = {
         "settings_cdp_on":      "ACTIVÉ — Ashley contrôle le navigateur via CDP",
         "settings_cdp_off":     "DÉSACTIVÉ — Ashley utilise la simulation clavier (classique)",
         "settings_cdp_desc":    "Quand ACTIVÉ, Ashley parle directement au navigateur via localhost:9222 — pas de simulation clavier, pas d'onglets visibles qui défilent, sub-100ms. Bascule automatiquement au mode classique si le navigateur ne répond pas. Compromis : n'importe quelle app locale pourrait se connecter à ce port — risque faible sans malware actif.",
-        "settings_cdp_howto":   "Activer ce toggle modifie automatiquement les raccourcis de ton navigateur (Chrome/Edge/Brave/Opera...) pour ajouter le flag requis. Les originaux sont sauvegardés — désactiver les restaure exactement. Après activation, ferme et rouvre ton navigateur pour appliquer le changement.",
+        "settings_cdp_howto":   "Activer ce toggle modifie automatiquement les raccourcis de ton navigateur (Chrome/Edge/Brave/Opera...) pour ajouter le flag requis. Les originaux sont sauvegardés — désactiver les restaure exactement. Après activation, ferme et rouvre ton navigateur pour appliquer le changement. ⚠ Si tu ouvres habituellement ton navigateur depuis une épingle de la barre des tâches, ouvre-le plutôt depuis le menu Démarrer ou le Bureau — les épingles de la barre des tâches sur Windows 10/11 peuvent contourner l'assistant.",
 
         # Wake word (écoute permanente, opt-in)
         "settings_wakeword_heading": "🎙 Mot de réveil (écoute permanente)",
@@ -959,7 +959,7 @@ UI = {
         "settings_cdp_on":      "ON — AshleyがCDP経由でブラウザを制御",
         "settings_cdp_off":     "OFF — Ashleyはキーボードシミュレーションを使用 (レガシー)",
         "settings_cdp_desc":    "ONの場合、Ashleyはlocalhost:9222経由でブラウザに直接話します (キーボードシミュレーションなし、目に見えるタブ切り替えなし、100ms未満)。ブラウザが応答しない場合は自動的にレガシーモードにフォールバック。トレードオフ:任意のローカルアプリがそのポートに接続できる — アクティブなマルウェアがないユーザーにとってリスクは低い。",
-        "settings_cdp_howto":   "このトグルを有効にすると、ブラウザのショートカット (Chrome/Edge/Brave/Opera...) が自動的に変更され、必要なフラグが追加されます。元のものはバックアップされます — OFFにすると正確に復元されます。有効化後、ブラウザを閉じて再度開いて変更を反映してください。",
+        "settings_cdp_howto":   "このトグルを有効にすると、ブラウザのショートカット (Chrome/Edge/Brave/Opera...) が自動的に変更され、必要なフラグが追加されます。元のものはバックアップされます — OFFにすると正確に復元されます。有効化後、ブラウザを閉じて再度開いて変更を反映してください。⚠ 普段タスクバーのピンからブラウザを開いてるなら、代わりにスタートメニューかデスクトップから開いてね — Windows 10/11のタスクバーピンはウィザードを迂回することがあります。",
 
         # Wake word
         "settings_wakeword_heading": "🎙 ウェイクワード (常時リスニング)",
@@ -1219,7 +1219,7 @@ UI = {
         "settings_cdp_on":      "EIN — Ashley steuert den Browser via CDP",
         "settings_cdp_off":     "AUS — Ashley nutzt Tastatursimulation (klassisch)",
         "settings_cdp_desc":    "Wenn EIN, spricht Ashley direkt mit dem Browser über localhost:9222 (keine Tastatursimulation, kein sichtbares Tab-Wechseln, sub-100ms). Fällt automatisch in den klassischen Modus zurück, wenn der Browser nicht antwortet. Kompromiss: jede lokale App könnte sich mit diesem Port verbinden — geringes Risiko für Nutzer ohne aktive Malware.",
-        "settings_cdp_howto":   "Aktivieren dieses Toggles modifiziert automatisch die Verknüpfungen deines Browsers (Chrome/Edge/Brave/Opera...) und fügt das nötige Flag hinzu. Originale werden gesichert — Ausschalten stellt sie genau wieder her. Nach dem Aktivieren schließe und öffne deinen Browser, damit die Änderung wirksam wird.",
+        "settings_cdp_howto":   "Aktivieren dieses Toggles modifiziert automatisch die Verknüpfungen deines Browsers (Chrome/Edge/Brave/Opera...) und fügt das nötige Flag hinzu. Originale werden gesichert — Ausschalten stellt sie genau wieder her. Nach dem Aktivieren schließe und öffne deinen Browser, damit die Änderung wirksam wird. ⚠ Wenn du deinen Browser normalerweise von einer Taskleisten-Anheftung öffnest, öffne ihn stattdessen vom Startmenü oder Desktop — Taskleisten-Anheftungen unter Windows 10/11 können den Assistenten umgehen.",
 
         # Wake word
         "settings_wakeword_heading": "🎙 Aktivierungswort (immer-an Lauschen)",
@@ -1479,7 +1479,7 @@ UI = {
         "settings_cdp_on":      "ВКЛ — Ashley управляет браузером через CDP",
         "settings_cdp_off":     "ВЫКЛ — Ashley использует имитацию клавиатуры (классический)",
         "settings_cdp_desc":    "Когда ВКЛ, Ashley общается напрямую с браузером через localhost:9222 (без имитации клавиатуры, без видимых переключений вкладок, sub-100мс). Автоматически откатывается на классический режим, если браузер не отвечает. Компромисс: любое локальное приложение могло бы подключиться к этому порту — риск низкий для пользователей без активного malware.",
-        "settings_cdp_howto":   "Активация этого тоггла автоматически модифицирует ярлыки твоего браузера (Chrome/Edge/Brave/Opera...) добавляя нужный флаг. Оригиналы сохраняются — выключение восстанавливает их в точности. После активации закрой и снова открой браузер, чтобы изменения применились.",
+        "settings_cdp_howto":   "Активация этого тоггла автоматически модифицирует ярлыки твоего браузера (Chrome/Edge/Brave/Opera...) добавляя нужный флаг. Оригиналы сохраняются — выключение восстанавливает их в точности. После активации закрой и снова открой браузер, чтобы изменения применились. ⚠ Если ты обычно открываешь браузер из закреплённого ярлыка на панели задач, открывай его из меню Пуск или с Рабочего стола — закреплённые ярлыки на Windows 10/11 могут обойти мастер.",
 
         # Wake word
         "settings_wakeword_heading": "🎙 Слово-активатор (постоянное прослушивание)",
@@ -1739,7 +1739,7 @@ UI = {
         "settings_cdp_on":      "켜짐 — Ashley가 CDP로 브라우저 제어",
         "settings_cdp_off":     "꺼짐 — Ashley가 키보드 시뮬레이션 사용 (레거시)",
         "settings_cdp_desc":    "켜면 Ashley가 localhost:9222 통해서 브라우저랑 직접 대화해 (키보드 시뮬레이션 없음, 보이는 탭 전환 없음, sub-100ms). 브라우저가 응답 안 하면 자동으로 레거시 모드로 폴백. 트레이드오프: 어떤 로컬 앱이든 그 포트에 연결할 수 있어 — 활성 멀웨어 없는 사용자라면 위험은 낮아.",
-        "settings_cdp_howto":   "이 토글 켜면 자동으로 브라우저 단축키 (Chrome/Edge/Brave/Opera...) 가 수정되어 필요한 플래그가 추가돼. 원본은 백업돼 — 끄면 정확히 복원돼. 활성화 후, 변경 사항 적용하려면 브라우저 닫고 다시 열어.",
+        "settings_cdp_howto":   "이 토글 켜면 자동으로 브라우저 단축키 (Chrome/Edge/Brave/Opera...) 가 수정되어 필요한 플래그가 추가돼. 원본은 백업돼 — 끄면 정확히 복원돼. 활성화 후, 변경 사항 적용하려면 브라우저 닫고 다시 열어. ⚠ 평소에 작업 표시줄 핀에서 브라우저를 여는 거면, 시작 메뉴나 바탕화면에서 열어줘 — Windows 10/11의 작업 표시줄 핀은 위자드를 우회할 수 있어.",
 
         # Wake word
         "settings_wakeword_heading": "🎙 깨움 단어 (항상 듣기)",

@@ -212,6 +212,125 @@ def _shortcut_locations() -> list[Path]:
     return [p for p in candidates if _is_writable_dir(p)]
 
 
+def _read_lnks_batch(lnk_paths: list[str]) -> dict[str, dict]:
+    """v0.19.35 (M3) — Lee MUCHOS .lnk en UNA sola invocación de PowerShell.
+
+    Antes: `find_browser_shortcuts()` llamaba a `_read_lnk_via_ps` por
+    cada .lnk → 1 subprocess Python por .lnk → ~100ms × N. En PCs
+    pobladas (300+ shortcuts en Start Menu) eso eran 30-60s con la UI
+    bloqueada en el spinner del wizard CDP.
+
+    Ahora: 1 PowerShell process que recibe TODOS los paths via stdin
+    (evita los 32KB del límite de command-line de Windows) y los procesa
+    con un loop interno. Latencia: ~3-5s para 200 .lnk vs ~30s antes.
+
+    Cada .lnk individual se envuelve en try/catch dentro del script —
+    un .lnk corrupto NO rompe el batch entero, solo se omite.
+
+    Returns dict {path: {target, arguments, working_directory}}. Solo
+    incluye paths que se leyeron exitosamente (los corruptos/permission
+    errors quedan fuera del dict).
+    """
+    if not lnk_paths:
+        return {}
+
+    # PowerShell script: lee paths de stdin, escribe metadata por cada uno.
+    # Separador "---" entre entries para parsing seguro.
+    ps_script = (
+        '$shell = New-Object -ComObject WScript.Shell\n'
+        'while ($p = [Console]::In.ReadLine()) {\n'
+        '    Write-Output ("PATH=" + $p)\n'
+        '    try {\n'
+        '        $sc = $shell.CreateShortcut($p)\n'
+        '        Write-Output ("TARGET=" + $sc.TargetPath)\n'
+        '        Write-Output ("ARGS=" + $sc.Arguments)\n'
+        '        Write-Output ("WD=" + $sc.WorkingDirectory)\n'
+        '    } catch {\n'
+        '        Write-Output ("ERROR=" + $_.Exception.Message)\n'
+        '    }\n'
+        '    Write-Output "---"\n'
+        '}\n'
+    )
+
+    # Pasamos paths via stdin separados por newlines. Una entrada por línea.
+    # Esto evita el límite de ~32KB del command-line argument de Windows.
+    stdin_input = "\n".join(lnk_paths) + "\n"
+
+    # Timeout escala con el batch size: base 8s + 50ms por path.
+    # 200 .lnk = 18s timeout cap.
+    timeout_seconds = 8.0 + len(lnk_paths) * 0.05
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            input=stdin_input,
+            capture_output=True, text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        _log.warning(
+            "Batch lnk read timeout (paths=%d, timeout=%.1fs)",
+            len(lnk_paths), timeout_seconds,
+        )
+        return {}
+    except Exception as _e:
+        _log.warning("Batch lnk read exception (paths=%d): %s", len(lnk_paths), _e)
+        return {}
+
+    if result.returncode != 0:
+        _log.warning(
+            "Batch lnk read failed: rc=%d, stderr=%r",
+            result.returncode, (result.stderr or "").strip()[:200],
+        )
+        return {}
+
+    return _parse_batch_lnk_output(result.stdout)
+
+
+def _parse_batch_lnk_output(stdout: str) -> dict[str, dict]:
+    """Parsea el output del batch reader. Devuelve dict {path: info}.
+
+    Estructura esperada por entry:
+        PATH=<path>
+        TARGET=<target>      (o ERROR=<msg> si falló)
+        ARGS=<args>
+        WD=<working_dir>
+        ---
+
+    Skipea entries con ERROR= (corruptos) o sin TARGET= (parse rota).
+    """
+    result: dict[str, dict] = {}
+    current_path: Optional[str] = None
+    current: dict = {}
+    had_error = False
+
+    for raw_line in stdout.split("\n"):
+        line = raw_line.rstrip("\r")
+        if line.startswith("PATH="):
+            # Reset para nueva entrada
+            current_path = line[5:]
+            current = {}
+            had_error = False
+        elif line.startswith("TARGET=") and current_path is not None:
+            current["target"] = line[7:]
+        elif line.startswith("ARGS=") and current_path is not None:
+            current["arguments"] = line[5:]
+        elif line.startswith("WD=") and current_path is not None:
+            current["working_directory"] = line[3:]
+        elif line.startswith("ERROR=") and current_path is not None:
+            had_error = True
+            _log.warning("Batch read error for %s: %s", current_path, line[6:])
+        elif line == "---" and current_path is not None:
+            # Cierre de entry — solo añadir si no hubo error y leímos target
+            if not had_error and current.get("target") is not None:
+                result[current_path] = current
+            current_path = None
+            current = {}
+            had_error = False
+
+    return result
+
+
 def _read_lnk_via_ps(lnk_path: str) -> Optional[dict]:
     """Lee un .lnk usando WScript.Shell COM via PowerShell.
 
@@ -351,50 +470,65 @@ def find_browser_shortcuts() -> list[dict]:
           - target_exe: nombre del .exe (chrome.exe, etc)
           - has_cdp_flag: bool — ya está modificado o no
           - arguments: string con los args actuales
-    """
-    found: list[dict] = []
-    seen_paths: set[str] = set()
 
+    v0.19.35 (M3): rediseño en 2 fases. Antes 1 subprocess PowerShell por
+    .lnk encontrado (~100ms × N) → 30-60s en PCs pobladas. Ahora:
+      • Fase 1 — recolectar TODOS los paths .lnk (Python file system,
+        millisegundos)
+      • Fase 2 — leer metadata de todos en UN SOLO batch PowerShell
+        (~3-5s para 200 .lnk)
+      • Fase 3 — filtrar a Chromium browsers en Python (instantáneo)
+
+    Resultado típico: ~3-5s en PCs pobladas (antes 30s+).
+    """
+    # ── Fase 1: recolectar paths .lnk únicos
+    all_lnk_paths: list[str] = []
+    seen_paths: set[str] = set()
     for loc in _shortcut_locations():
         if not loc.exists():
             continue
         try:
-            lnks = list(loc.rglob("*.lnk"))
+            for lnk in loc.rglob("*.lnk"):
+                lnk_str = str(lnk)
+                if lnk_str not in seen_paths:
+                    seen_paths.add(lnk_str)
+                    all_lnk_paths.append(lnk_str)
         except Exception as _e:
-            # rglob puede fallar en symlinks circulares o permisos raros
             _log.warning("rglob falló en %s: %s", loc, _e)
             continue
-        for lnk in lnks:
-            lnk_str = str(lnk)
-            if lnk_str in seen_paths:
+
+    if not all_lnk_paths:
+        return []
+
+    # ── Fase 2: batch read (1 subprocess para TODOS los paths)
+    info_by_path = _read_lnks_batch(all_lnk_paths)
+
+    # ── Fase 3: filtrar a browsers Chromium y construir resultado
+    found: list[dict] = []
+    for lnk_str in all_lnk_paths:
+        info = info_by_path.get(lnk_str)
+        if not info:
+            continue  # batch read falló para este .lnk (corrupto/permisos)
+        try:
+            target = (info.get("target") or "").strip()
+            if not target:
                 continue
-            seen_paths.add(lnk_str)
-            try:
-                info = _read_lnk_via_ps(lnk_str)
-                if not info:
-                    continue
-                target = (info.get("target") or "").strip()
-                if not target:
-                    continue
-                exe_name = Path(target).name.lower()
-                if exe_name not in _CHROMIUM_EXES:
-                    continue
-                args = info.get("arguments") or ""
-                # v0.19.6 — limpieza opportunistic: si hay un .bak legacy
-                # tirado al lado de este .lnk, lo movemos a la carpeta nueva
-                # del data dir. Así desde la primera vez que el user abre
-                # Settings → CDP, los .bak desaparecen del escritorio.
-                _migrate_legacy_backup(lnk_str)
-                found.append({
-                    "path": lnk_str,
-                    "browser": _browser_friendly_name(exe_name),
-                    "target_exe": exe_name,
-                    "has_cdp_flag": CDP_FLAG in args,
-                    "arguments": args,
-                })
-            except Exception as _e:
-                _log.warning("Error procesando .lnk %s: %s", lnk_str, _e)
+            exe_name = Path(target).name.lower()
+            if exe_name not in _CHROMIUM_EXES:
                 continue
+            args = info.get("arguments") or ""
+            # v0.19.6 — limpieza opportunistic de .bak legacy junto al .lnk.
+            _migrate_legacy_backup(lnk_str)
+            found.append({
+                "path": lnk_str,
+                "browser": _browser_friendly_name(exe_name),
+                "target_exe": exe_name,
+                "has_cdp_flag": CDP_FLAG in args,
+                "arguments": args,
+            })
+        except Exception as _e:
+            _log.warning("Error procesando .lnk %s: %s", lnk_str, _e)
+            continue
     return found
 
 
