@@ -134,24 +134,53 @@ class TestCDPNewTabNoneButTabAppeared:
         )
         assert success is True
 
-    def test_falls_back_when_tab_truly_did_not_open(
+    def test_no_fallback_when_poll_exhausts_without_tab_appearing(
             self, fast_sleep, mock_cdp_module, stub_legacy_deps):
-        """Si new_tab → None Y el poll NO encuentra la tab (CDP genuinamente
-        falló), entonces SÍ debe fallback a webbrowser.open."""
+        """v0.19.39 — REGLA NUEVA: si CDP estaba disponible y new_tab fue
+        llamado, NUNCA hacemos fallback a webbrowser.open desde el path
+        CDP. Aunque el poll de 10s no encuentre la tab, asumimos que el
+        browser eventualmente la abrirá (mejor que duplicar en PCs lentos).
+
+        Antes (v0.19.38): poll fallaba → fallback → 2 tabs en PCs lentos.
+        Ahora (v0.19.39): poll falla → return success optimista, NO fallback.
+        """
         from reflex_companion import actions
 
-        # find_tabs_matching siempre devuelve [] → tab nunca apareció
+        # find_tabs_matching siempre devuelve [] → tab nunca aparece
         mock_cdp_module.find_tabs_matching.return_value = []
         mock_cdp_module.new_tab.return_value = None
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(_vid_url("xyz98765432"), "Music")):
+            msg, _, success = actions.play_music("test", prefer_cdp=True, lang="en")
+
+        # CRÍTICO v0.19.39: NO debe haber fallback a webbrowser.open
+        # incluso si el poll falla totalmente
+        assert not stub_legacy_deps.called, (
+            "v0.19.39: con CDP disponible, NUNCA fallback a webbrowser.open "
+            "desde el path CDP. Si la HTTP request se envió, asumimos que "
+            "el browser eventualmente abrirá la tab. Hacer fallback duplica "
+            "tabs en PCs lentos donde el browser tarda >10s en cold start."
+        )
+
+    def test_falls_back_only_when_cdp_path_throws_exception(
+            self, fast_sleep, mock_cdp_module, stub_legacy_deps):
+        """v0.19.39 — el ÚNICO caso donde fallbackeamos a webbrowser.open
+        desde el path CDP es cuando CDP REALMENTE lanzó una excepción
+        (no solo lento)."""
+        from reflex_companion import actions
+
+        # CDP path crashea con excepción real
+        mock_cdp_module.find_tabs_matching.side_effect = RuntimeError("CDP crashed")
+
+        with patch("reflex_companion.actions._resolve_youtube_url",
+                   return_value=(_vid_url("crash1234567"), "Music")):
             actions.play_music("test", prefer_cdp=True, lang="en")
 
-        # Cuando el poll también falla, SÍ debemos hacer fallback
+        # Excepción real → SÍ debe fallback (red de seguridad)
         assert stub_legacy_deps.called, (
-            "Si CDP genuinamente falla (new_tab=None Y tab no aparece "
-            "en poll), debe haber fallback a webbrowser.open"
+            "Cuando CDP path REALMENTE crashea con excepción (no solo "
+            "lento), SÍ debe fallback a webbrowser.open como red de seguridad"
         )
 
 
@@ -188,40 +217,47 @@ class TestPostActionDedupeSweep:
     """v0.19.38 — si tras toda la lógica resultan 2+ tabs con el mismo
     videoId, el sweep final cierra los extras."""
 
-    def test_closes_duplicates_when_two_tabs_same_videoid(
+    def test_closes_duplicates_when_cdp_threw_and_legacy_path_ran(
             self, fast_sleep, mock_cdp_module, stub_legacy_deps):
+        """v0.19.39 — sweep se ejecuta cuando CDP path lanzó excepción y
+        caímos a webbrowser.open. Si tras eso hay 2+ tabs con el mismo
+        videoId, sweep cierra los extras.
+
+        (En v0.19.39, este es el ÚNICO escenario donde sweep corre desde
+        CDP-then-legacy, porque con poll exhausto NO caemos a legacy.)
+        """
         from reflex_companion import actions
 
         target_url = _vid_url("dup12345678")
         target_vid = "dup12345678"
 
-        # Simulamos el flow completo:
-        #   1ª call: dedupe-init check → []
-        #   2ª call: close-old-yt loop → []
-        #   3ª-6ª: poll attempts (4 max) → todos []
-        #   7ª: sweep después de webbrowser.open → DOS tabs duplicadas
+        # CDP path crashea → fallback a legacy → webbrowser.open → sweep
+        # ve los dos tabs (uno del browser que abrió pre-crash, otro
+        # de webbrowser.open). Sweep cierra el extra.
         call_count = {"n": 0}
 
         def fake_find_tabs(hint, port=9222):
             call_count["n"] += 1
-            if call_count["n"] <= 6:
-                return []  # Nada en poll
-            # Sweep ve los dos duplicados
+            if call_count["n"] == 1:
+                # Init dedupe check al top de play_music — no existing
+                return []
+            # Sweep call (después de webbrowser.open) ve los duplicados
             return [
                 {"id": "tab1", "title": "Dup - YT", "url": target_url},
                 {"id": "tab2", "title": "Dup - YT", "url": target_url},
             ]
 
+        # Hacemos que el CDP path crashee para que caiga a legacy
+        # (close_tab del loop close-old-yt OK, pero new_tab raises)
         mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
-        mock_cdp_module.new_tab.return_value = None  # forzar fallback
+        mock_cdp_module.new_tab.side_effect = RuntimeError("simulated CDP crash")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(target_url, "Dup Music")):
             actions.play_music("dup", prefer_cdp=True, lang="en")
 
-        # El sweep debe haber llamado close_tab
+        # Sweep debe haber cerrado el duplicado
         close_calls = mock_cdp_module.close_tab.call_args_list
-        # Verificamos que se cerró al menos UNA tab del par (la duplicada)
         close_ids = [c.args[0] if c.args else c.kwargs.get("tab_id")
                      for c in close_calls]
         assert "tab2" in close_ids, (
@@ -239,25 +275,114 @@ class TestPostActionDedupeSweep:
 
         def fake_find_tabs(hint, port=9222):
             call_count["n"] += 1
-            if call_count["n"] <= 6:
+            # Calls 1 (init dedupe) y 2 (close-old-yt loop): no hay tabs
+            # viejas → no se cierran (el_one NO está aún)
+            if call_count["n"] <= 2:
                 return []
+            # Sweep call: ahora sí hay 1 tab (la nueva), pero solo 1 → no
+            # debe cerrarse
             return [
                 {"id": "the_one", "title": "Solo - YT", "url": target_url},
             ]
 
+        # Forzar fallback via CDP exception
         mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
-        mock_cdp_module.new_tab.return_value = None
+        mock_cdp_module.new_tab.side_effect = RuntimeError("CDP crash")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(target_url, "Solo")):
             actions.play_music("solo", prefer_cdp=True, lang="en")
 
-        # close_tab no debe llamarse para "the_one" (es la única)
+        # close_tab no debe llamarse para "the_one" (es la única tras la acción)
         close_calls = mock_cdp_module.close_tab.call_args_list
         close_ids = [c.args[0] if c.args else c.kwargs.get("tab_id")
                      for c in close_calls]
         assert "the_one" not in close_ids, (
             "El sweep NO debe cerrar tabs cuando solo hay 1"
+        )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  v0.19.39 — Slow PC scenarios (cold browser start, HDD, antivirus)
+# ════════════════════════════════════════════════════════════════════════
+
+
+class TestSlowPCScenarios:
+    """v0.19.39 — el problema específico del user: en PCs gama baja
+    el browser puede tardar mucho en abrir la tab. NUNCA debemos
+    abrir una segunda tab por impaciencia."""
+
+    def test_extended_poll_finds_tab_after_slow_browser(
+            self, fast_sleep, mock_cdp_module, stub_legacy_deps):
+        """Simula PC lento: tab aparece SOLO después del 6º poll attempt
+        (~5s). El código v0.19.38 con poll de 1s habría caído a fallback.
+        v0.19.39 con poll de 10s debe encontrarla."""
+        from reflex_companion import actions
+
+        target_url = _vid_url("slow12345678")
+        call_count = {"n": 0}
+
+        def fake_find_tabs(hint, port=9222):
+            call_count["n"] += 1
+            # Calls 1-2: init dedupe + close-old-yt loop → []
+            # Calls 3-7: poll attempts 1-5 → [] (browser still loading)
+            # Call 8+: poll attempt 6 finalmente ve la tab
+            if call_count["n"] < 8:
+                return []
+            return [{
+                "id": "slow_tab",
+                "title": "Slow Music - YouTube",
+                "url": target_url,
+            }]
+
+        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
+        mock_cdp_module.new_tab.return_value = None  # CDP timeout en PC lento
+
+        with patch("reflex_companion.actions._resolve_youtube_url",
+                   return_value=(target_url, "Slow Music")):
+            msg, _, success = actions.play_music(
+                "slow song", prefer_cdp=True, lang="en",
+            )
+
+        assert success is True
+        assert not stub_legacy_deps.called, (
+            "v0.19.39: en PC lento donde tab tarda 5s en aparecer, NO "
+            "debe haber fallback a webbrowser.open. El poll de 10s la encuentra."
+        )
+
+    def test_extended_poll_maxes_at_10_seconds(
+            self, fast_sleep, mock_cdp_module, stub_legacy_deps):
+        """El poll NO debe esperar más de ~10s incluso si la tab nunca aparece.
+        Después de 10s asumimos optimistamente que el browser la abrirá."""
+        from reflex_companion import actions
+
+        # find_tabs_matching siempre [] → tab nunca aparece
+        mock_cdp_module.find_tabs_matching.return_value = []
+        mock_cdp_module.new_tab.return_value = None
+
+        # Trackear cuántas calls a find_tabs_matching hizo el código
+        # (debería ser limitado: dedupe init + close-old-yt + 4+12 polls)
+        call_count = {"n": 0}
+        original_side_effect = mock_cdp_module.find_tabs_matching.side_effect
+        def counted(hint, port=9222):
+            call_count["n"] += 1
+            return []
+        mock_cdp_module.find_tabs_matching.side_effect = counted
+
+        with patch("reflex_companion.actions._resolve_youtube_url",
+                   return_value=(_vid_url("never1234567"), "Never")):
+            actions.play_music("never", prefer_cdp=True, lang="en")
+
+        # Polls: 4 fast + 12 slow = 16 + init dedupe (1) + close-old-yt (1) = 18 max
+        # No fallback (sin webbrowser.open) por filosofía v0.19.39
+        assert not stub_legacy_deps.called, (
+            "Con poll exhausto (10s pasados sin tab), NO debe fallback. "
+            "Esperamos optimismamente que el browser la abrirá eventualmente."
+        )
+        # Sanity: no se polea más de ~20 veces
+        assert call_count["n"] <= 25, (
+            f"find_tabs_matching llamada {call_count['n']} veces — "
+            "demasiado, debería capped a ~18"
         )
 
 

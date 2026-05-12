@@ -1021,10 +1021,8 @@ def play_music(query: str, browser_already_open: bool = False,
         if _cdp.is_cdp_available():
             try:
                 # Bonus del path CDP: cerrar la(s) tab(s) anterior(es) de
-                # YouTube antes de abrir la nueva. Esto evita la acumulación
-                # de tabs que pasa con webbrowser.open. Atomico: si falla la
-                # nueva, las anteriores ya están cerradas — caemos al fallback
-                # que abrirá una nueva limpia.
+                # YouTube antes de abrir la nueva. Evita acumulación de
+                # tabs que pasa con webbrowser.open.
                 old_yt = _cdp.find_tabs_matching("youtube")
                 for t in old_yt:
                     _cdp.close_tab(t["id"])
@@ -1035,58 +1033,92 @@ def play_music(query: str, browser_already_open: bool = False,
                     log.warning(f"play_music: CDP path — opened tab id={new_t['id']}")
                     if resolved_ok:
                         return _amsg(lang, "music_playing", title=title), True, True
-                    # v0.19.24 E6 — no resolvimos a video; solo abrimos
-                    # search results. Ser honestos con el user / Ashley.
                     return _amsg(lang, "music_search_only", query=query), False, True
 
-                # v0.19.38 — BUG FIX CRÍTICO: si new_tab() devuelve None
-                # (típicamente porque el HTTP response de CDP tardó >3s),
-                # NO podemos asumir que el browser no abrió la tab. Opera
-                # en particular suele abrir la tab pero responder lento.
-                # Antes caíamos directo a webbrowser.open → SEGUNDO TAB.
-                # Ahora poleamos brevemente para verificar si la tab apareció.
+                # v0.19.38 / v0.19.39 — new_tab devolvió None.
+                #
+                # CASO COMÚN en PCs lentos / cold browser start:
+                #   • La HTTP request a /json/new SÍ llegó al browser
+                #   • El browser está procesando (cold start = 5-15s en
+                #     PCs de gama baja con HDD)
+                #   • _get_json hizo timeout en 3s → devolvió None
+                #   • PERO la tab eventualmente APARECERÁ
+                #
+                # v0.19.38 (incompleto): poleábamos 1s y luego fallback a
+                # webbrowser.open. En PCs lentos eso seguía duplicando.
+                #
+                # v0.19.39 (este fix): SI CDP estaba disponible, NUNCA hacemos
+                # fallback a webbrowser.open desde aquí. La request ya fue
+                # enviada — abrir otra duplica garantizado en PCs lentos.
+                # Polemos hasta 10s (cubre cold starts de browser realistas).
+                # Si tras 10s aún no aparece, asumimos optimistamente que
+                # el browser eventualmente la abrirá y reportamos éxito.
                 log.warning(
-                    "play_music: CDP path — new_tab returned None, "
-                    "polling tabs to verify before fallback"
+                    "play_music: CDP new_tab=None — polling up to 10s "
+                    "(NO fallback a webbrowser.open para evitar duplicar)"
                 )
                 import re as _re
                 vid_match = _re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', video_url)
                 target_vid = vid_match.group(1) if vid_match else None
-                # 4 attempts × 250ms = 1s max polling
-                tab_appeared = False
-                for attempt in range(4):
-                    if attempt > 0:
-                        time.sleep(0.25)
+
+                def _tab_appeared() -> bool:
                     try:
                         current_tabs = _cdp.find_tabs_matching("youtube")
                     except Exception:
-                        current_tabs = []
+                        return False
                     for t in current_tabs:
                         tab_url = t.get("url") or ""
-                        # Match por videoId si lo tenemos (URL canónica),
-                        # o por URL exacta si no
                         if target_vid and target_vid in tab_url:
-                            tab_appeared = True
-                            break
+                            return True
                         if not target_vid and video_url in tab_url:
-                            tab_appeared = True
-                            break
-                    if tab_appeared:
+                            return True
+                    return False
+
+                # Fase 1: 4 polls rápidos (250ms × 4 = 1s) para PCs rápidos
+                for attempt in range(4):
+                    if attempt > 0:
+                        time.sleep(0.25)
+                    if _tab_appeared():
                         log.warning(
-                            "play_music: CDP tab appeared on poll attempt %d "
-                            "(new_tab response was slow but request worked)",
+                            "play_music: CDP tab apareció en poll rápido (attempt %d)",
                             attempt + 1,
                         )
                         if resolved_ok:
                             return _amsg(lang, "music_playing", title=title), True, True
                         return _amsg(lang, "music_search_only", query=query), False, True
 
+                # Fase 2: 12 polls más lentos (750ms × 12 = 9s) para PCs lentos
+                # con cold browser start. Total max polling: 1 + 9 = 10s.
+                for attempt in range(12):
+                    time.sleep(0.75)
+                    if _tab_appeared():
+                        log.warning(
+                            "play_music: CDP tab apareció en poll lento (attempt %d, ~%.1fs total)",
+                            attempt + 1, 1 + (attempt + 1) * 0.75,
+                        )
+                        if resolved_ok:
+                            return _amsg(lang, "music_playing", title=title), True, True
+                        return _amsg(lang, "music_search_only", query=query), False, True
+
+                # 10s pasaron y tab no apareció. Pero la HTTP request fue
+                # enviada. Asumir optimismamente que el browser eventualmente
+                # la abrirá (mejor que duplicar). El user puede retry si no
+                # se abrió en absoluto.
                 log.warning(
-                    "play_music: CDP request returned None AND no tab "
-                    "appeared after polling — falling back to webbrowser.open"
+                    "play_music: CDP tab no apareció en 10s — asumiendo "
+                    "browser la abrirá (NO duplicar con webbrowser.open)"
                 )
+                if resolved_ok:
+                    return _amsg(lang, "music_playing", title=title), True, True
+                return _amsg(lang, "music_search_only", query=query), False, True
             except Exception as _e:
-                log.warning(f"play_music: CDP path failed ({_e}), falling back to webbrowser.open")
+                # Solo fallbackeamos si CDP REALMENTE crasheó con excepción
+                # (no si solo fue lento). Esto preserva la red de seguridad
+                # cuando CDP genuinamente falla.
+                log.warning(
+                    f"play_music: CDP path THREW exception ({_e}), "
+                    "fallback to webbrowser.open"
+                )
 
     # Snapshot PRE-acción: cuántas pestañas hay en navegadores antes de actuar.
     # Usamos este conteo para verificar que la pestaña realmente se abrió.
