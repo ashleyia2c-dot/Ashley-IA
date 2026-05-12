@@ -998,6 +998,13 @@ def play_music(query: str, browser_already_open: bool = False,
     # Ashley emitió dos veces seguidas la misma URL → 2 tabs idénticas.
     # Si ya existe una tab con la URL EXACTA o con el videoId en el href,
     # no reabrimos. Mejor reportar éxito y dejar al user con UNA tab.
+    #
+    # v0.19.41 — BUG FIX: antes usábamos `find_tabs_matching("youtube")`
+    # que filtra por TITLE. Pero Opera (y otros browsers) muestran el
+    # title como "Daft Punk - Harder, Better..." SIN la palabra "youtube"
+    # → dedupe fallaba → SE ABRÍA UNA SEGUNDA TAB del mismo video.
+    # Ahora filtramos por URL (siempre contiene "youtube.com" y se setea
+    # INMEDIATAMENTE al crear la tab, antes de que cargue el title).
     if prefer_cdp:
         try:
             from . import browser_cdp as _cdp
@@ -1007,9 +1014,17 @@ def play_music(query: str, browser_already_open: bool = False,
                 vid_match = _re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', video_url)
                 if vid_match:
                     target_vid = vid_match.group(1)
-                    existing_tabs = _cdp.find_tabs_matching("youtube")
-                    for t in existing_tabs:
-                        if target_vid in (t.get("url") or ""):
+                    # v0.19.41 — list_tabs + URL filter (no title-based).
+                    # OJO: videoIds de YouTube son CASE-SENSITIVE
+                    # (dQw4w9WgXcQ != dqw4w9wgxcq). Lower solo para
+                    # detectar el dominio "youtube.com", el videoId
+                    # se compara con case original.
+                    all_tabs = _cdp.list_tabs()
+                    for t in all_tabs:
+                        tab_url = t.get("url") or ""
+                        if "youtube.com" not in tab_url.lower():
+                            continue
+                        if target_vid in tab_url:  # case-sensitive
                             log.warning(f"play_music: video {target_vid} already in tab {t['id']}, NOT re-opening")
                             return _amsg(lang, "music_playing", title=title), True, True
         except Exception as _e:
@@ -1023,7 +1038,16 @@ def play_music(query: str, browser_already_open: bool = False,
                 # Bonus del path CDP: cerrar la(s) tab(s) anterior(es) de
                 # YouTube antes de abrir la nueva. Evita acumulación de
                 # tabs que pasa con webbrowser.open.
-                old_yt = _cdp.find_tabs_matching("youtube")
+                #
+                # v0.19.41 — filter por URL (no title). find_tabs_matching
+                # falla cuando el title no contiene "youtube" (común en
+                # Opera y otros browsers que muestran solo el nombre del
+                # video como title).
+                all_tabs_for_close = _cdp.list_tabs()
+                old_yt = [
+                    t for t in all_tabs_for_close
+                    if "youtube.com" in (t.get("url") or "").lower()
+                ]
                 for t in old_yt:
                     _cdp.close_tab(t["id"])
                 log.warning(f"play_music: CDP path — closed {len(old_yt)} old YouTube tab(s)")
@@ -1062,12 +1086,20 @@ def play_music(query: str, browser_already_open: bool = False,
                 target_vid = vid_match.group(1) if vid_match else None
 
                 def _tab_appeared() -> bool:
+                    # v0.19.41 — list_tabs + URL filter (no title-based).
+                    # Antes find_tabs_matching("youtube") esperaba que el
+                    # title incluyera "youtube" — Opera no lo hace
+                    # inmediatamente, causando polls de 5-10s
+                    # innecesarios. URL se setea al instante.
+                    # OJO: videoIds case-sensitive — no lower del URL completo.
                     try:
-                        current_tabs = _cdp.find_tabs_matching("youtube")
+                        all_tabs = _cdp.list_tabs()
                     except Exception:
                         return False
-                    for t in current_tabs:
+                    for t in all_tabs:
                         tab_url = t.get("url") or ""
+                        if "youtube.com" not in tab_url.lower():
+                            continue
                         if target_vid and target_vid in tab_url:
                             return True
                         if not target_vid and video_url in tab_url:
@@ -1176,9 +1208,12 @@ def play_music(query: str, browser_already_open: bool = False,
                     time.sleep(0.6)
                     matching_tabs = []
                     try:
-                        all_yt = _cdp.find_tabs_matching("youtube")
-                        for t in all_yt:
-                            if target_vid in (t.get("url") or ""):
+                        # v0.19.41 — URL filter (no title-based).
+                        # videoIds case-sensitive.
+                        all_tabs_sweep = _cdp.list_tabs()
+                        for t in all_tabs_sweep:
+                            tab_url = t.get("url") or ""
+                            if "youtube.com" in tab_url.lower() and target_vid in tab_url:
                                 matching_tabs.append(t)
                     except Exception:
                         matching_tabs = []

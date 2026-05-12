@@ -46,6 +46,7 @@ def mock_cdp_module():
     mock = MagicMock()
     mock.is_cdp_available.return_value = True
     mock.find_tabs_matching.return_value = []
+    mock.list_tabs.return_value = []
     mock.close_tab.return_value = True
     mock.new_tab.return_value = None
 
@@ -106,7 +107,7 @@ class TestCDPNewTabNoneButTabAppeared:
         # luego devuelve la tab que abrió CDP (visible en poll)
         polled_state = {"calls": 0}
 
-        def fake_find_tabs(hint, port=9222):
+        def fake_find_tabs(*_args, **_kwargs):
             polled_state["calls"] += 1
             if polled_state["calls"] == 1:
                 return []  # Loop close-old-yt: no hay tabs viejas
@@ -116,7 +117,8 @@ class TestCDPNewTabNoneButTabAppeared:
                 "url": target_url,
             }]
 
-        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
+        mock_cdp_module.list_tabs.side_effect = fake_find_tabs
+        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs  # legacy compat
         mock_cdp_module.new_tab.return_value = None  # ← Bug trigger
 
         with patch("reflex_companion.actions._resolve_youtube_url",
@@ -148,6 +150,7 @@ class TestCDPNewTabNoneButTabAppeared:
 
         # find_tabs_matching siempre devuelve [] → tab nunca aparece
         mock_cdp_module.find_tabs_matching.return_value = []
+        mock_cdp_module.list_tabs.return_value = []
         mock_cdp_module.new_tab.return_value = None
 
         with patch("reflex_companion.actions._resolve_youtube_url",
@@ -172,6 +175,7 @@ class TestCDPNewTabNoneButTabAppeared:
 
         # CDP path crashea con excepción real
         mock_cdp_module.find_tabs_matching.side_effect = RuntimeError("CDP crashed")
+        mock_cdp_module.list_tabs.side_effect = RuntimeError("CDP crashed")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(_vid_url("crash1234567"), "Music")):
@@ -194,6 +198,7 @@ class TestCDPNewTabSuccessNoFallthrough:
         url = _vid_url("ok123456789")
         mock_cdp_module.new_tab.return_value = {"id": "new1", "url": url}
         mock_cdp_module.find_tabs_matching.return_value = []  # no old tabs
+        mock_cdp_module.list_tabs.return_value = []  # v0.19.41 path
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(url, "OK Music")):
@@ -236,7 +241,7 @@ class TestPostActionDedupeSweep:
         # de webbrowser.open). Sweep cierra el extra.
         call_count = {"n": 0}
 
-        def fake_find_tabs(hint, port=9222):
+        def fake_find_tabs(*_args, **_kwargs):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # Init dedupe check al top de play_music — no existing
@@ -249,7 +254,8 @@ class TestPostActionDedupeSweep:
 
         # Hacemos que el CDP path crashee para que caiga a legacy
         # (close_tab del loop close-old-yt OK, pero new_tab raises)
-        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
+        mock_cdp_module.list_tabs.side_effect = fake_find_tabs
+        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs  # legacy compat
         mock_cdp_module.new_tab.side_effect = RuntimeError("simulated CDP crash")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
@@ -273,7 +279,7 @@ class TestPostActionDedupeSweep:
         target_url = _vid_url("solo12345678")
         call_count = {"n": 0}
 
-        def fake_find_tabs(hint, port=9222):
+        def fake_find_tabs(*_args, **_kwargs):
             call_count["n"] += 1
             # Calls 1 (init dedupe) y 2 (close-old-yt loop): no hay tabs
             # viejas → no se cierran (el_one NO está aún)
@@ -286,7 +292,8 @@ class TestPostActionDedupeSweep:
             ]
 
         # Forzar fallback via CDP exception
-        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
+        mock_cdp_module.list_tabs.side_effect = fake_find_tabs
+        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs  # legacy compat
         mock_cdp_module.new_tab.side_effect = RuntimeError("CDP crash")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
@@ -322,7 +329,7 @@ class TestSlowPCScenarios:
         target_url = _vid_url("slow12345678")
         call_count = {"n": 0}
 
-        def fake_find_tabs(hint, port=9222):
+        def fake_find_tabs(*_args, **_kwargs):
             call_count["n"] += 1
             # Calls 1-2: init dedupe + close-old-yt loop → []
             # Calls 3-7: poll attempts 1-5 → [] (browser still loading)
@@ -335,7 +342,8 @@ class TestSlowPCScenarios:
                 "url": target_url,
             }]
 
-        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs
+        mock_cdp_module.list_tabs.side_effect = fake_find_tabs
+        mock_cdp_module.find_tabs_matching.side_effect = fake_find_tabs  # legacy compat
         mock_cdp_module.new_tab.return_value = None  # CDP timeout en PC lento
 
         with patch("reflex_companion.actions._resolve_youtube_url",
@@ -358,6 +366,7 @@ class TestSlowPCScenarios:
 
         # find_tabs_matching siempre [] → tab nunca aparece
         mock_cdp_module.find_tabs_matching.return_value = []
+        mock_cdp_module.list_tabs.return_value = []
         mock_cdp_module.new_tab.return_value = None
 
         # Trackear cuántas calls a find_tabs_matching hizo el código
@@ -400,9 +409,11 @@ class TestPreActionDedupeStillWorks:
         from reflex_companion import actions
 
         target_url = _vid_url("existing123")
-        mock_cdp_module.find_tabs_matching.return_value = [
+        existing_tab = [
             {"id": "old1", "title": "Existing", "url": target_url}
         ]
+        mock_cdp_module.find_tabs_matching.return_value = existing_tab
+        mock_cdp_module.list_tabs.return_value = existing_tab  # v0.19.41 path
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(target_url, "Existing")):
