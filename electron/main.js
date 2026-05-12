@@ -364,17 +364,62 @@ function killProcessesOnPort(port) {
 // Se ejecuta al arranque ANTES de pickReflexPorts, así garantizamos que
 // cada nueva sesión empieza con el PC limpio independientemente de cómo
 // terminó la anterior.
+// v0.19.43 — regex y match unificados para uso en sweep async (startup) y
+// sync (shutdown). Cubre TODOS los binarios que Ashley puede spawnar:
+//   python/pythonw — bundled en python-embed (subprocess Python para
+//     keyboard sim, granian worker, etc.)
+//   node/bun       — Reflex frontend dev server (legacy, raramente usado)
+//   reflex         — shim CLI
+//   granian        — HTTP server de Reflex (no es python.exe!)
+//   cloudflared    — tunnel para mobile companion
+function _buildAshleySweepScript(currentPid) {
+  // PowerShell escape: backslashes dobles y comillas simples duplicadas.
+  const safePath = PROJECT_ROOT.replace(/\\/g, '\\\\').replace(/'/g, "''");
+  // En producción los binarios están bajo Programs\Ashley\... — si el
+  // ExecutablePath contiene esa marca, es nuestro proceso aunque la
+  // CommandLine no incluya el repo path (ej. subprocess `python -c <script>`).
+  return [
+    "Get-CimInstance Win32_Process",
+    "| Where-Object { ($_.Name -match '^(python|pythonw|node|bun|reflex|granian|cloudflared)\\.exe$') -and (",
+    "    ($_.CommandLine -like '*" + safePath + "*') -or",
+    "    ($_.ExecutablePath -like '*" + safePath + "*') -or",
+    "    ($_.ExecutablePath -like '*\\Programs\\Ashley\\*')",
+    ") }",
+    "| Where-Object { $_.ProcessId -ne " + currentPid + " }",
+    "| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $_.ProcessId } catch {} }",
+  ].join(' ');
+}
+
+
+// v0.19.43 — versión SYNC para usar en killReflex donde no podemos
+// esperar a un Promise (Electron está en proceso de quit y la event loop
+// puede morir antes del callback async). Sin esto, el sweep async de la
+// versión vieja se cancela mid-flight y deja procesos huérfanos.
+function killStrayAshleyProcessesSync() {
+  if (process.platform !== 'win32') return 0;
+  const psScript = _buildAshleySweepScript(process.pid);
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync(
+      `powershell -NoProfile -NonInteractive -Command "${psScript}"`,
+      { windowsHide: true, timeout: 3000, encoding: 'utf-8' },
+    ) || '';
+    const killed = out.trim().split(/\s+/).filter(Boolean);
+    if (killed.length) {
+      log(`Zombies (sync sweep) exterminados: PIDs ${killed.join(', ')}`);
+    }
+    return killed.length;
+  } catch (err) {
+    log(`killStrayAshleyProcessesSync err: ${err.message}`);
+    return 0;
+  }
+}
+
+
 function killStrayAshleyProcesses() {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve(0);
-    // PowerShell escape: backslashes dobles y comillas simples duplicadas.
-    const safePath = PROJECT_ROOT.replace(/\\/g, '\\\\').replace(/'/g, "''");
-    const psScript = [
-      "Get-CimInstance Win32_Process",
-      "| Where-Object { ($_.Name -match '^(python|node|bun|reflex)') -and ($_.CommandLine -like '*" + safePath + "*') }",
-      "| Where-Object { $_.ProcessId -ne " + process.pid + " }",
-      "| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $_.ProcessId } catch {} }",
-    ].join(' ');
+    const psScript = _buildAshleySweepScript(process.pid);
     exec(
       `powershell -NoProfile -NonInteractive -Command "${psScript}"`,
       // 1500ms — PowerShell tarda 800-1200ms en spawnar + ejecutar el query
@@ -1537,11 +1582,25 @@ function killReflex() {
     }
   }
 
-  // Sweep adicional bloqueante: mata cualquier python.exe/node.exe
-  // que haya quedado huérfano antes de que Electron salga del todo.
-  // Sin filtros — durante un update queremos cero supervivientes.
+  // v0.19.43 — Sweep TARGETED bloqueante FIRST: mata cualquier proceso
+  // bajo nuestro install dir (Programs\Ashley\* o repo path). Más
+  // preciso que /F /IM (no mata Python del usuario) y SYNC (a diferencia
+  // del Promise asíncrono anterior que se cancelaba en mid-flight cuando
+  // Electron salía).
   if (process.platform === 'win32') {
-    for (const img of ['python.exe', 'node.exe', 'bun.exe', 'reflex.exe']) {
+    try { killStrayAshleyProcessesSync(); } catch {}
+  }
+
+  // Sweep amplio bloqueante: mata cualquier python.exe/cloudflared.exe
+  // /etc. que haya quedado huérfano antes de que Electron salga del todo.
+  // Sin filtros — durante un update queremos cero supervivientes.
+  // v0.19.43 — añadidos pythonw.exe (Python embeddable variant),
+  // granian.exe (Reflex HTTP server, NO es python.exe), cloudflared.exe
+  // (mobile companion tunnel). Estos faltaban antes y resultaban en
+  // procesos colgados al cerrar Ashley.
+  if (process.platform === 'win32') {
+    for (const img of ['python.exe', 'pythonw.exe', 'node.exe', 'bun.exe',
+                       'reflex.exe', 'granian.exe', 'cloudflared.exe']) {
       try {
         execSync(`taskkill /F /IM "${img}"`, {
           windowsHide: true,
@@ -1554,9 +1613,6 @@ function killReflex() {
       }
     }
   }
-
-  // Sweep async amplio (por si quedó algo que matchee por command line)
-  try { killStrayAshleyProcesses(); } catch {}
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────
