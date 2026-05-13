@@ -108,7 +108,8 @@ class TestOpenUrlDedupe:
         ]
 
         with patch("reflex_companion.actions.webbrowser.open") as mock_wbo:
-            msg = actions.open_url(target, prefer_cdp=True, lang="en")
+            # v0.19.45 — open_url ahora retorna (msg, success)
+            msg, ok = actions.open_url(target, prefer_cdp=True, lang="en")
 
         # NO debe haber llamado a new_tab (dedupe disparó)
         assert not mock_cdp_module.new_tab.called
@@ -118,6 +119,8 @@ class TestOpenUrlDedupe:
         mock_cdp_module.activate_tab.assert_called_once_with("t1")
         # Mensaje de "ya abierta" en lugar de "abierta"
         assert "existing" in msg.lower() or "switched" in msg.lower()
+        # success=True porque la tab ya estaba abierta
+        assert ok is True
 
     def test_dedupe_handles_trailing_slash_difference(
             self, fast_sleep, mock_cdp_module):

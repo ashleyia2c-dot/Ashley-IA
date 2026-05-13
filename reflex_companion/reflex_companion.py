@@ -279,6 +279,11 @@ class State(rx.State):
 
     # ── Modo de acciones ──────────────────────────────────
     auto_actions: bool = False
+    # ── Vision/Screen Awareness (v0.19.48) ─────────────────
+    # Cada 10min Ashley toma screenshot + LLM call para comentar lo que
+    # ve. Antes acoplado a auto_actions. Separado porque es CARO (~50%
+    # del coste API mensual). Default OFF — opt-in explícito por el user.
+    vision_enabled: bool = False
     # ── Flag de sesión para música ────────────────────────
     browser_opened: bool = False
     # ── Focus mode (oculta panel derecho) ─────────────────
@@ -525,8 +530,9 @@ class State(rx.State):
 
     # ── Voz ─────────────────────────────────────────────────
     def _persist_voice(self):
-        # vision_enabled se unificó bajo auto_actions — ya no vive en voice.json.
-        # El campo queda en los archivos antiguos y simplemente se ignora.
+        # v0.19.48 — vision_enabled vuelve a voice.json. Antes acoplado a
+        # auto_actions. Ahora opt-in independiente vía botón eye en el
+        # portrait overlay. Default OFF (cuesta ~$0.05/día en API).
         i18n.save_voice_config(
             self.tts_enabled, self.elevenlabs_key, self.voice_id,
             voice_mode=self.voice_mode,
@@ -542,6 +548,7 @@ class State(rx.State):
             discovery_enabled=self.discovery_enabled,
             cdp_enabled=self.cdp_enabled,
             wake_word_enabled=self.wake_word_enabled,
+            vision_enabled=self.vision_enabled,
             voice_speed=self.voice_speed,
         )
 
@@ -1401,6 +1408,10 @@ class State(rx.State):
         self.voice_mode = vcfg.get("voice_mode", False)
         # notifications: default True si no está en config (feature nueva)
         self.notifications_enabled = vcfg.get("notifications_enabled", True)
+        # v0.19.48 — vision/screen awareness. Default OFF — antes acoplado
+        # a auto_actions, pero es CARO (~$0.05/día sólo en LLM calls
+        # invisibles). Opt-in explícito por el user.
+        self.vision_enabled = vcfg.get("vision_enabled", False)
         # LLM provider config (feature nueva — default xai por retrocompat)
         self.llm_provider = vcfg.get("llm_provider", "xai") or "xai"
         self.openrouter_key = vcfg.get("openrouter_key", "") or ""
@@ -1432,8 +1443,6 @@ class State(rx.State):
         # Detectar si Ollama está corriendo (no bloqueamos arranque — 800ms max)
         if self.llm_provider == "ollama":
             self.refresh_ollama_status()
-        # NOTE: vision_enabled ya no existe — ahora va unificado bajo auto_actions.
-        # Si voice.json viejo trae la key, la ignoramos silenciosamente.
         #
         # v0.13.10: Whisper YA NO se warmup en on_load. Antes lanzábamos un
         # thread background que descargaba el modelo de 75MB + lo cargaba en
@@ -2008,9 +2017,10 @@ class State(rx.State):
             affection=self.affection,
             message_count=user_msg_count,
             facts_count=len(self.facts),
-            # "She Sees" se gana ahora cuando el user activa el awareness del PC
-            # (auto_actions), que es el toggle que le permite ver la pantalla.
-            vision_enabled=self.auto_actions,
+            # v0.19.48 — "She Sees" achievement requiere vision toggle ON
+            # (Screen Awareness, no auto_actions). Antes los dos estaban
+            # acoplados; ahora es opt-in separado vía botón eye.
+            vision_enabled=self.vision_enabled,
             used_mic=False,
             executed_action=executed_action,
             relationship_age_days=_rel_age,
@@ -2058,6 +2068,24 @@ class State(rx.State):
         if not actions_so_far:
             return
 
+        # v0.19.46 — CRÍTICO: si la cadena incluye `wait_then`, NO
+        # especular ninguna acción del turno. wait_then existe
+        # precisamente para encadenar acciones EN ORDEN (ej:
+        # play_music → wait 5s → click:like). Si especulamos, los
+        # threads corren EN PARALELO y wait_then despierta antes de
+        # que la tab nueva esté lista → click corre contra la tab
+        # vieja del user (bug confirmado en logs del user con
+        # `speculative=2` cuando esperaba `speculative=0`).
+        # Que finalize_response las ejecute secuencialmente. Pérdida
+        # de speedup ~3-5s, pero la chain funciona DE VERDAD.
+        if any(a.get("type") == "wait_then" for a in actions_so_far):
+            import logging as _logging
+            _logging.getLogger("ashley").warning(
+                "Skipping speculative dispatch — chain has wait_then "
+                "(needs sequential execution)."
+            )
+            return
+
         # Reflex State no permite atributos undeclared (raise "must be
         # declared before they can be set"). Storage del speculative
         # dispatch se mantiene en un dict module-level keyed por id(self).
@@ -2085,7 +2113,18 @@ class State(rx.State):
 
             # Reservar slot inmediatamente para evitar dispatch duplicado
             # en el siguiente chunk de stream (parsing es idempotente).
-            result_holder: dict = {"result": None}
+            #
+            # v0.19.45 (FASE 3) — `completed` flag separado de `result`.
+            # Antes finalize chequeaba `if pre_result is not None` para
+            # decidir reusar vs re-ejecutar. Si el worker crasheaba ANTES
+            # de setear `result`, finalize asumía "no terminó" y RE-
+            # EJECUTABA → causa raíz del bug 2-tabs en play_music.
+            #
+            # Ahora el worker SIEMPRE setea `completed = True` en el
+            # finally, incluso si el except path crasheó. Finalize
+            # chequea `completed` (no `result`), así un crash silencioso
+            # se trata como "terminó (con error)" y NO re-ejecuta.
+            result_holder: dict = {"result": None, "completed": False}
             slot[key] = (None, result_holder)
 
             def _worker(
@@ -2110,6 +2149,13 @@ class State(rx.State):
                         "screenshot": None,
                         "browser_opened": _bo,
                     }
+                finally:
+                    # v0.19.45 — completion flag siempre se marca.
+                    # Si el worker llega aquí, significa que terminó
+                    # (con éxito O con excepción). En cualquier caso, la
+                    # acción YA SE EJECUTÓ (side effects ya ocurrieron).
+                    # Finalize NO debe re-ejecutar.
+                    holder["completed"] = True
 
             try:
                 t = threading.Thread(target=_worker, daemon=True,
@@ -2323,24 +2369,30 @@ class State(rx.State):
                 }
         return cache["state_snapshot"]
 
-    def _cached_system_state(self) -> str:
+    def _cached_system_state(self, prefer_cdp: bool | None = None) -> str:
         """Devuelve get_system_state() con caché por turno. EnumWindows +
         UI Automation enumera todas las pestañas — la operación más cara
         en un turn (50-1000ms). Antes se llamaba 2 veces por turn cuando
         auto_actions=ON; ahora solo una.
         """
         cache = _get_turn_cache(id(self))
-        if "system_state_text" not in cache:
+        # v0.19.45 (FASE 4) — la cache key incluye `prefer_cdp` porque
+        # el contenido cambia (CDP da URLs, UIA solo titles). Sin esto,
+        # un toggle de CDP a mitad de sesión no se reflejaría en el
+        # contexto inyectado.
+        use_cdp = self.cdp_enabled if prefer_cdp is None else prefer_cdp
+        cache_key = "system_state_cdp" if use_cdp else "system_state_uia"
+        if cache_key not in cache:
             try:
                 from .actions import get_system_state
-                cache["system_state_text"] = get_system_state()
+                cache[cache_key] = get_system_state(prefer_cdp=use_cdp)
             except Exception as _e:
                 import logging
                 logging.getLogger("ashley").warning(
                     "get_system_state failed: %s", _e,
                 )
-                cache["system_state_text"] = ""
-        return cache["system_state_text"]
+                cache[cache_key] = ""
+        return cache[cache_key]
 
     def _message_needs_system_state(self, user_message: str) -> bool:
         """Decide si vale la pena inyectar la lista de ventanas/pestañas
@@ -2394,22 +2446,35 @@ class State(rx.State):
         capabilities = []
         if self.language == "fr":
             capabilities.append("=== TES CAPACITÉS ACTIVES ===")
-            # Extraemos las dos ramas a variables para evitar escape hell con los
-            # apostrofes franceses dentro de f-strings entre comillas simples.
+            # v0.19.50 — Actions y Vision desacopladas. Cada una con su
+            # propia descripción honest: Actions = control PC; Vision = ver
+            # pantalla. Antes acopladas en un solo "⚡ Actions".
             actions_on_fr = (
-                "ACTIVÉ — tu peux VOIR les fenêtres/onglets ouverts du patron, "
-                "prendre des captures d'écran et agir sur son PC (ouvrir apps, "
-                "fermer onglets, contrôler le volume, etc.)."
+                "ACTIVÉ — tu peux ouvrir des apps, contrôler le volume, fermer "
+                "des onglets/fenêtres, jouer de la musique, etc."
             )
             actions_off_fr = (
-                "DÉSACTIVÉ — tu es AVEUGLE par rapport au PC du patron. Tu ne "
-                "vois ni ses fenêtres, ni ses onglets, ni son écran. Tu ne peux "
-                "rien faire sur son PC. Si le patron te demande d'ouvrir/fermer/"
-                "voir quelque chose, dis-lui d'activer le toggle ⚡ Actions d'abord."
+                "DÉSACTIVÉ — tu ne peux rien contrôler sur le PC. Si le patron "
+                "te demande d'ouvrir/fermer/lancer quelque chose, dis-lui "
+                "d'activer le toggle ⚡ Actions d'abord."
             )
             capabilities.append(
-                "⚡ Actions (contrôle et conscience du PC) : "
+                "⚡ Actions (contrôle PC) : "
                 + (actions_on_fr if self.auto_actions else actions_off_fr)
+            )
+            vision_on_fr = (
+                "ACTIVÉ — tu peux VOIR l'écran du patron. Une capture d'écran "
+                "est jointe à chacun de ses messages, et tu jettes un œil "
+                "proactif toutes les 10 min."
+            )
+            vision_off_fr = (
+                "DÉSACTIVÉ — tu ne vois PAS l'écran du patron. Si il te demande "
+                "« regarde mon écran » ou similaire, dis-lui d'activer le bouton "
+                "👁 (sous ton portrait) d'abord."
+            )
+            capabilities.append(
+                "👁 Vision (regard sur l'écran) : "
+                + (vision_on_fr if self.vision_enabled else vision_off_fr)
             )
             capabilities.append(
                 "🌐 Mode navigateur moderne (CDP) : "
@@ -2462,7 +2527,33 @@ class State(rx.State):
             )
         elif self.language == "en":
             capabilities.append("=== YOUR ACTIVE CAPABILITIES ===")
-            capabilities.append(f"⚡ Actions (PC control & awareness): {'ON — you CAN see the boss open windows/tabs, take screenshots, and act on his PC (open apps, close tabs, control volume, etc.).' if self.auto_actions else 'OFF — you are BLIND to the boss PC. You cannot see his windows, tabs, or screen. You cannot control anything. If the boss asks you to open/close/see something, tell him to activate the ⚡ Actions toggle first.'}")
+            # v0.19.50 — Actions y Vision desacopladas (ver comentario FR).
+            actions_on_en = (
+                "ON — you can open apps, control volume, close tabs/windows, "
+                "play music, etc."
+            )
+            actions_off_en = (
+                "OFF — you cannot control anything on the PC. If the boss "
+                "asks you to open/close/launch something, tell him to "
+                "activate the ⚡ Actions toggle first."
+            )
+            capabilities.append(
+                "⚡ Actions (PC control): "
+                + (actions_on_en if self.auto_actions else actions_off_en)
+            )
+            vision_on_en = (
+                "ON — you CAN see the boss's screen. A screenshot is attached "
+                "to each of his messages, and you peek proactively every 10 min."
+            )
+            vision_off_en = (
+                "OFF — you do NOT see the boss's screen. If he asks 'look at "
+                "my screen' or similar, tell him to activate the 👁 button "
+                "(under your portrait) first."
+            )
+            capabilities.append(
+                "👁 Vision (screen awareness): "
+                + (vision_on_en if self.vision_enabled else vision_off_en)
+            )
             capabilities.append(
                 "🌐 Modern browser mode (CDP): "
                 + (
@@ -2492,9 +2583,36 @@ class State(rx.State):
             capabilities.append("IMPORTANT: Do NOT offer to do things you can't do. If Actions is OFF, don't say 'I'll open that for you' — say 'Activate ⚡ Actions and I can do that.'")
             capabilities.append("Do NOT offer to send messages, emails, or contact people — you cannot do that.")
             capabilities.append("Do NOT interpret notifications, popups, or small UI text from the screenshot — if you can't read it with 100% certainty, do NOT mention it. Don't invent names, times, or messages you 'think you see'.")
-        else:  # es
+        else:  # es (también fallback para ja/de/ru/ko)
             capabilities.append("=== TUS CAPACIDADES ACTIVAS ===")
-            capabilities.append(f"⚡ Acciones (control y visión del PC): {'ACTIVADO — PUEDES ver las ventanas/pestañas que tiene abiertas el jefe, tomar capturas de pantalla y actuar en su PC (abrir apps, cerrar pestañas, controlar volumen, etc.).' if self.auto_actions else 'DESACTIVADO — estás CIEGA respecto al PC del jefe. No ves sus ventanas, ni sus pestañas, ni su pantalla. No puedes controlar nada. Si el jefe te pide abrir/cerrar/ver algo, dile que active el toggle ⚡ Acciones primero.'}")
+            # v0.19.50 — Actions y Vision desacopladas (ver comentario FR).
+            actions_on_es = (
+                "ACTIVADO — puedes abrir apps, controlar volumen, cerrar "
+                "pestañas/ventanas, poner música, etc."
+            )
+            actions_off_es = (
+                "DESACTIVADO — no puedes controlar nada en el PC. Si el jefe "
+                "te pide abrir/cerrar/lanzar algo, dile que active el toggle "
+                "⚡ Acciones primero."
+            )
+            capabilities.append(
+                "⚡ Acciones (control PC): "
+                + (actions_on_es if self.auto_actions else actions_off_es)
+            )
+            vision_on_es = (
+                "ACTIVADO — PUEDES ver la pantalla del jefe. Se adjunta una "
+                "captura de pantalla a cada uno de sus mensajes, y echas un "
+                "vistazo proactivo cada 10 min."
+            )
+            vision_off_es = (
+                "DESACTIVADO — NO ves la pantalla del jefe. Si te pide "
+                "\"mira mi pantalla\" o similar, dile que active el botón "
+                "👁 (bajo tu retrato) primero."
+            )
+            capabilities.append(
+                "👁 Visión (mirar pantalla): "
+                + (vision_on_es if self.vision_enabled else vision_off_es)
+            )
             capabilities.append(
                 "🌐 Modo browser moderno (CDP): "
                 + (
@@ -3190,14 +3308,20 @@ class State(rx.State):
                 logging.getLogger("ashley").warning("system state snapshot failed: %s", _e)
 
         # ── Screenshot de contexto (Ashley ve tu pantalla) ──────
-        # Tomamos screenshot + lista verificada de ventanas SOLO si auto_actions
-        # está ON. Este es el toggle maestro: "Actions" controla tanto el
-        # control del PC como toda la visibilidad (ventanas, tabs, screenshots).
-        # Con Actions OFF, Ashley es totalmente ciega al contenido del PC —
-        # garantía de privacidad para cuando el user hace algo privado y no
-        # quiere que Ashley vea nada.
+        # v0.19.50 — DESACOPLADO de auto_actions. Ahora vision_enabled
+        # controla TODOS los paths donde Ashley mira pantalla:
+        #   1. Per-turn screenshot adjunto (este bloque) — cuando user pide
+        #      "mira mi pantalla" o cualquier cosa donde Ashley necesita
+        #      contexto visual.
+        #   2. Bg_task proactive vision cada 10min — ya separado en v0.19.48.
+        #
+        # Antes acoplado a auto_actions: si user activaba ⚡ Actions para
+        # play_music + click, Ashley empezaba a adjuntar screenshot cada msg
+        # SIN que el user lo supiera (~+1500 tokens/msg invisibles).
+        # Y si user activaba solo 👁 Vision, "mira mi pantalla" NO funcionaba.
+        # Ahora limpio: Vision toggle = único control para screenshots.
         _t0 = _t.monotonic()
-        if self.auto_actions and messages_for_llm:
+        if self.vision_enabled and messages_for_llm:
             last_msg = messages_for_llm[-1]
             if last_msg.get("role") == "user" and not last_msg.get("image"):
                 try:
@@ -3331,19 +3455,15 @@ class State(rx.State):
                 if spec is not None:
                     # Pre-dispatched durante stream.
                     #
-                    # v0.19.44 — timeout dinámico por tipo de acción.
-                    # Antes (v0.14.1+): join(timeout=1.0) para todo.
-                    # Eso provocaba el bug exacto del user: speculative
-                    # de play_music tarda hasta 20s (8s scrape + 3s CDP
-                    # + 10s poll), tras 1s thread aún corriendo →
-                    # pre_result is None → fallback a
-                    # _execute_and_record_action → play_music SE
-                    # EJECUTABA OTRA VEZ → 2 tabs del mismo video.
+                    # v0.19.44 — timeout dinámico por tipo de acción
+                    # (30s long-running, 1.5s resto). Speculative corre
+                    # DURANTE stream (3-5s) — tiene ese head start.
                     #
-                    # Ahora: 30s para acciones long-running, 1.5s para
-                    # las demás. Note: speculative corre DURANTE stream
-                    # (3-5s) — el speculative tiene ese head start, así
-                    # que en práctica nunca llegamos a esperar 30s.
+                    # v0.19.45 (FASE 3) — Chequeamos `completed` (no
+                    # `result is not None`) para detectar crashes
+                    # silenciosos del worker. Si el worker llegó al
+                    # finally, AYA EJECUTÓ la acción (con éxito o con
+                    # error) y NO debemos re-ejecutar.
                     thread, holder = spec
                     if thread is not None:
                         spec_timeout = (
@@ -3353,6 +3473,7 @@ class State(rx.State):
                         )
                         thread.join(timeout=spec_timeout)
                     pre_result = holder.get("result")
+                    spec_completed = holder.get("completed", False)
                     if pre_result is not None:
                         # Reusar el resultado del thread + replicar el
                         # state mgmt que _execute_and_record_action haría
@@ -3373,8 +3494,52 @@ class State(rx.State):
                             "image": result.get("screenshot") or "",
                         })
                         self.save_history()
+                    elif spec_completed:
+                        # v0.19.45 (FASE 3) — Worker completó pero
+                        # `result is None` significa que crasheó
+                        # silenciosamente entre el reset inicial y el
+                        # except path (ej. timeout del except, GIL
+                        # raro, etc.). En cualquier caso, el side
+                        # effect de la acción YA OCURRIÓ — NO debemos
+                        # re-ejecutar. Reportamos genérico al user.
+                        import logging as _logging
+                        _logging.getLogger("ashley").warning(
+                            "Speculative worker completed but result=None "
+                            "for action %s — assuming side-effect occurred, "
+                            "NOT re-executing to avoid duplicates.",
+                            current_action["type"],
+                        )
+                        ts = now_iso()
+                        # Mensaje genérico que NO miente al user
+                        action_type_name = current_action.get("type", "?")
+                        self.messages.append({
+                            "role": "system_result",
+                            "content": f"⚙ Acción ejecutada ({action_type_name})",
+                            "ui_content": "",
+                            "timestamp": ts,
+                            "id": f"sys-{ts}",
+                            "image": "",
+                        })
+                        self.save_history()
+                        result = {
+                            "success": True,  # asumir éxito optimista
+                            "result": "executed",
+                            "screenshot": None,
+                            "browser_opened": self.browser_opened,
+                        }
                     else:
-                        # Thread no terminó a tiempo — fallback al path normal
+                        # Thread NO terminó dentro del timeout. La acción
+                        # podría estar en flight o hung. Fallback al path
+                        # normal — riesgo controlado de doble ejecución
+                        # (mitigado por el dedupe interno de cada acción
+                        # idempotente, ej. play_music dedupea por videoId).
+                        import logging as _logging
+                        _logging.getLogger("ashley").warning(
+                            "Speculative thread for %s did NOT complete in "
+                            "%.1fs — fallback to normal execution.",
+                            current_action["type"],
+                            30.0 if current_action["type"] in _LONG_RUNNING_ACTIONS else 1.5,
+                        )
                         result = self._execute_and_record_action(current_action)
                 else:
                     result = self._execute_and_record_action(current_action)
@@ -3555,24 +3720,46 @@ class State(rx.State):
         #   v0.19.31 — Skip si single action fue terminal (play_music,
         #   screenshot, list_windows, read_page) por bug 2-tabs-mismo-video.
         #
-        # v0.19.32 — DESACTIVADA por completo. El user reportó que la
-        # continuation causaba duplicados en CUALQUIER acción, no solo
-        # en las terminales. El LLM tiende a re-emitir la misma acción
-        # con ligeras variaciones cuando el follow-up le pregunta "¿plan
-        # completo o falta paso?".
+        # v0.19.32 — DESACTIVADA por completo. Causaba duplicados.
+        # v0.19.45 — RE-HABILITADA en modo COMMENT-ONLY:
         #
-        # Filosofía nueva: si el user pide UNA cosa, hacerla UNA vez. Si
-        # pide multi-step ("abre X y haz Y"), Ashley debe emitir AMBOS
-        # tags en la MISMA respuesta — extract_all_actions soporta esto
-        # desde v0.13.5. Los casos donde Ashley "olvida" el segundo paso
-        # se manejan mejor con prompt engineering que con auto-replay.
+        # El user reportó: "ashely likeo pero en el mensaje ella dice
+        # que no lo hizo, es grave, ella debe saber que hace". Sin
+        # continuation, Ashley escribe TODO en su primera respuesta
+        # ANTES de saber el resultado → predice mal (dice "todavía no
+        # encuentro" cuando la acción sí funcionó).
         #
-        # El código de _stream_action_continuation se mantiene por si
-        # algún día queremos re-habilitarla con un trigger más restrictivo
-        # (p.ej. solo si el mensaje del user contiene 2+ verbos de acción
-        # detectados por _USER_ACTION_VERBS).
-        should_continue = False
-        if should_continue:  # pragma: no cover (dead code, see comment above)
+        # Solución: continuation TURN para que Ashley vea el
+        # system_result y comente con precisión. PERO con TRES
+        # safeguards anti-duplicado:
+        #   1. Trigger NUEVO: "COMENTA el resultado, NO emitas tag".
+        #   2. Post-stream STRIP: cualquier action tag que se cuele en
+        #      la respuesta se ELIMINA y se loguea (LLM disobeyed).
+        #   3. NO se llama _execute_and_record_action sobre tags
+        #      strippeados — solo el texto se appendea al chat.
+        #
+        # Skip continuation cuando:
+        #   • No hay actions ejecutadas (nada que comentar).
+        #   • Todas son safe/conversational (Ashley ya las comentó en
+        #     la primera respuesta — bubble vacía si pedimos comment
+        #     extra, bug v0.18.5).
+        #   • Action es NOOP (silenciosa por diseño, ej. done_important
+        #     ya marcado).
+        all_safe_conversational = bool(executed_results) and all(
+            r.get("action", {}).get("type") in _SAFE_ACTIONS
+            for r in executed_results
+        )
+        any_real_side_effect = any(
+            not r.get("result", {}).get("noop", False)
+            for r in executed_results
+        )
+        should_continue = (
+            bool(executed_results)
+            and not all_safe_conversational
+            and any_real_side_effect
+            and self._auto_iter_count < 1  # cap 1 follow-up por turn
+        )
+        if should_continue:
             self._auto_iter_count += 1
             yield from self._stream_action_continuation(executed_results)
 
@@ -3595,46 +3782,62 @@ class State(rx.State):
         self.current_response = ""
         yield
 
+        # v0.19.45 — TRIGGER REESCRITO en modo COMMENT-ONLY.
+        # Antes pedía "emite la siguiente acción" → causaba duplicados.
+        # Ahora pide SOLO comentar el resultado real. Ashley ve el
+        # [system_result] y narra con precisión (no predice).
         n_done = len(executed_results)
+        last_action_type = (
+            executed_results[-1].get("action", {}).get("type", "")
+            if executed_results else ""
+        )
+        last_success = (
+            executed_results[-1].get("result", {}).get("success", True)
+            if executed_results else True
+        )
+        outcome_word = "exitosa" if last_success else "fallida"
+
         if (self.language or "en").startswith("es"):
             trigger = (
-                f"[CONTINUACIÓN AUTOMÁTICA DEL PLAN] El jefe te pidió "
-                f"varios pasos en su mensaje original. Has ejecutado "
-                f"{n_done} acción(es) hasta ahora. Mira el último "
-                f"[system_result] del historial: ¿el plan está completo "
-                f"o falta un paso?\n\n"
-                f"Si falta — emite la siguiente acción en tu voz "
-                f"natural (1-2 frases breves + el tag). Si el resultado "
-                f"intermedio cambió la situación (algo no salió como "
-                f"esperabas), ajusta el plan en lugar de continuar a "
-                f"ciegas. Si crees que está completo o necesitas "
-                f"información del jefe, dilo y NO emitas tag."
+                f"[COMENTARIO POST-ACCIÓN] Acabas de ejecutar la acción "
+                f"'{last_action_type}' (resultado: {outcome_word}). El "
+                f"[system_result] está justo arriba en el historial — "
+                f"léelo y comenta el RESULTADO REAL al jefe en 1-2 "
+                f"frases naturales en tu voz.\n\n"
+                f"REGLA ABSOLUTA: NO emitas NINGÚN tag [action:...] aquí. "
+                f"Ya hiciste lo tuyo. Esto es solo para confirmarle al "
+                f"jefe lo que pasó (éxito → 'ya está, le di al like' / "
+                f"fallo → 'no pude, parece que el botón no aparece'). "
+                f"NO repitas la acción. NO lances acciones nuevas. "
+                f"SOLO comenta."
             )
         elif (self.language or "en").startswith("fr"):
             trigger = (
-                f"[CONTINUATION AUTOMATIQUE DU PLAN] Le patron t'a "
-                f"demandé plusieurs étapes. Tu en as exécuté {n_done}. "
-                f"Regarde le dernier [system_result] : le plan est-il "
-                f"complet ou manque-t-il une étape ?\n\n"
-                f"S'il manque, émets la suivante dans ta voix (1-2 "
-                f"phrases + le tag). Si un résultat intermédiaire change "
-                f"la donne, ajuste au lieu de continuer aveuglément. Si "
-                f"tu juges que c'est terminé ou tu as besoin d'aide du "
-                f"patron, dis-le SANS émettre de tag."
+                f"[COMMENTAIRE POST-ACTION] Tu viens d'exécuter "
+                f"'{last_action_type}' (résultat : "
+                f"{'réussi' if last_success else 'échec'}). Le "
+                f"[system_result] est juste au-dessus — lis-le et "
+                f"commente le résultat RÉEL au patron en 1-2 phrases "
+                f"naturelles.\n\n"
+                f"RÈGLE ABSOLUE : N'émets AUCUN tag [action:...] ici. "
+                f"Tu as déjà agi. Ceci est juste pour confirmer au "
+                f"patron ce qui s'est passé. NE répète PAS l'action. "
+                f"COMMENTE SEULEMENT."
             )
         else:
             trigger = (
-                f"[AUTOMATIC PLAN CONTINUATION] The boss asked for "
-                f"several steps in his original message. You've executed "
-                f"{n_done} action(s) so far. Check the last "
-                f"[system_result] in history: is the plan complete or is "
-                f"a step missing?\n\n"
-                f"If missing — emit the next action in your natural "
-                f"voice (1-2 short sentences + the tag). If an "
-                f"intermediate result changed the situation (something "
-                f"didn't go as you expected), adjust the plan instead of "
-                f"blindly continuing. If you think it's done or need "
-                f"information from the boss, say so and do NOT emit a tag."
+                f"[POST-ACTION COMMENT] You just executed "
+                f"'{last_action_type}' (result: "
+                f"{'success' if last_success else 'failure'}). The "
+                f"[system_result] is right above in history — read it "
+                f"and comment on the REAL outcome to the boss in 1-2 "
+                f"natural sentences in your voice.\n\n"
+                f"ABSOLUTE RULE: do NOT emit ANY [action:...] tag here. "
+                f"You already acted. This is just to confirm to the "
+                f"boss what happened (success → 'done, hit the like' / "
+                f"failure → 'couldn't do it, button isn't showing'). "
+                f"Do NOT repeat the action. Do NOT launch new actions. "
+                f"COMMENT ONLY."
             )
 
         try:
@@ -3647,7 +3850,17 @@ class State(rx.State):
             cont_text = self._last_response
             ct_clean, ct_mood = self._extract_mood(cont_text)
             ct_clean, ct_aff = self._extract_affection(ct_clean)
-            ct_clean, follow_action = self._extract_action(ct_clean)
+            # v0.19.45 — STRIP cualquier tag de acción que se cuele
+            # (LLM disobeyed). NO ejecutamos. Solo logueamos warning.
+            ct_clean, leaked_action = self._extract_action(ct_clean)
+            if leaked_action is not None:
+                import logging as _logging
+                _logging.getLogger("ashley").warning(
+                    "Continuation comment-mode disobeyed: LLM emitted "
+                    "[action:%s:...] in COMMENT-only context. STRIPPED — "
+                    "NOT executing to avoid duplicates.",
+                    leaked_action.get("type", "?"),
+                )
             self._apply_affection_delta(ct_aff)
             self.mood = ct_mood
             self.current_response = ""
@@ -3665,21 +3878,10 @@ class State(rx.State):
                     "image": "",
                 })
                 self.save_history()
-
-            # Si Ashley emitió siguiente paso, ejecutarlo. Si tiene
-            # success y el plan sigue sin parecer cerrado, el counter
-            # cap controla cuántas más iteraciones permitimos.
-            if follow_action is not None:
-                _is_safe = follow_action["type"] in _SAFE_ACTIONS
-                if self.auto_actions or _is_safe:
-                    fr = self._execute_and_record_action(follow_action)
-                    yield
-                    if not fr.get("success", True):
-                        # Si falla → entramos al path de apology, que
-                        # también puede iterar respetando el counter.
-                        yield from self._stream_action_failure_apology(
-                            follow_action, fr["result"],
-                        )
+            # v0.19.45 — NUNCA ejecutamos follow_action en comment-mode.
+            # El bloque que antes ejecutaba `_execute_and_record_action`
+            # se ELIMINÓ deliberadamente. Si Ashley quiere "iterar",
+            # debe hacerlo en su próxima respuesta al user.
         except Exception as e:
             self._handle_grok_error(e, "action_continuation")
 
@@ -4047,6 +4249,14 @@ class State(rx.State):
 
     def toggle_auto_actions(self):
         self.auto_actions = not self.auto_actions
+
+    def toggle_vision_enabled(self):
+        """v0.19.48 — Toggle Screen Awareness (vision). Disparaba LLM call
+        cada 10min con screenshot adjunto cuando estaba acoplado a
+        auto_actions; ahora es opt-in independiente. Default OFF (caro:
+        ~$0.05/día solo en LLM calls invisibles con screenshot)."""
+        self.vision_enabled = not self.vision_enabled
+        self._persist_voice()
 
     def toggle_focus_mode(self):
         self.focus_mode = not self.focus_mode
@@ -5103,10 +5313,13 @@ class State(rx.State):
     async def discovery_bg_task(self):
         """
         Corre en background mientras la app esté abierta.
-        Dos funciones:
-        1. Cada 45 min: discovery de contenido basado en gustos
-        2. Cada 10 min: screen awareness proactiva (si auto_actions está ON —
-           auto_actions es ahora el toggle maestro para todo awareness del PC)
+        Tres funciones:
+        1. Cada 45 min: discovery de contenido basado en gustos (si
+           discovery_enabled está ON)
+        2. Cada 10 min: screen awareness proactiva (si vision_enabled está
+           ON — v0.19.48 desacopló de auto_actions porque era caro: ~$0.05/día
+           en LLM calls invisibles con screenshots)
+        3. Cada tick: posible absence msg + followup proactivo si user idle
 
         Shutdown clean: cuando Reflex/Electron cierra la sesión, asyncio
         cancela esta tarea raising CancelledError dentro de un sleep o
@@ -5203,11 +5416,18 @@ class State(rx.State):
                 logging.getLogger("ashley").warning("followup bg: %s", _e)
 
             # ── Screen Awareness proactiva (Level 3) ──────────────
-            # Cada 10 min: si Actions está ON y no estamos busy, tomar
-            # screenshot y preguntarle a Grok si hay algo interesante que
-            # comentar. auto_actions gate unifica todo el awareness del PC.
+            # Cada 10 min: si vision_enabled está ON y no estamos busy,
+            # tomar screenshot y preguntarle a Grok si hay algo interesante
+            # que comentar.
+            #
+            # v0.19.48 — DESACOPLADO de auto_actions. Antes el toggle ⚡
+            # Actions activaba implícitamente Screen Awareness — los
+            # users que querían play_music + click acababan pagando 50%
+            # extra en API por LLM calls invisibles cada 10min con
+            # screenshot adjunto. Ahora es opt-in separado (default OFF)
+            # con su propio botón en el portrait overlay.
             async with self:
-                _vision  = self.auto_actions
+                _vision  = self.vision_enabled
                 _busy    = self.is_thinking or self.current_response != ""
                 _lang    = self.language
                 _vmode   = self.voice_mode

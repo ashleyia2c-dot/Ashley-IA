@@ -177,13 +177,30 @@ def new_tab(url: str = "", port: int = DEFAULT_CDP_PORT) -> Optional[dict]:
     Returns el tab object recién creado (con id, title='', url) o None si
     el browser no respondió. Útil para play_music: abrir directamente la
     URL de YouTube sin pasar por webbrowser.open ni SendInput.
+
+    v0.19.46 — CRÍTICO: Chromium 130+ (que incluye Opera GX 130, Edge,
+    Brave reciente) cambió `/json/new` de aceptar GET a EXIGIR PUT por
+    razones de seguridad CSRF. El error literal del browser es:
+        "Using unsafe HTTP verb GET to invoke /json/new.
+         This action supports only PUT verb." (HTTP 405)
+    Con GET el endpoint devolvía None → caíamos al poll de 10s → al final
+    al fallback optimista mentiroso → wait_then clickeaba la tab vieja.
+    Verificado experimentalmente con curl PUT (200 OK + tab abierta en
+    50ms) vs GET (405 instantáneo).
     """
     if url:
         encoded = urllib.parse.quote(url, safe='')
         endpoint = f"http://127.0.0.1:{port}/json/new?{encoded}"
     else:
         endpoint = f"http://127.0.0.1:{port}/json/new"
-    return _get_json(endpoint, timeout=3.0)  # algo más de timeout — abre + carga
+    try:
+        # PUT (no GET) — Chromium 130+ rechaza GET con 405.
+        req = urllib.request.Request(endpoint, method="PUT")
+        with urllib.request.urlopen(req, timeout=3.0) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except (urllib.error.URLError, ConnectionRefusedError,
+            TimeoutError, json.JSONDecodeError, OSError):
+        return None
 
 
 def activate_tab(tab_id: str, port: int = DEFAULT_CDP_PORT) -> bool:
@@ -400,57 +417,352 @@ def click_by_selector(target: str | dict, css_selector: str,
     return False, val.get("error", "Elemento no encontrado")
 
 
+# v0.19.45 — Sinónimos multilingües para botones comunes. Cuando Ashley
+# dice "like" pero el browser está en otro idioma (Opera/Chrome usan el
+# locale del SO), los aria-labels NO contienen "like" — contienen "Me
+# gusta" / "J'aime" / "いいね" / etc. Sin esto, click_by_text fallaba para
+# usuarios con YouTube no-inglés (caso del user reportado).
+#
+# Cada entrada mapea un término "canonical" (lo que Ashley puede emitir)
+# a una lista de variantes que CUALQUIERA podría aparecer como aria-label
+# o texto del botón. La búsqueda intenta TODAS las variantes hasta encontrar
+# match.
+# v0.19.46 — ORDEN IMPORTA. La búsqueda en aria-label/innerText itera
+# variantes en orden y se queda con la primera que matchee. Las más
+# largas/específicas van PRIMERO porque son menos propensas a falsos
+# positivos. Ej: "indica que te gusta" antes que "me gusta" antes que
+# "like" — sino "like" matchea cualquier canal random como
+# "@studylikenat" (bug real reportado por user en YouTube/Opera ES).
+_BUTTON_SYNONYMS = {
+    "like": [
+        # ES — más específico primero
+        "indica que te gusta", "me gusta",
+        # FR
+        "j'aime", "j’aime",
+        # JA — frase + carácter
+        "高く評価", "いいね",
+        # DE
+        "gefällt mir", "mag ich",
+        # RU — más específico primero
+        "мне нравится", "нравится",
+        # KO
+        "좋아요",
+        # EN — más específico primero, "like" al final (genérico)
+        "i like this", "like",
+    ],
+    "dislike": [
+        "indica que no te gusta", "no me gusta",
+        "je n'aime pas", "je n’aime pas",
+        "低く評価", "よくないね",
+        "gefällt mir nicht", "mag ich nicht",
+        "не нравится",
+        "싫어요",
+        "i dislike this", "dislike",
+    ],
+    "subscribe": [
+        "suscribirse", "suscríbete", "suscrito",
+        "s'abonner", "s’abonner", "abonné",
+        "チャンネル登録", "登録",
+        "abonnieren", "abonniert",
+        "подписаться", "вы подписаны",
+        "구독중", "구독",
+        "subscribed", "subscribe",
+    ],
+    "share": [
+        "compartir", "partager", "共有", "teilen", "поделиться", "공유", "share",
+    ],
+    "save": [
+        "guardar", "enregistrer", "保存", "speichern", "сохранить", "저장", "save",
+    ],
+    "play": [
+        "reproducir", "lire", "再生", "abspielen", "воспроизвести", "재생", "play",
+    ],
+    "pause": [
+        "pausar", "mettre en pause", "一時停止", "pausieren", "пауза", "일시중지", "pause",
+    ],
+}
+
+# v0.19.46 — Canonicals cuyo botón es TOGGLEABLE (aria-pressed cambia
+# tras click). Para estos, verificamos post-click leyendo aria-pressed
+# antes/después → success real (no solo "el JS encontró algo").
+# Cubre el bug del user: click_by_text reportaba True habiendo clickeado
+# `@studylikenat` (un canal aleatorio) en vez del botón Like real.
+_TOGGLE_CANONICALS = frozenset({"like", "dislike", "subscribe", "play", "pause"})
+
+
+def _expand_synonyms(text: str) -> list[str]:
+    """v0.19.45 — Si `text` es una palabra-clave conocida (like/dislike/etc.),
+    devuelve todas las variantes multilingües. Si no, devuelve [text]."""
+    norm = text.lower().strip()
+    for canonical, variants in _BUTTON_SYNONYMS.items():
+        if norm == canonical or norm in [v.lower() for v in variants]:
+            return variants
+    return [text]
+
+
+# v0.19.45 — Selectores estables CSS-only para botones conocidos en
+# sitios populares. Cuando aria-label / innerText fallan (DOM custom,
+# button sin texto, locale exótico), estos selectores apuntan a la
+# estructura DOM estable del sitio. Solo se prueban si el target es
+# uno de los canonical conocidos (like/dislike/subscribe/etc.) y la
+# tab matchea el dominio correspondiente.
+# v0.19.46 — YouTube 2025 cambió el wrapping: ahora usa
+# segmented-like-dislike-button-view-model para encapsular like + dislike.
+# Hay 3 instancias de like-button-view-model en el DOM (mobile/responsive
+# variants); solo 1 es visible. Por eso el JS abajo usa querySelectorAll
+# y filtra por offsetParent !== null en vez de querySelector (que da el
+# primero, que suele ser el oculto). Verificado experimentalmente con
+# probe_youtube_dom.py: 3 like-button-view-model, sample[1] es el visible.
+_SITE_SPECIFIC_SELECTORS = {
+    "youtube.com": {
+        "like": [
+            # Selector 2025 — wrapping nuevo, MÁS específico, primero
+            "segmented-like-dislike-button-view-model like-button-view-model button",
+            # Fallback genérico — el JS de click_by_text elige el primer VISIBLE
+            "like-button-view-model button",
+            # Selectores legacy (pueden funcionar en versiones viejas)
+            "ytd-segmented-like-dislike-button-renderer like-button-view-model button",
+            "#segmented-like-button button",
+            "ytd-toggle-button-renderer like-button-view-model button",
+        ],
+        "dislike": [
+            "segmented-like-dislike-button-view-model dislike-button-view-model button",
+            "dislike-button-view-model button",
+            "ytd-segmented-like-dislike-button-renderer dislike-button-view-model button",
+            "#segmented-dislike-button button",
+        ],
+        "subscribe": [
+            "ytd-subscribe-button-renderer button",
+            "#subscribe-button button",
+            "#subscribe-button-shape button",
+            "yt-subscribe-button-view-model button",
+        ],
+        "share": [
+            'yt-button-view-model button[aria-label*="ompartir" i]',
+            'yt-button-view-model button[aria-label*="hare" i]',
+            'ytd-button-renderer[id="share"] button',
+        ],
+    },
+    "twitter.com": {
+        "like": ['button[data-testid="like"]'],
+        "share": ['button[data-testid="retweet"]'],
+    },
+    "x.com": {
+        "like": ['button[data-testid="like"]'],
+        "share": ['button[data-testid="retweet"]'],
+    },
+}
+
+
+def _get_site_selectors_for(text: str) -> dict[str, list[str]]:
+    """Devuelve {hostname_substring: [selectors]} si `text` es un canonical
+    conocido. Sino devuelve {}."""
+    norm = text.lower().strip()
+    # Normalizar a canonical si el user dio una variante
+    canonical = None
+    for cn, variants in _BUTTON_SYNONYMS.items():
+        if norm == cn or norm in [v.lower() for v in variants]:
+            canonical = cn
+            break
+    if not canonical:
+        return {}
+    out: dict[str, list[str]] = {}
+    for host, mapping in _SITE_SPECIFIC_SELECTORS.items():
+        if canonical in mapping:
+            out[host] = mapping[canonical]
+    return out
+
+
+def _is_toggle_canonical(text: str) -> bool:
+    """v0.19.46 — True si `text` (o uno de sus sinónimos) corresponde a un
+    canonical toggleable (like/dislike/subscribe/play/pause). Usado para
+    decidir si verificamos post-click vía aria-pressed."""
+    norm = text.lower().strip()
+    for canonical, variants in _BUTTON_SYNONYMS.items():
+        if canonical not in _TOGGLE_CANONICALS:
+            continue
+        if norm == canonical or norm in [v.lower() for v in variants]:
+            return True
+    return False
+
+
 def click_by_text(target: str | dict, text: str,
                    port: int = DEFAULT_CDP_PORT) -> tuple[bool, str]:
     """Hace click en el primer elemento clickeable cuyo texto/aria-label
-    contenga el `text` dado (case-insensitive).
+    matche el `text` dado, con varias estrategias defensivas.
 
-    Estrategia más universal que CSS selector — funciona en muchos sitios
-    sin selectores hardcoded. Busca en este orden:
-      1. button/[role=button] con aria-label que contenga el texto
-      2. button con innerText que contenga el texto
-      3. <a> con innerText que contenga el texto
+    Estrategia en cascada (más fiable → más permisiva):
+      1. **Site-specific selectors** (v0.19.46): para sitios conocidos
+         (youtube.com, x.com, etc.) y canonicals conocidos (like/share/...),
+         prueba selectores DOM estables. Usa `querySelectorAll` y elige el
+         PRIMER VISIBLE (no el primer match) — YouTube tiene varias
+         instancias del mismo selector pero solo una es visible.
+      2. **aria-label match con sinónimos multilingües, prioridad por
+         especificidad** (v0.19.46): los sinónimos están ordenados de
+         más específico (frase larga) a más genérico (palabra corta).
+         Para sinónimos cortos (≤4 chars) requiere whole-word match
+         (regex `\\b`) — sino "like" matchea cualquier "@studylikenat".
+      3. **innerText match** con misma lógica de prioridad.
+
+    Para canonicals TOGGLEABLES (like/dislike/subscribe/play/pause),
+    además: lee aria-pressed antes/después del click y verifica que
+    cambió. Si no cambió → success=False (el click técnicamente ocurrió
+    pero no surtió efecto, posiblemente clickeó elemento equivocado).
+
+    Cubre 3 bugs reales reportados:
+      • YouTube ES: "like" no estaba en aria-labels (eran "Indica que
+        te gusta..."), pero la primera instancia del selector estaba
+        oculta — `querySelector` daba la oculta, no clickeable.
+      • Aria substring "like" matcheaba `@studylikenat` (canal random)
+        antes de las variantes en español de la lista.
+      • Reportaba success=True habiendo clickeado el elemento equivocado
+        — sin verificación post-click no había forma de saber.
     """
-    safe_text = text.replace("\\", "\\\\").replace("'", "\\'")
+    # v0.19.45 — Expandir a sinónimos multilingües si aplica
+    candidates = _expand_synonyms(text)
+    safe_candidates = [c.replace("\\", "\\\\").replace("'", "\\'") for c in candidates]
+    candidates_js = "[" + ",".join(f"'{c}'" for c in safe_candidates) + "]"
+
+    # v0.19.45 — Site-specific selectors (más fiables que aria/text)
+    site_selectors = _get_site_selectors_for(text)
+    site_selectors_js_parts = []
+    for host, sels in site_selectors.items():
+        safe_host = host.replace("'", "\\'")
+        safe_sels = [s.replace("\\", "\\\\").replace("'", "\\'") for s in sels]
+        sels_arr = "[" + ",".join(f"'{s}'" for s in safe_sels) + "]"
+        site_selectors_js_parts.append(f"'{safe_host}':{sels_arr}")
+    site_selectors_js = "{" + ",".join(site_selectors_js_parts) + "}"
+
+    is_toggle = _is_toggle_canonical(text)
+    is_toggle_js = "true" if is_toggle else "false"
+
     js = f"""
-(() => {{
-    const target = '{safe_text}'.toLowerCase();
+(async () => {{
+    const targets = {candidates_js}.map(t => t.toLowerCase());
+    const siteSelectors = {site_selectors_js};
+    const isToggle = {is_toggle_js};
+
     const isClickable = (el) => {{
         if (!el) return false;
+        if (el.disabled) return false;
+        if (el.offsetParent === null && el.tagName !== 'BODY') {{
+            return false;  // hidden via display:none/detached
+        }}
         const tag = el.tagName.toLowerCase();
         if (tag === 'button' || tag === 'a') return true;
         if (el.getAttribute('role') === 'button') return true;
         if (el.onclick) return true;
         return false;
     }};
-    // 1. aria-label
+
+    // v0.19.46 — Match con prioridad por especificidad. Sinónimos cortos
+    // (≤4 chars) requieren WHOLE-WORD match (sino "like" → "@studylikenat").
+    // Sinónimos largos pueden matchear como substring.
+    const matchesTarget = (text_lower, target) => {{
+        if (!text_lower) return false;
+        if (target.length <= 4) {{
+            // Whole-word con \\b regex (escape para regex literal del target)
+            const escaped = target.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
+            const re = new RegExp("\\\\b" + escaped + "\\\\b", "i");
+            return re.test(text_lower);
+        }}
+        return text_lower.includes(target);
+    }};
+
+    // v0.19.46 — Helper: realizar click + verificación opcional aria-pressed.
+    // Para toggleables, lee aria-pressed antes, click, espera 250ms, lee
+    // después. Devuelve verified=true si cambió o si el botón no tenía
+    // aria-pressed (no toggle real, asumimos OK porque encontramos el
+    // selector específico).
+    const doClick = async (el, method, matched_str) => {{
+        const beforePressed = el.getAttribute('aria-pressed');
+        const beforeLabel = (el.getAttribute('aria-label') || el.innerText || '').slice(0, 80);
+        el.click();
+        if (!isToggle) {{
+            return {{found: true, label: beforeLabel, method: method, matched: matched_str,
+                     verified: true, before: null, after: null}};
+        }}
+        // Toggle: esperar y leer aria-pressed tras click
+        await new Promise(r => setTimeout(r, 250));
+        const afterPressed = el.getAttribute('aria-pressed');
+        let verified = false;
+        if (beforePressed === null && afterPressed === null) {{
+            // Botón no expone aria-pressed (no es un toggle real). Asumimos
+            // OK SOLO si vino vía site-selector (más fiable que aria/text).
+            verified = (method === 'site-selector');
+        }} else {{
+            verified = (beforePressed !== afterPressed);
+        }}
+        return {{found: true, label: beforeLabel, method: method, matched: matched_str,
+                 verified: verified, before: beforePressed, after: afterPressed}};
+    }};
+
+    // ── 0. Site-specific selectors ───────────────────────────────────────
+    // v0.19.46 — querySelectorAll + filter visible. Antes usábamos
+    // querySelector que da SOLO el primero — en YouTube hay 3 instancias
+    // de like-button-view-model y la primera suele estar oculta.
+    const host = (location.hostname || '').toLowerCase();
+    for (const [siteHost, sels] of Object.entries(siteSelectors)) {{
+        if (!host.includes(siteHost)) continue;
+        for (const sel of sels) {{
+            try {{
+                const all = document.querySelectorAll(sel);
+                for (const el of all) {{
+                    if (isClickable(el)) {{
+                        return await doClick(el, 'site-selector', sel);
+                    }}
+                }}
+            }} catch (e) {{
+                // selector inválido — siguiente
+            }}
+        }}
+    }}
+
+    // ── 1. aria-label match con prioridad por especificidad ──────────────
     const ariaCandidates = document.querySelectorAll('[aria-label]');
-    for (const el of ariaCandidates) {{
-        const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
-        if (lbl.includes(target) && isClickable(el)) {{
-            el.click();
-            return {{found: true, label: el.getAttribute('aria-label'), method: 'aria'}};
+    for (const target of targets) {{
+        for (const el of ariaCandidates) {{
+            const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+            if (matchesTarget(lbl, target) && isClickable(el)) {{
+                return await doClick(el, 'aria', target);
+            }}
         }}
     }}
-    // 2. innerText match
-    const all = document.querySelectorAll('button, a, [role="button"]');
-    for (const el of all) {{
-        const txt = (el.innerText || '').toLowerCase().trim();
-        if (txt && txt.includes(target)) {{
-            el.click();
-            return {{found: true, label: el.innerText.slice(0, 60), method: 'text'}};
+
+    // ── 2. innerText match con misma lógica ──────────────────────────────
+    const allClickable = document.querySelectorAll('button, a, [role="button"]');
+    for (const target of targets) {{
+        for (const el of allClickable) {{
+            const txt = (el.innerText || '').toLowerCase().trim();
+            if (matchesTarget(txt, target) && isClickable(el)) {{
+                return await doClick(el, 'text', target);
+            }}
         }}
     }}
-    return {{found: false, error: 'No clickable element matched: ' + target}};
+    return {{found: false, verified: false,
+             error: 'No clickable element matched: ' + targets.join(' | ')}};
 }})()
 """
     res = evaluate_js(target, js, port)
     if not res or not res.get("result"):
         return False, "CDP no respondió"
     val = res["result"].get("value") or {}
-    if val.get("found"):
-        return True, f"Click en '{val.get('label', '?')}' (vía {val.get('method', '?')})"
-    return False, val.get("error", "No se encontró elemento clickeable")
+    if not val.get("found"):
+        return False, val.get("error", "No se encontró elemento clickeable")
+    # v0.19.46 — éxito real solo si verified (toggle cambió o site-selector)
+    method = val.get("method", "?")
+    label = val.get("label", "?")
+    if val.get("verified"):
+        return True, f"Click en '{label}' (vía {method})"
+    # Click ocurrió pero el aria-pressed NO cambió (botón equivocado).
+    # Reportar honestamente para que Ashley se disculpe en personaje.
+    before = val.get("before")
+    after = val.get("after")
+    return False, (
+        f"Click ejecutado en '{label}' pero no surtió efecto "
+        f"(aria-pressed: {before!r} → {after!r}, vía {method}). "
+        f"Probablemente clickeó el elemento equivocado."
+    )
 
 
 def fill_input(target: str | dict, css_selector: str, value: str,

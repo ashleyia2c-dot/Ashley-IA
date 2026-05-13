@@ -170,20 +170,24 @@ class TestCDPNewTabNoneButTabAppeared:
             self, fast_sleep, mock_cdp_module, stub_legacy_deps):
         """v0.19.39 — el ÚNICO caso donde fallbackeamos a webbrowser.open
         desde el path CDP es cuando CDP REALMENTE lanzó una excepción
-        (no solo lento)."""
+        en `new_tab()` (no solo lento, no solo close-old-yt failures).
+
+        v0.19.45 — el close-old-yt ahora atrapa excepciones internamente
+        (logs warning, continúa). Solo `new_tab()` raise excepción en
+        el outer try/except → fallback."""
         from reflex_companion import actions
 
-        # CDP path crashea con excepción real
-        mock_cdp_module.find_tabs_matching.side_effect = RuntimeError("CDP crashed")
-        mock_cdp_module.list_tabs.side_effect = RuntimeError("CDP crashed")
+        # close-old-yt funciona OK (list_tabs ok), pero new_tab crashea
+        mock_cdp_module.list_tabs.return_value = []
+        mock_cdp_module.new_tab.side_effect = RuntimeError("CDP new_tab crashed")
 
         with patch("reflex_companion.actions._resolve_youtube_url",
                    return_value=(_vid_url("crash1234567"), "Music")):
             actions.play_music("test", prefer_cdp=True, lang="en")
 
-        # Excepción real → SÍ debe fallback (red de seguridad)
+        # Excepción real en new_tab → SÍ debe fallback (red de seguridad)
         assert stub_legacy_deps.called, (
-            "Cuando CDP path REALMENTE crashea con excepción (no solo "
+            "Cuando CDP new_tab REALMENTE crashea con excepción (no solo "
             "lento), SÍ debe fallback a webbrowser.open como red de seguridad"
         )
 

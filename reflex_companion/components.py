@@ -1135,12 +1135,16 @@ def _portrait_overlay() -> rx.Component:
                 on_click=State.send_initiative,
                 title=State.t["menu_initiative"],
             ),
-            # ⛶ focus — toggle modo focus (oculta panel)
+            # 👁 vision — Screen Awareness toggle (v0.19.48)
+            # Antes este slot era duplicado del focus mode (que ya está
+            # en el header). Ahora controla si Ashley toma screenshots
+            # cada 10min para comentar lo que ve. Default OFF (caro en
+            # API: ~$0.05/día solo en LLM calls invisibles).
             _portrait_action_btn(
-                "focus",
-                on_click=State.toggle_focus_mode,
-                is_active=State.focus_mode,
-                title=State.t["pill_focus"],
+                "eye",
+                on_click=State.toggle_vision_enabled,
+                is_active=State.vision_enabled,
+                title=State.t["vision_tooltip"],
             ),
             spacing="3",
             class_name="ashley-action-row",

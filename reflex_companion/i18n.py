@@ -94,6 +94,7 @@ UI = {
         "mic_tooltip":        "Hold to speak / click to toggle dictation",
         "tts_on_tooltip":     "Ashley speaks — click to mute",
         "tts_off_tooltip":    "Ashley is muted — click to enable voice",
+        "vision_tooltip":     "Screen Awareness — click to toggle. When ON, Ashley peeks at your screen every 10 min and comments. Costs ~$0.05/day extra in API calls.",
 
         # Settings modal — estructura: REQUIRED / OPTIONAL / INCLUDED
         "settings_tooltip":         "Settings",
@@ -348,6 +349,7 @@ UI = {
         "mic_tooltip":        "Click para dictar por voz",
         "tts_on_tooltip":     "Ashley habla — click para silenciar",
         "tts_off_tooltip":    "Ashley silenciada — click para activar voz",
+        "vision_tooltip":     "Visión — click para activar/desactivar. Cuando está ON, Ashley te mira la pantalla cada 10min y comenta. Cuesta ~$0.05/día extra en API.",
 
         "settings_tooltip":         "Ajustes",
         "settings_title":           "Ajustes",
@@ -593,6 +595,7 @@ UI = {
         "mic_tooltip":        "Clique pour dicter à la voix",
         "tts_on_tooltip":     "Ashley parle — clique pour couper",
         "tts_off_tooltip":    "Ashley est muette — clique pour activer la voix",
+        "vision_tooltip":     "Vision — clique pour activer. Quand actif, Ashley jette un œil à ton écran toutes les 10 min et commente. Coûte ~$0.05/jour de plus en API.",
 
         "settings_tooltip":         "Paramètres",
         "settings_title":           "Paramètres",
@@ -847,6 +850,7 @@ UI = {
         "mic_tooltip":        "クリックで音声ディクテーション",
         "tts_on_tooltip":     "Ashleyが話す — クリックでミュート",
         "tts_off_tooltip":    "Ashleyはミュート中 — クリックで音声を有効化",
+        "vision_tooltip":     "視線モード — クリックで切替。ONの時、Ashleyは10分ごとに画面を覗いてコメントします。API費用が1日約$0.05追加。",
 
         # Settings modal
         "settings_tooltip":         "設定",
@@ -1107,6 +1111,7 @@ UI = {
         "mic_tooltip":        "Klick für Sprachdiktat",
         "tts_on_tooltip":     "Ashley spricht — klick zum Stummschalten",
         "tts_off_tooltip":    "Ashley ist stumm — klick zum Aktivieren der Stimme",
+        "vision_tooltip":     "Bildschirm-Wahrnehmung — klick zum Umschalten. Wenn AN, wirft Ashley alle 10min einen Blick auf deinen Bildschirm und kommentiert. Kostet ~$0.05/Tag extra an API.",
 
         # Settings modal
         "settings_tooltip":         "Einstellungen",
@@ -1367,6 +1372,7 @@ UI = {
         "mic_tooltip":        "Кликни для голосового ввода",
         "tts_on_tooltip":     "Ashley говорит — кликни чтобы выключить",
         "tts_off_tooltip":    "Ashley молчит — кликни чтобы включить голос",
+        "vision_tooltip":     "Зрение — кликни чтобы переключить. Когда ВКЛ, Ashley смотрит на твой экран каждые 10 мин и комментирует. Стоит ~$0.05/день дополнительно в API.",
 
         # Settings modal
         "settings_tooltip":         "Настройки",
@@ -1627,6 +1633,7 @@ UI = {
         "mic_tooltip":        "클릭해서 음성 입력",
         "tts_on_tooltip":     "Ashley가 말해 — 클릭해서 끄기",
         "tts_off_tooltip":    "Ashley 음소거 — 클릭해서 음성 켜기",
+        "vision_tooltip":     "화면 보기 — 클릭해서 토글. 켜면 Ashley가 10분마다 화면을 보고 코멘트해. API 비용이 하루 ~$0.05 추가돼.",
 
         # Settings modal
         "settings_tooltip":         "설정",
@@ -2479,6 +2486,9 @@ def load_voice_config() -> dict:
             "discovery_enabled": bool(data.get("discovery_enabled", False)),
             "cdp_enabled": bool(data.get("cdp_enabled", False)),
             "wake_word_enabled": bool(data.get("wake_word_enabled", False)),
+            # v0.19.48 — Screen Awareness opt-in (caro: ~$0.05/día en API).
+            # Default OFF — antes acoplado a auto_actions.
+            "vision_enabled": bool(data.get("vision_enabled", False)),
             # Clamp en lectura: si alguien edita voice.json con un valor
             # absurdo, tope a un rango razonable.
             "voice_speed": max(0.5, min(2.0, float(data.get("voice_speed", 1.0) or 1.0))),
@@ -2501,6 +2511,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
                       discovery_enabled: bool = False,
                       cdp_enabled: bool = False,
                       wake_word_enabled: bool = False,
+                      vision_enabled: bool = False,
                       voice_speed: float = 1.0) -> None:
     """Persist voice config atomically. El archivo contiene la API key de
     ElevenLabs del user — un write corrupto perdería su config de voz
@@ -2525,6 +2536,7 @@ def save_voice_config(tts_enabled: bool, elevenlabs_key: str, voice_id: str,
             "discovery_enabled": bool(discovery_enabled),
             "cdp_enabled": bool(cdp_enabled),
             "wake_word_enabled": bool(wake_word_enabled),
+            "vision_enabled": bool(vision_enabled),
             "voice_speed": max(0.5, min(2.0, float(voice_speed or 1.0))),
         })
     except Exception as e:

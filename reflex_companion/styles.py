@@ -1090,6 +1090,12 @@ def global_styles():
     letter-spacing: 0.02em;
     line-height: 1;
     text-shadow: 0 1px 8px rgba(212,163,115,0.30);
+    /* v0.19.45 — Cormorant Garamond es serif: el baseline del glifo
+       está más abajo del centro visual de la línea, así que con
+       align-items:center el flexbox los centra por LÍNEA (incluye
+       espacio para descenders inexistentes en dígitos). Resultado:
+       número parece "caerse" respecto al corazón. Nudge sutil arriba. */
+    transform: translateY(-2px);
   }}
 
   /* ── Affection heart (v0.16) ──────────────────────────────

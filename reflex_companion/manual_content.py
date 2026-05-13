@@ -128,6 +128,33 @@ _EN = {
             ),
         },
         {
+            "id": "vision",
+            "icon": "👁",
+            "title": "Screen Awareness — Ashley peeks at your screen",
+            "content_md": (
+                "**Opt-in via the 👁 button** in the portrait area "
+                "(below Ashley's name, next to mic and ✨).\n\n"
+                "**What it does**: every 10 minutes Ashley takes a "
+                "low-res screenshot of your active monitor and asks "
+                "Grok to comment on what she sees — like a friend "
+                "glancing over your shoulder. Examples: noticing you've "
+                "been on the same Excel sheet for an hour, or "
+                "commenting on a video you're watching.\n\n"
+                "**Cost transparency**: each peek is an LLM call with "
+                "an image attached (~14k tokens). On a typical session "
+                "that's **~30 extra calls per day = ~$0.05/day** in "
+                "API usage. The button is **OFF by default** — you opt "
+                "in only if you want that proactive vibe.\n\n"
+                "**When it skips**: if Ashley is busy responding to "
+                "you, or if there's nothing interesting on screen "
+                "(she stays silent rather than forcing commentary).\n\n"
+                "**Privacy**: screenshots are sent only to Grok (xAI) "
+                "for that single comment, never stored on disk, never "
+                "uploaded anywhere else. If you'd rather keep your "
+                "screen private, just leave the toggle OFF."
+            ),
+        },
+        {
             "id": "browser",
             "icon": "🌐",
             "title": "Modern browser mode (CDP)",
@@ -533,6 +560,34 @@ _ES = {
                 "que ella scrapee podría intentar colarlos para "
                 "ejecutar comandos arbitrarios. Bloquearlos no cuesta "
                 "nada y cierra esa puerta del todo."
+            ),
+        },
+        {
+            "id": "vision",
+            "icon": "👁",
+            "title": "Visión — Ashley te mira la pantalla",
+            "content_md": (
+                "**Opt-in mediante el botón 👁** en el área del retrato "
+                "(debajo del nombre de Ashley, junto a mic y ✨).\n\n"
+                "**Qué hace**: cada 10 minutos Ashley toma una captura "
+                "low-res de tu monitor activo y le pregunta a Grok que "
+                "comente lo que ve — como una amiga echando un vistazo "
+                "por encima de tu hombro. Ejemplos: notar que llevas "
+                "una hora en la misma hoja de Excel, o comentar el "
+                "vídeo que estás viendo.\n\n"
+                "**Coste transparente**: cada vistazo es una llamada "
+                "al LLM con imagen adjunta (~14k tokens). En una sesión "
+                "típica son **~30 calls extra al día = ~$0.05/día** "
+                "de uso de API. El botón está **OFF por defecto** — "
+                "lo activas tú solo si quieres ese vibe proactivo.\n\n"
+                "**Cuándo se salta**: si Ashley está respondiéndote, "
+                "o si no hay nada interesante en pantalla (prefiere "
+                "callar antes que forzar un comentario).\n\n"
+                "**Privacidad**: las capturas se mandan solo a Grok "
+                "(xAI) para ese único comentario, nunca se guardan en "
+                "disco, nunca se suben a otro sitio. Si prefieres "
+                "mantener tu pantalla privada, simplemente deja el "
+                "toggle OFF."
             ),
         },
         {
@@ -975,6 +1030,35 @@ _FR = {
                 "qu'elle aurait scrapée pourrait essayer de les "
                 "glisser pour exécuter des commandes arbitraires. "
                 "Les bloquer ne coûte rien et ferme cette porte."
+            ),
+        },
+        {
+            "id": "vision",
+            "icon": "👁",
+            "title": "Vision — Ashley jette un œil à ton écran",
+            "content_md": (
+                "**Opt-in via le bouton 👁** dans la zone du portrait "
+                "(sous le nom d'Ashley, à côté du micro et de ✨).\n\n"
+                "**Ce que ça fait** : toutes les 10 minutes Ashley "
+                "prend une capture basse résolution de ton moniteur "
+                "actif et demande à Grok de commenter ce qu'elle voit "
+                "— comme une amie qui jette un coup d'œil par-dessus "
+                "ton épaule.\n\n"
+                "**Coût transparent** : chaque coup d'œil est un appel "
+                "LLM avec image jointe (~14k tokens). Sur une session "
+                "typique : **~30 appels supplémentaires par jour = "
+                "~$0.05/jour** d'utilisation API. Le bouton est **OFF "
+                "par défaut** — tu actives uniquement si tu veux ce "
+                "vibe proactif.\n\n"
+                "**Quand elle s'abstient** : si Ashley est en train de "
+                "te répondre, ou s'il n'y a rien d'intéressant à "
+                "l'écran (elle préfère se taire que forcer un "
+                "commentaire).\n\n"
+                "**Confidentialité** : les captures vont uniquement à "
+                "Grok (xAI) pour ce seul commentaire, jamais "
+                "stockées sur disque, jamais uploadées ailleurs. Si tu "
+                "préfères garder ton écran privé, laisse simplement le "
+                "toggle OFF."
             ),
         },
         {
@@ -1423,6 +1507,29 @@ _JA = {
             ),
         },
         {
+            "id": "vision",
+            "icon": "👁",
+            "title": "視線モード — Ashleyが画面を覗き見",
+            "content_md": (
+                "**ポートレートエリアの 👁 ボタンでオプトイン** "
+                "(Ashleyの名前の下、マイクと ✨ の隣)。\n\n"
+                "**機能**: 10分ごとにAshleyがアクティブモニターの低解像度"
+                "スクリーンショットを撮り、Grokに見えたものへのコメントを"
+                "求めます — 肩越しに覗く友達のように。\n\n"
+                "**コスト透明性**: 毎回の覗き見は画像添付のLLM呼び出し"
+                "(~14k トークン)です。典型的なセッションでは**1日"
+                "~30回追加 = ~$0.05/日**のAPI使用料。ボタンは**デフォルト"
+                "OFF** — そのプロアクティブな雰囲気が欲しい場合のみ"
+                "オプトインします。\n\n"
+                "**スキップする時**: Ashleyがあなたに返答中、または画面に"
+                "面白いものがない時(コメントを強制するより沈黙を選ぶ)。\n\n"
+                "**プライバシー**: スクリーンショットはその1コメントのみ"
+                "Grok(xAI)に送られ、ディスクに保存されず、他の場所に"
+                "アップロードされません。画面をプライベートにしたい場合は、"
+                "トグルをOFFのままにしてください。"
+            ),
+        },
+        {
             "id": "browser",
             "icon": "🌐",
             "title": "モダンブラウザモード(CDP)",
@@ -1831,6 +1938,34 @@ _DE = {
                 "scrapt, könnte versuchen, sie einzuschleusen, um "
                 "beliebige Befehle auszuführen. Sie zu blockieren "
                 "kostet nichts und schließt diese Tür komplett."
+            ),
+        },
+        {
+            "id": "vision",
+            "icon": "👁",
+            "title": "Bildschirm-Wahrnehmung — Ashley schaut auf deinen Bildschirm",
+            "content_md": (
+                "**Opt-in über den 👁-Knopf** im Portrait-Bereich "
+                "(unter Ashleys Namen, neben Mikro und ✨).\n\n"
+                "**Was es tut**: Alle 10 Minuten macht Ashley einen "
+                "Low-Res-Screenshot deines aktiven Monitors und bittet "
+                "Grok, das Gesehene zu kommentieren — wie eine "
+                "Freundin, die über deine Schulter schaut.\n\n"
+                "**Kostentransparenz**: Jeder Blick ist ein LLM-Aufruf "
+                "mit Bild-Anhang (~14k Tokens). In einer typischen "
+                "Session sind das **~30 zusätzliche Aufrufe pro Tag = "
+                "~$0.05/Tag** an API-Nutzung. Der Knopf ist "
+                "**standardmäßig AUS** — du aktivierst ihn nur, wenn "
+                "du dieses proaktive Vibe willst.\n\n"
+                "**Wann sie pausiert**: Wenn Ashley dir gerade "
+                "antwortet oder nichts Interessantes auf dem "
+                "Bildschirm ist (sie schweigt lieber, als einen "
+                "Kommentar zu erzwingen).\n\n"
+                "**Datenschutz**: Screenshots gehen nur an Grok (xAI) "
+                "für diesen einen Kommentar, werden nie auf der "
+                "Festplatte gespeichert, nie woanders hochgeladen. "
+                "Wenn du deinen Bildschirm privat halten willst, lass "
+                "den Schalter einfach AUS."
             ),
         },
         {
@@ -2296,6 +2431,34 @@ _RU = {
             ),
         },
         {
+            "id": "vision",
+            "icon": "👁",
+            "title": "Зрение — Ashley смотрит на твой экран",
+            "content_md": (
+                "**Опт-ин через кнопку 👁** в области портрета "
+                "(под именем Ashley, рядом с микрофоном и ✨).\n\n"
+                "**Что делает**: каждые 10 минут Ashley делает скрин "
+                "низкого разрешения активного монитора и просит Grok "
+                "прокомментировать увиденное — как подруга, "
+                "заглядывающая через плечо.\n\n"
+                "**Прозрачность стоимости**: каждый взгляд — это "
+                "вызов LLM с прикреплённым изображением (~14k "
+                "токенов). В типичной сессии это **~30 "
+                "дополнительных вызовов в день = ~$0.05/день** "
+                "использования API. Кнопка **по умолчанию ВЫКЛ** — "
+                "включай только если хочешь этот проактивный вайб.\n\n"
+                "**Когда пропускает**: если Ashley сейчас тебе "
+                "отвечает или на экране нет ничего интересного "
+                "(она лучше промолчит, чем заставит себя "
+                "комментировать).\n\n"
+                "**Конфиденциальность**: скриншоты идут только в "
+                "Grok (xAI) для этого одного комментария, никогда не "
+                "сохраняются на диск, никогда не загружаются больше "
+                "никуда. Если хочешь сохранить экран приватным, "
+                "просто оставь переключатель ВЫКЛ."
+            ),
+        },
+        {
             "id": "browser",
             "icon": "🌐",
             "title": "Современный режим браузера (CDP)",
@@ -2732,6 +2895,30 @@ _KO = {
                 "앱 이름엔 절대 필요 없지만, Ashley가 스크랩한 "
                 "악성 웹페이지가 임의 명령 실행을 위해 몰래 넣을 "
                 "수 있어. 차단해도 비용 없고 그 문을 완전히 닫는 거야."
+            ),
+        },
+        {
+            "id": "vision",
+            "icon": "👁",
+            "title": "화면 보기 — Ashley가 화면을 봐",
+            "content_md": (
+                "**포트레이트 영역의 👁 버튼으로 옵트인** "
+                "(Ashley 이름 아래, 마이크와 ✨ 옆).\n\n"
+                "**기능**: 10분마다 Ashley가 활성 모니터의 저해상도 "
+                "스크린샷을 찍고 Grok에게 본 것에 대해 코멘트해 "
+                "달라고 해 — 어깨 너머로 보는 친구처럼.\n\n"
+                "**비용 투명성**: 매 한번의 보기는 이미지 첨부된 "
+                "LLM 호출이야 (~14k 토큰). 일반 세션에서는 **하루 "
+                "~30회 추가 호출 = ~$0.05/일** API 사용량. 버튼은 "
+                "**기본적으로 꺼짐** — 그 적극적인 vibe를 원할 때만 "
+                "옵트인해.\n\n"
+                "**건너뛸 때**: Ashley가 너에게 답변 중이거나, "
+                "화면에 흥미로운 게 없을 때 (강제로 코멘트하기보다 "
+                "조용히 있는 걸 선택해).\n\n"
+                "**프라이버시**: 스크린샷은 이 한 코멘트를 위해서만 "
+                "Grok (xAI)에 보내지고, 디스크에 저장되지 않고, "
+                "다른 곳에 업로드되지 않아. 화면을 비공개로 유지하고 "
+                "싶으면 토글을 꺼진 채로 두면 돼."
             ),
         },
         {

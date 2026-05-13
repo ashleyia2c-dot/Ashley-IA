@@ -199,21 +199,56 @@ class TestCloseTab:
 
 
 class TestNewTab:
+    """v0.19.46 — `new_tab` migró de _get_json (GET) a urlopen con
+    method='PUT' porque Chromium 130+ rechaza GET con HTTP 405. Los
+    tests ahora interceptan urlopen directamente y verifican el method."""
+
+    def _make_mock_resp(self, body=None):
+        mock_resp = MagicMock()
+        if body is None:
+            body = b'{"id":"new1","title":"","url":"about:blank"}'
+        mock_resp.read = MagicMock(return_value=body)
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    def test_uses_put_method(self):
+        """v0.19.46 — DEBE usar PUT (no GET). Chromium 130+ devuelve 405
+        en GET. Bug confirmado experimentalmente con curl PUT vs GET."""
+        with patch("reflex_companion.browser_cdp.urllib.request.urlopen",
+                   return_value=self._make_mock_resp()) as mock_open:
+            new_tab("https://example.com")
+            req = mock_open.call_args[0][0]
+            assert req.get_method() == "PUT", (
+                f"new_tab debe usar PUT, está usando {req.get_method()}. "
+                "Chromium 130+ rechaza GET con HTTP 405."
+            )
+
     def test_url_is_url_encoded(self):
-        with patch("reflex_companion.browser_cdp._get_json") as mock:
-            mock.return_value = {"id": "new1", "title": "", "url": "..."}
+        with patch("reflex_companion.browser_cdp.urllib.request.urlopen",
+                   return_value=self._make_mock_resp()) as mock_open:
             new_tab("https://youtube.com/watch?v=abc&t=10")
-            called_url = mock.call_args[0][0]
+            req = mock_open.call_args[0][0]
+            called_url = req.full_url
             # & debe estar encoded para no romper la query string
             assert "%26" in called_url or "v%3D" in called_url
 
     def test_empty_url_uses_blank_endpoint(self):
-        with patch("reflex_companion.browser_cdp._get_json") as mock:
-            mock.return_value = {"id": "x", "url": "about:blank"}
+        with patch("reflex_companion.browser_cdp.urllib.request.urlopen",
+                   return_value=self._make_mock_resp(
+                       body=b'{"id":"x","url":"about:blank"}'
+                   )) as mock_open:
             new_tab("")
-            called_url = mock.call_args[0][0]
+            req = mock_open.call_args[0][0]
+            called_url = req.full_url
             # Sin query string
             assert "?" not in called_url
+
+    def test_returns_none_on_exception(self):
+        import urllib.error
+        with patch("reflex_companion.browser_cdp.urllib.request.urlopen",
+                   side_effect=urllib.error.URLError("network down")):
+            assert new_tab("https://example.com") is None
 
 
 # ════════════════════════════════════════════════════════════════════════

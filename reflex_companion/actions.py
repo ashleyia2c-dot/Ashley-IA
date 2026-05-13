@@ -255,7 +255,411 @@ _SHORTCUT_REJECT_TOKENS = (
     "desinstalar", "désinstaller",
     "readme", "manual", "helper", "crash", "reporter",
     "redistributable", "config",
+    # v0.19.45 — Bug del user "abre et" que matcheaba "Ashley-Setup-0.19.44.exe"
+    # porque "et" es substring de "Setup". Añadidos installer markers.
+    "setup", "installer",
 )
+
+
+# v0.19.45 — Si la query del user (hint) es MUY CORTA (<3 chars), es
+# demasiado ambigua para hacer fuzzy matching seguro. Bug reportado:
+# "abre et" → matcheaba "S**et**up" en cualquier installer del Desktop
+# y lanzaba el .exe. Ahora rechazamos hints de <3 chars de plano.
+#
+# Si la query es de 3-4 chars, requerimos match EXACTO o PREFIX (no
+# substring). Reduce drásticamente falsos positivos sin descartar
+# casos legítimos como "abre VS" → "Visual Studio" (prefix).
+_MIN_HINT_LEN = 3
+_MIN_HINT_LEN_FOR_SUBSTRING = 5
+
+
+# ── App discovery (v0.19.47) ─────────────────────────────────────────────────
+#
+# Lista de apps instaladas (.lnk en escritorio + Start Menu) inyectada
+# en el system_state que ve Ashley. NO filtramos uninstallers/docs/etc.
+# por nombre — confiamos en el LLM para descartar semánticamente. Sí
+# filtramos cosas que NUNCA son apps reales: docs (.pdf/.txt/.html),
+# tools del SO en \Windows\System32 (excepto los pocos que el user pide
+# legítimamente), y .lnk roto sin target.
+#
+# Filosofía: el filtro debe ser LANGUAGE-AGNOSTIC. Un user en alemán con
+# "Deinstallation X" o un user japonés con "アンインストール X" debe ver la
+# misma calidad de lista que un user en español con "Desinstalar X". El
+# LLM filtra mentalmente — yo NO mantengo regex multi-idioma frágiles.
+
+import struct as _struct
+import time as _time
+
+# Cache de discovery — TTL 5min. Las apps no se instalan/desinstalan a cada
+# minuto, así que cachear es seguro. Refresca al cabo de 5min para captar
+# instalaciones nuevas en sesiones largas.
+_INSTALLED_APPS_CACHE: dict = {"ts": 0.0, "apps": []}
+_INSTALLED_APPS_TTL_SEC = 300.0  # 5 min
+
+
+def _resolve_lnk_target(lnk_path: str) -> str | None:
+    """Lee el binario del .lnk y extrae el TargetPath sin usar COM (rápido).
+
+    Microsoft Shell Link Format (.lnk):
+      - Header de 76 bytes con flags
+      - Si flags & 0x01 (HasLinkTargetIDList) → skip ID list
+      - Si flags & 0x02 (HasLinkInfo) → leer LocalBasePath
+
+    ~1ms por file vs ~50ms con win32com.client.Dispatch. Crítico para que
+    el discovery de 100+ shortcuts no lleve segundos.
+
+    Devuelve None si no se puede parsear (formato extraño o archivo
+    truncado). El caller debe asumir "OK por defecto" si None.
+    """
+    try:
+        with open(lnk_path, "rb") as f:
+            data = f.read(8192)  # header + LinkInfo es <8KB en >99% .lnk
+        if len(data) < 76 or data[0:4] != b"L\x00\x00\x00":
+            return None
+        flags = _struct.unpack_from("<I", data, 0x14)[0]
+        offset = 76
+        if flags & 0x01:  # HasLinkTargetIDList
+            id_list_size = _struct.unpack_from("<H", data, offset)[0]
+            offset += 2 + id_list_size
+        if flags & 0x02:  # HasLinkInfo
+            if offset + 20 > len(data):
+                return None
+            link_info_flags = _struct.unpack_from("<I", data, offset + 8)[0]
+            local_base_path_offset = _struct.unpack_from("<I", data, offset + 16)[0]
+            if link_info_flags & 0x01:  # VolumeIDAndLocalBasePath
+                start = offset + local_base_path_offset
+                if start < len(data):
+                    end_idx = data.find(b"\x00", start)
+                    if end_idx == -1:
+                        end_idx = len(data)
+                    raw = data[start:end_idx]
+                    try:
+                        return raw.decode("latin-1", errors="replace")
+                    except Exception:
+                        return None
+        return None
+    except Exception:
+        return None
+
+
+# Allowed Windows\System32 binaries (tools del SO que el user PUEDE pedir).
+# Resto de System32 → admin junk que Ashley no debe ver.
+_ALLOWED_SYSTEM32 = frozenset({
+    "cmd.exe", "powershell.exe", "calc.exe", "notepad.exe",
+    "mspaint.exe", "snippingtool.exe", "control.exe",
+    "taskmgr.exe", "regedit.exe", "explorer.exe",
+})
+
+# Extensiones que indican docs (no apps). language-agnostic.
+_DOC_TARGET_EXTS = (".pdf", ".txt", ".html", ".htm", ".url", ".chm", ".xml", ".md", ".rtf")
+
+
+def _is_real_app_target(target: str | None) -> bool:
+    """True si el target del .lnk parece una app real (no doc, no admin tool).
+
+    Si target es None (no pudimos parsear), retorna True (asumir OK — dudar
+    a favor del user). El path es inspeccionado en LOWERCASE y solo por
+    sustring/extension — language-agnostic.
+    """
+    if not target:
+        return True
+    target_lower = target.lower()
+    if target_lower.endswith(_DOC_TARGET_EXTS):
+        return False
+    # System32/SysWoW64 admin tools — same path en cualquier idioma de Windows
+    if "\\windows\\system32\\" in target_lower or "\\windows\\syswow64\\" in target_lower:
+        target_name = os.path.basename(target_lower)
+        if target_name not in _ALLOWED_SYSTEM32:
+            return False
+    return True
+
+
+def _clean_lnk_name(filename: str) -> str:
+    name = filename
+    if name.lower().endswith(".lnk"):
+        name = name[:-4]
+    return name.strip()
+
+
+def _discover_via_powershell() -> list[str]:
+    """v0.19.47 — Universal: PowerShell Get-StartApps devuelve TODAS las
+    apps lanzables del Start Menu del user, incluyendo:
+      - Apps clásicas (con .exe paths)
+      - UWP / Microsoft Store apps (Calculadora, Cámara, ChatGPT, etc.)
+      - Apps de OneDrive Desktop (si OneDrive las redirigió)
+      - Web app shortcuts del Edge
+
+    En el IDIOMA del SO del user — "Calculadora" en español, "Calculator"
+    en inglés, "計算機" en japonés, etc. La API de Windows hace el i18n
+    por nosotros — no necesitamos mantener listas multilingüe.
+
+    Returns lista PRIORIZADA: primero las apps que matchean APP_MAP
+    (browsers, Office, IDEs, juegos populares — alta probabilidad de que
+    el user las pida), después el resto alfabéticamente. Esto garantiza
+    que cosas como Word/Excel/Discord salgan siempre aunque el cap sea
+    bajo y el user tenga muchísimas apps.
+
+    ~500-1500ms primera vez (PowerShell startup). Cacheado 5min en
+    discover_installed_apps. Si falla por timeout/error, devolvemos []
+    y el caller cae al fallback .lnk parsing.
+    """
+    try:
+        # [Console]::OutputEncoding = UTF8 sino PS usa OEM del sistema
+        # y rompe con caracteres no-ASCII en ES/JA/RU/etc.
+        ps_cmd = (
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+            "Get-StartApps | Select-Object Name | ConvertTo-Json -Compress"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, timeout=8, encoding="utf-8",
+        )
+        if result.returncode != 0 or not result.stdout:
+            return []
+        import json as _json
+        data = _json.loads(result.stdout)
+        if not isinstance(data, list):
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            name = (entry.get("Name") or "").strip()
+            if not name or len(name) < 2 or len(name) > 60:
+                continue
+            norm = name.lower()
+            if norm in seen:
+                continue
+            seen.add(norm)
+            names.append(name)
+
+        # PRIORIZAR apps comunes (matchean APP_MAP/URL_APPS) — el user
+        # las pedirá probablemente. Resto alfabético.
+        # Build set de palabras-clave de apps conocidas (lower)
+        known_keywords: set[str] = set()
+        for k in APP_MAP.keys():
+            known_keywords.add(k.lower())
+        for k in URL_APPS.keys():
+            known_keywords.add(k.lower())
+
+        def _is_known(name: str) -> bool:
+            nl = name.lower()
+            for kw in known_keywords:
+                if kw == nl or kw in nl or nl in kw:
+                    return True
+            return False
+
+        priority = sorted([n for n in names if _is_known(n)],
+                          key=lambda x: x.lower())
+        rest = sorted([n for n in names if not _is_known(n)],
+                      key=lambda x: x.lower())
+        return priority + rest
+    except Exception:
+        return []
+
+
+def _discover_via_lnk_walk(max_total: int = 80) -> list[str]:
+    """Fallback: walk desktop + Start Menu para .lnk + parse target.
+    Usado si _discover_via_powershell falla. Mantiene tier priority
+    (Desktop > Start Menu) y filtro de docs/System32."""
+    seen: set[str] = set()
+    tier_results: list[list[str]] = [[], [], [], []]
+
+    desktop_user = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+    desktop_public = os.path.join(
+        os.environ.get("PUBLIC", "C:\\Users\\Public"), "Desktop",
+    )
+    start_user = os.path.join(
+        os.environ.get("APPDATA", ""),
+        "Microsoft", "Windows", "Start Menu", "Programs",
+    )
+    start_common = os.path.join(
+        os.environ.get("PROGRAMDATA", "C:\\ProgramData"),
+        "Microsoft", "Windows", "Start Menu", "Programs",
+    )
+
+    locations = [
+        (desktop_user, False),
+        (desktop_public, False),
+        (start_user, True),
+        (start_common, True),
+    ]
+
+    def _try_add(lnk_path: str, tier_idx: int):
+        name = _clean_lnk_name(os.path.basename(lnk_path))
+        if not name or len(name) < 2 or len(name) > 60:
+            return
+        norm = name.lower()
+        if norm in seen:
+            return
+        target = _resolve_lnk_target(lnk_path)
+        if not _is_real_app_target(target):
+            return
+        seen.add(norm)
+        tier_results[tier_idx].append(name)
+
+    for tier_idx, (path, recursive) in enumerate(locations):
+        if not os.path.isdir(path):
+            continue
+        try:
+            if recursive:
+                for root, dirs, files in os.walk(path):
+                    depth = root[len(path):].count(os.sep)
+                    if depth > 2:
+                        continue
+                    for f in files:
+                        if f.lower().endswith(".lnk"):
+                            _try_add(os.path.join(root, f), tier_idx)
+            else:
+                for f in os.listdir(path):
+                    if f.lower().endswith(".lnk"):
+                        _try_add(os.path.join(path, f), tier_idx)
+        except Exception:
+            continue
+
+    for tier in tier_results:
+        tier.sort(key=lambda x: x.lower())
+    return [name for tier in tier_results for name in tier]
+
+
+def discover_installed_apps(max_total: int = 80) -> list[str]:
+    """Lista de apps instaladas — método universal (PowerShell Get-StartApps)
+    con fallback a parsing .lnk si PowerShell falla.
+
+    Get-StartApps es la API oficial de Windows para "qué apps puede lanzar
+    este user". Devuelve names en el idioma del SO. Incluye UWP/Store apps,
+    apps de OneDrive redirected, y web apps de Edge — cosas que el parsing
+    manual de .lnk no veía bien. Cacheado 5min porque las apps casi no
+    cambian.
+
+    El filtro es MÍNIMO y language-agnostic: solo length checks. Ashley
+    filtra semánticamente uninstaller/about/help/etc en su prompt — el
+    LLM es multilingüe y sabe distinguir "Discord" de "Uninstall Discord"
+    o "Acerca de Java" sin necesidad de regex multi-idioma de mi parte.
+    """
+    now = _time.time()
+    if (_INSTALLED_APPS_CACHE["apps"]
+            and (now - _INSTALLED_APPS_CACHE["ts"]) < _INSTALLED_APPS_TTL_SEC):
+        return _INSTALLED_APPS_CACHE["apps"][:max_total]
+
+    # Método primario: PowerShell Get-StartApps (universal)
+    candidates = _discover_via_powershell()
+
+    # Fallback: parsing .lnk si PowerShell falla
+    if not candidates:
+        candidates = _discover_via_lnk_walk(max_total=max_total)
+
+    _INSTALLED_APPS_CACHE["apps"] = candidates
+    _INSTALLED_APPS_CACHE["ts"] = now
+    return candidates[:max_total]
+
+
+def _fuzzy_score(needle: str, haystack: str) -> int:
+    """Puntúa subsequence match. Mayor = mejor.
+
+    Devuelve 0 si:
+      - No es subsequence
+      - Los chars matched están demasiado dispersos (densidad < 30%)
+        EXCEPTO si la mayoría de chars matched están al inicio de una
+        palabra (acronym-like) → score válido.
+      - El primer char no está al inicio de una palabra
+
+    Bonus por:
+      - Subsequence empieza al inicio del haystack: +100
+      - Cada char matched al inicio de una palabra: +20 (acronym-like)
+      - Densidad alta (chars matched compacto): +1 por unidad de %
+
+    Ejemplos esperados:
+      'vsc' vs 'Visual Studio Code'  → match acronym, score alto
+      'vscode' vs 'Visual Studio Code' → match con bonus por word starts
+      'vscode' vs 'Godot_..._win64.exe' → score bajo (no word starts)
+    """
+    if not needle:
+        return 0
+    needle = needle.lower()
+    haystack_lower = haystack.lower()
+    if len(needle) > len(haystack_lower):
+        return 0
+
+    # Encontrar las posiciones de cada char de needle en haystack
+    positions: list[int] = []
+    i = 0
+    for j, c in enumerate(haystack_lower):
+        if i < len(needle) and c == needle[i]:
+            positions.append(j)
+            i += 1
+    if i < len(needle):
+        return 0  # no es subsequence
+
+    # Word-start count: bonus por chars en inicio de palabra
+    word_start_chars = 0
+    for p in positions:
+        if p == 0 or haystack_lower[p - 1] in " -_/.":
+            word_start_chars += 1
+
+    # Densidad: chars matched / span (último - primero + 1)
+    span = positions[-1] - positions[0] + 1
+    density_pct = int(100 * len(needle) / span)
+
+    # v0.19.47 — Si MAYORÍA de chars son word-starts (acronym-like),
+    # bypass density check. "vsc" → "Visual Studio Code" tiene density
+    # baja (chars muy dispersos) pero todos en word-starts → match válido.
+    is_acronym_like = word_start_chars >= max(2, len(needle) - 1)
+    if not is_acronym_like and density_pct < 30:
+        return 0  # demasiado disperso y no es acronym
+
+    score = density_pct
+    # Bonus por empezar al inicio del haystack
+    if positions[0] == 0:
+        score += 100
+    score += word_start_chars * 20
+    return score
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    """Compat wrapper sobre _fuzzy_score: True si score > 0."""
+    return _fuzzy_score(needle, haystack) > 0
+
+
+def collect_app_suggestions(hint: str, top_n: int = 5) -> list[str]:
+    """v0.19.47 — Feature C: cuando open_app() falla, devuelve top N apps
+    candidatas para que Ashley reintente con un nombre correcto.
+
+    Estrategia en 2 pasos:
+      1. Score por score_shortcut_name (exact/prefix/substring match).
+         Si encuentra candidatos, devuelve esos (más fiables).
+      2. Fallback FZF-style: subsequence de caracteres. Captura typos
+         comunes y abreviaciones — "vscode" → "Visual Studio Code".
+
+    Si hint es muy corto (<3) devuelve [] — descartado por anti-falso-match.
+    """
+    if not hint or len(hint.strip()) < _MIN_HINT_LEN:
+        return []
+    apps = discover_installed_apps(max_total=200)  # entre TODAS las apps
+
+    # Paso 1: scoring tradicional
+    scored = []
+    for app in apps:
+        s = score_shortcut_name(app, hint)
+        if s > 0:
+            scored.append((s, app))
+    if scored:
+        scored.sort(reverse=True)
+        return [app for _, app in scored[:top_n]]
+
+    # Paso 2: fallback fuzzy subsequence con scoring por densidad/word-starts
+    fuzzy = []
+    for app in apps:
+        app_l = app.lower()
+        # Skip uninstallers/setup obvios via _SHORTCUT_REJECT_TOKENS
+        if any(tok in app_l for tok in _SHORTCUT_REJECT_TOKENS):
+            continue
+        fs = _fuzzy_score(hint, app)
+        if fs > 0:
+            fuzzy.append((fs, app))
+    fuzzy.sort(reverse=True)  # mayor score primero
+    return [app for _, app in fuzzy[:top_n]]
 
 
 def score_shortcut_name(name: str, hint: str) -> int:
@@ -267,18 +671,30 @@ def score_shortcut_name(name: str, hint: str) -> int:
     Scoring:
       100  → nombre exacto = hint (ej. "rimworld.lnk" con hint="rimworld")
        80  → nombre empieza por hint (ej. "rimworld classic")
-       60  → hint es substring del nombre (ej. "play rimworld now")
+       60  → hint es substring del nombre (ej. "play rimworld now") —
+            v0.19.45 SOLO si len(hint) >= 5 (queries cortas son demasiado
+            ambiguas para substring match seguro).
        30  → nombre es substring del hint (ej. name="rim", hint="rimworld")
-        0  → rechazado o sin relación
+        0  → rechazado, sin relación, o hint demasiado corto
 
     Expuesto como función pura para poder testear el ranking sin filesystem.
+
+    v0.19.45 — Reglas de seguridad anti-falso-match:
+    1. Hint < 3 chars: return 0 (demasiado ambiguo).
+    2. Hint < 5 chars: solo permitir exact (100) y prefix (80), NO
+       substring (60). Bug del user "abre et" no debe matchear "Setup".
+    3. _SHORTCUT_REJECT_TOKENS expandido con "setup"/"installer".
     """
     if not name or not hint:
         return 0
     name_l = name.lower()
     hint_l = hint.lower()
 
-    # Descartar desinstaladores, readmes, crash reporters, etc.
+    # v0.19.45 — Hint demasiado corto = ambigüedad → rechazar
+    if len(hint_l) < _MIN_HINT_LEN:
+        return 0
+
+    # Descartar desinstaladores, readmes, crash reporters, installers, etc.
     if any(tok in name_l for tok in _SHORTCUT_REJECT_TOKENS):
         return 0
 
@@ -286,7 +702,9 @@ def score_shortcut_name(name: str, hint: str) -> int:
         return 100
     if name_l.startswith(hint_l):
         return 80
-    if hint_l in name_l:
+    # v0.19.45 — Substring match SOLO para hints largos (5+ chars).
+    # "et" no debe matchear cualquier .exe que contenga "et" en el nombre.
+    if hint_l in name_l and len(hint_l) >= _MIN_HINT_LEN_FOR_SUBSTRING:
         return 60
     if name_l in hint_l:
         return 30
@@ -416,6 +834,15 @@ _ACTION_MSGS = {
         "ru": "Не нашёл '{name}'. Пробовал прямой запуск, PowerShell, меню Пуск и обычные папки. Последняя ошибка: {err}",
         "ko": "'{name}' 못 찾았어. 직접 실행, PowerShell, 시작 메뉴, 일반 폴더 다 시도했어. 마지막 에러: {err}",
     },
+    "open_not_found_suggestions": {
+        "en": "Couldn't find '{name}', but I see similar apps installed: {suggestions}. Try one of those next.",
+        "es": "No pude encontrar '{name}', pero veo apps similares instaladas: {suggestions}. Prueba con alguna de esas.",
+        "fr": "N'a pas trouvé '{name}', mais je vois des apps similaires installées : {suggestions}. Essaie l'une d'elles.",
+        "ja": "'{name}' が見つかりませんでしたが、似たアプリがインストールされています: {suggestions}。次はそれを試してみて。",
+        "de": "Konnte '{name}' nicht finden, aber ich sehe ähnliche Apps installiert: {suggestions}. Probier eine davon.",
+        "ru": "Не нашёл '{name}', но вижу похожие приложения: {suggestions}. Попробуй одно из них.",
+        "ko": "'{name}' 못 찾았는데, 비슷한 앱들이 설치돼 있어: {suggestions}. 그중 하나로 다시 시도해 봐.",
+    },
     # ── search_web / open_url ───────────────────────────────────────
     "search_web": {
         "en": "Search for '{query}' opened in Google.",
@@ -510,6 +937,24 @@ _ACTION_MSGS = {
         "de": "Keine Tabs mit '{hint}' gefunden.",
         "ru": "Не нашёл вкладок с '{hint}'.",
         "ko": "'{hint}' 포함 탭 못 찾았어.",
+    },
+    "tabs_ambiguous": {
+        "en": "{count} tabs match '{hint}' — be more specific (none closed):\n{items}",
+        "es": "{count} pestañas coinciden con '{hint}' — sé más específica (no cerré ninguna):\n{items}",
+        "fr": "{count} onglets correspondent à '{hint}' — sois plus précise (aucun fermé) :\n{items}",
+        "ja": "'{hint}' に一致するタブが {count} 個 — もっと具体的に (何も閉じてない):\n{items}",
+        "de": "{count} Tabs passen zu '{hint}' — sei spezifischer (nichts geschlossen):\n{items}",
+        "ru": "{count} вкладок совпадают с '{hint}' — уточни (ничего не закрыто):\n{items}",
+        "ko": "'{hint}' 일치하는 탭 {count}개 — 더 구체적으로 말해 (아무것도 안 닫았어):\n{items}",
+    },
+    "windows_ambiguous": {
+        "en": "{count} windows match '{hint}' — be more specific (none closed):\n{items}",
+        "es": "{count} ventanas coinciden con '{hint}' — sé más específica (no cerré ninguna):\n{items}",
+        "fr": "{count} fenêtres correspondent à '{hint}' — sois plus précise (aucune fermée) :\n{items}",
+        "ja": "'{hint}' に一致するウィンドウが {count} 個 — もっと具体的に (何も閉じてない):\n{items}",
+        "de": "{count} Fenster passen zu '{hint}' — sei spezifischer (nichts geschlossen):\n{items}",
+        "ru": "{count} окон совпадают с '{hint}' — уточни (ничего не закрыто):\n{items}",
+        "ko": "'{hint}' 일치하는 창 {count}개 — 더 구체적으로 말해 (아무것도 안 닫았어):\n{items}",
     },
     # ── volume ─────────────────────────────────────────────────────
     "vol_up": {
@@ -760,12 +1205,14 @@ def _open_msg(lang: str, kind: str, **kw) -> str:
     """Mensajes localizados para open_app — wrapper sobre _amsg para
     retro-compat. Antes solo cubría en/es; ahora delega a _amsg que
     maneja los 7 idiomas.
-    kind: 'launched' | 'web' | 'proto_fail' | 'not_found'"""
+    kind: 'launched' | 'web' | 'proto_fail' | 'not_found' |
+          'not_found_with_suggestions' (v0.19.47)"""
     key_map = {
         "launched": "open_launched",
         "web": "open_web",
         "proto_fail": "open_proto_fail",
         "not_found": "open_not_found",
+        "not_found_with_suggestions": "open_not_found_suggestions",
     }
     return _amsg(lang, key_map.get(kind, "open_not_found"), **kw)
 
@@ -873,6 +1320,18 @@ def open_app(app_name: str, lang: str = "en") -> str:
     # Start-Process, escritorio, menú inicio, rutas comunes) si nada
     # encontró el .exe, un último shell-pass con metacaracteres no aporta
     # nada legítimo — solo riesgo. Mejor un error claro.
+    #
+    # v0.19.47 — Feature C: antes de rendirnos, recolectamos sugerencias
+    # vía collect_app_suggestions (fuzzy match contra .lnk del user). Si
+    # encontramos candidatos similares, los incluimos en el msg para que
+    # Ashley pueda reintentar con el nombre correcto en el siguiente turn.
+    suggestions = collect_app_suggestions(app_name, top_n=3)
+    if suggestions:
+        sugg_str = ", ".join(f"'{s}'" for s in suggestions)
+        return _open_msg(
+            lang, "not_found_with_suggestions",
+            name=app_name, suggestions=sugg_str,
+        )
     return _open_msg(lang, "not_found", name=app_name, err="not on disk")
 
 
@@ -984,7 +1443,7 @@ def play_music(query: str, browser_already_open: bool = False,
     siempre devolvía True aunque el mensaje fuera 'Error: ...', así que
     Ashley nunca disparaba la disculpa post-fallo.
     """
-    global _youtube_hwnd
+    global _youtube_hwnd, _last_ashley_music_tab_id
     import logging
     log = logging.getLogger("ashley.music")
 
@@ -1046,26 +1505,48 @@ def play_music(query: str, browser_already_open: bool = False,
         from . import browser_cdp as _cdp
         if _cdp.is_cdp_available():
             try:
-                # Bonus del path CDP: cerrar la(s) tab(s) anterior(es) de
-                # YouTube antes de abrir la nueva. Evita acumulación de
-                # tabs que pasa con webbrowser.open.
-                #
-                # v0.19.41 — filter por URL (no title). find_tabs_matching
-                # falla cuando el title no contiene "youtube" (común en
-                # Opera y otros browsers que muestran solo el nombre del
-                # video como title).
-                all_tabs_for_close = _cdp.list_tabs()
-                old_yt = [
-                    t for t in all_tabs_for_close
-                    if "youtube.com" in (t.get("url") or "").lower()
-                ]
-                for t in old_yt:
-                    _cdp.close_tab(t["id"])
-                log.warning(f"play_music: CDP path — closed {len(old_yt)} old YouTube tab(s)")
+                # v0.19.45 — Cerrar SOLO la tab anterior de música que
+                # Ashley abrió (track via `_last_ashley_music_tab_id`).
+                # Antes cerrábamos TODAS las tabs youtube.com (incluso
+                # videos/streams del user) → mataba el video de Warcraft
+                # del user al pedir música. Reportado y bug-confirmado.
+                if _last_ashley_music_tab_id:
+                    try:
+                        # Verificar que la tab aún existe antes de cerrar
+                        all_tabs_check = _cdp.list_tabs()
+                        tab_exists = any(
+                            t.get("id") == _last_ashley_music_tab_id
+                            for t in all_tabs_check
+                        )
+                        if tab_exists:
+                            _cdp.close_tab(_last_ashley_music_tab_id)
+                            log.warning(
+                                "play_music: CDP closed previous music tab "
+                                "id=%s (NOT touching other YT tabs of user)",
+                                _last_ashley_music_tab_id,
+                            )
+                        else:
+                            log.warning(
+                                "play_music: previous music tab id=%s "
+                                "no longer exists (user closed it)",
+                                _last_ashley_music_tab_id,
+                            )
+                        _last_ashley_music_tab_id = ""
+                    except Exception as _e:
+                        log.warning(
+                            "play_music: failed closing previous music tab: %s",
+                            _e,
+                        )
 
                 new_t = _cdp.new_tab(video_url)
                 if new_t and new_t.get("id"):
-                    log.warning(f"play_music: CDP path — opened tab id={new_t['id']}")
+                    # v0.19.45 — Trackear esta tab para cerrarla la
+                    # próxima vez (en vez de cerrar todas las YT).
+                    _last_ashley_music_tab_id = new_t["id"]
+                    log.warning(
+                        "play_music: CDP path — opened tab id=%s, tracked "
+                        "as Ashley's music tab", new_t["id"],
+                    )
                     if resolved_ok:
                         return _amsg(lang, "music_playing", title=title), True, True
                     return _amsg(lang, "music_search_only", query=query), False, True
@@ -1103,6 +1584,11 @@ def play_music(query: str, browser_already_open: bool = False,
                     # inmediatamente, causando polls de 5-10s
                     # innecesarios. URL se setea al instante.
                     # OJO: videoIds case-sensitive — no lower del URL completo.
+                    #
+                    # v0.19.45 — si encontramos la tab, también capturamos
+                    # su id en _last_ashley_music_tab_id para poder
+                    # cerrarla en la próxima petición de música.
+                    nonlocal_capture_id = None
                     try:
                         all_tabs = _cdp.list_tabs()
                     except Exception:
@@ -1111,10 +1597,16 @@ def play_music(query: str, browser_already_open: bool = False,
                         tab_url = t.get("url") or ""
                         if "youtube.com" not in tab_url.lower():
                             continue
-                        if target_vid and target_vid in tab_url:
-                            return True
-                        if not target_vid and video_url in tab_url:
-                            return True
+                        match_videoid = target_vid and target_vid in tab_url
+                        match_full = not target_vid and video_url in tab_url
+                        if match_videoid or match_full:
+                            nonlocal_capture_id = t.get("id")
+                            break
+                    if nonlocal_capture_id:
+                        # v0.19.45 — track la tab que el poll encontró
+                        global _last_ashley_music_tab_id
+                        _last_ashley_music_tab_id = nonlocal_capture_id
+                        return True
                     return False
 
                 # Fase 1: 4 polls rápidos (250ms × 4 = 1s) para PCs rápidos
@@ -1468,27 +1960,43 @@ def _open_url_cdp_safe(
 
 # ── Búsqueda web ──────────────────────────────────────────────────────────────
 
-def search_web(query: str, prefer_cdp: bool = False, lang: str = "en") -> str:
+def search_web(query: str, prefer_cdp: bool = False,
+               lang: str = "en") -> tuple[str, bool]:
     """v0.19.42 — Acepta prefer_cdp para usar el path CDP (rápido, sin
     foco visible). NO dedupe porque cada búsqueda Google puede querer
-    resultados frescos."""
+    resultados frescos.
+
+    v0.19.45 — Ahora retorna (mensaje, success). Antes siempre devolvía
+    string asumiendo éxito, aunque _open_url_cdp_safe hubiera devuelto
+    opened_ok=False. El caller (execute_action) tiene que propagar ese
+    success a Ashley para que disculpe en personaje cuando falla.
+    """
     url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
-    _open_url_cdp_safe(url, prefer_cdp=prefer_cdp, dedupe=False)
-    return _amsg(lang, "search_web", query=query)
+    _already_open, opened_ok = _open_url_cdp_safe(
+        url, prefer_cdp=prefer_cdp, dedupe=False,
+    )
+    return _amsg(lang, "search_web", query=query), opened_ok
 
 
 # ── Abrir URL ─────────────────────────────────────────────────────────────────
 
-def open_url(url: str, prefer_cdp: bool = False, lang: str = "en") -> str:
+def open_url(url: str, prefer_cdp: bool = False,
+             lang: str = "en") -> tuple[str, bool]:
     """v0.19.42 — Acepta prefer_cdp para usar el path CDP. Con dedupe:
     si la URL ya está abierta en otra tab, activa esa tab en vez de
-    abrir otra (evita acumulación de duplicados)."""
+    abrir otra (evita acumulación de duplicados).
+
+    v0.19.45 — Ahora retorna (mensaje, success) consistente con
+    search_web/play_music. Antes siempre asumía éxito.
+    """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    already_open, _ok = _open_url_cdp_safe(url, prefer_cdp=prefer_cdp, dedupe=True)
+    already_open, opened_ok = _open_url_cdp_safe(
+        url, prefer_cdp=prefer_cdp, dedupe=True,
+    )
     if already_open:
-        return _amsg(lang, "url_already_open", url=url)
-    return _amsg(lang, "open_url", url=url)
+        return _amsg(lang, "url_already_open", url=url), True
+    return _amsg(lang, "open_url", url=url), opened_ok
 
 
 # ── Cerrar ventana / app ──────────────────────────────────────────────────────
@@ -1723,9 +2231,11 @@ def close_window(hint: str, lang: str = "en") -> str:
     # También buscar el proceso directamente por nombre del exe detectado en la ventana
     found_title = ""
 
-    # 2. Intentar WM_CLOSE por título de ventana
-    found_hwnd = [0]
-    found_title_ref = [""]
+    # 2. Intentar WM_CLOSE por título de ventana.
+    # v0.19.47 — Feature B: acumular TODAS las ventanas que matchean (no
+    # solo la primera). Si hay >1 → devolver lista para disambiguation.
+    # Si exactamente 1 → cerrar. Si 0 → caer al taskkill por proceso.
+    matching_windows: list[tuple[int, str]] = []
     CB = _ct.WINFUNCTYPE(_ct.c_bool, _ct.c_void_p, _ct.c_void_p)
     def _enum_cb(hwnd, _):
         if not _u32.IsWindowVisible(hwnd):
@@ -1735,12 +2245,39 @@ def close_window(hint: str, lang: str = "en") -> str:
             return True
         buf = _ct.create_unicode_buffer(n + 1)
         _u32.GetWindowTextW(hwnd, buf, n + 1)
-        if key in _normalize(buf.value):
-            found_hwnd[0] = hwnd
-            found_title_ref[0] = buf.value
-            return False
+        title = buf.value
+        if key in _normalize(title):
+            matching_windows.append((hwnd, title))
         return True
     _u32.EnumWindows(CB(_enum_cb), 0)
+
+    # v0.19.47 — Si hay >1 windows matching: ambiguo, devolver lista sin cerrar.
+    # Excepción: si el hint matchea EXACTO al nombre de un proceso conocido
+    # (ej. "discord", "spotify") asumimos que el user quiere cerrar TODAS
+    # las instancias de esa app — ese es el comportamiento clásico de
+    # close_window para apps standalone. La ambigüedad solo aplica a
+    # hints genéricos que matchean varios títulos distintos.
+    is_explicit_proc = (key in _CLOSE_MAP) or (key in APP_MAP)
+    if len(matching_windows) > 1 and not is_explicit_proc:
+        items = []
+        # Cap a 8 entries para no saturar el contexto
+        for hwnd, title in matching_windows[:8]:
+            proc = _get_process_name_for_hwnd(hwnd) or "?"
+            items.append(f"  - '{title[:60]}' [{proc}]")
+        items_str = "\n".join(items)
+        import logging as _logging
+        _logging.getLogger("ashley.tabs").warning(
+            "close_window: ambiguous (%d matches) for hint=%r — "
+            "NOT closing any, returning list",
+            len(matching_windows), hint,
+        )
+        return _amsg(
+            lang, "windows_ambiguous",
+            count=len(matching_windows), hint=hint, items=items_str,
+        )
+
+    found_hwnd = [matching_windows[0][0]] if matching_windows else [0]
+    found_title_ref = [matching_windows[0][1]] if matching_windows else [""]
 
     if found_hwnd[0]:
         found_title = found_title_ref[0]
@@ -1804,6 +2341,21 @@ def close_window(hint: str, lang: str = "en") -> str:
 # Se captura justo después de webbrowser.open() en el proceso principal
 # (donde no hay foreground lock) y se reutiliza en llamadas posteriores.
 _youtube_hwnd: int = 0
+
+# v0.19.45 — ID de la última tab YouTube que ASHLEY abrió vía CDP.
+# Solo cerramos ESTA tab al abrir nueva música — NO tocamos otras tabs
+# de YouTube del user (videos, streams, etc.).
+#
+# Bug previo: close-old-yt iteraba TODAS las tabs youtube.com y las
+# cerraba. Si user estaba viendo Warcraft en YouTube y pedía música,
+# Ashley cerraba SU video. UX terrible reportada por user.
+#
+# Trade-off: si CDP `new_tab` devuelve None (HTTP timeout, browser
+# lento), no podemos saber qué id se asignó → no actualizamos
+# `_last_ashley_music_tab_id` y la tab queda "huérfana" (no se cerrará
+# en la próxima música). Acumulación posible pero menos mala que
+# cerrar tabs del user.
+_last_ashley_music_tab_id: str = ""
 
 _BROWSER_WIN32_CLASSES = {"Chrome_WidgetWin_1", "MozillaWindowClass"}
 
@@ -2118,15 +2670,45 @@ def close_browser_tab(hint: str, prefer_cdp: bool = False, lang: str = "en") -> 
                 log.warning(f"close_browser_tab: CDP path — found {len(matches)} match(es) for hint={hint!r}")
                 if not matches:
                     return _amsg(lang, "tabs_not_found", hint=hint)
-                closed_titles = []
-                for t in matches:
-                    if _cdp.close_tab(t["id"]):
-                        closed_titles.append(t.get("title", ""))
-                if not closed_titles:
-                    return _amsg(lang, "tabs_not_found", hint=hint)
-                if "youtube" in hint.lower():
-                    _youtube_hwnd = 0
-                return _amsg(lang, "tabs_closed", count=len(closed_titles), hint=hint)
+                # v0.19.47 — Feature B: si hay >1 matches, NO cerramos
+                # ninguno. Devolvemos la lista para que Ashley pueda
+                # pedirle al user cuál exactamente o ser más específica
+                # en el siguiente turn. Antes el código cerraba TODAS
+                # las matches → bug confirmado: pidió "cierra youtube"
+                # con 3 tabs → cerró las 3 incluyendo el video del user
+                # de Warcraft.
+                if len(matches) > 1:
+                    items: list[str] = []
+                    for t in matches[:8]:  # cap a 8 para no saturar
+                        title = (t.get("title") or "")[:60]
+                        url = (t.get("url") or "")
+                        # Truncar URL — solo el videoId/path importante
+                        url_hint = ""
+                        if "youtube.com/watch" in url and "v=" in url:
+                            vid = url.split("v=")[1].split("&")[0][:11]
+                            url_hint = f" (v={vid})"
+                        elif url.startswith("http"):
+                            from urllib.parse import urlparse
+                            parsed = urlparse(url)
+                            url_hint = f" ({parsed.netloc}{parsed.path[:30]})"
+                        items.append(f"  - '{title}'{url_hint}")
+                    items_str = "\n".join(items)
+                    log.warning(
+                        "close_browser_tab: ambiguous (%d matches) — "
+                        "NOT closing any, returning list for disambiguation",
+                        len(matches),
+                    )
+                    return _amsg(
+                        lang, "tabs_ambiguous",
+                        count=len(matches), hint=hint, items=items_str,
+                    )
+                # Exactamente 1 match — cerrar
+                t = matches[0]
+                if _cdp.close_tab(t["id"]):
+                    if "youtube" in hint.lower():
+                        _youtube_hwnd = 0
+                    return _amsg(lang, "tabs_closed", count=1, hint=hint)
+                return _amsg(lang, "tabs_not_found", hint=hint)
             except Exception as _e:
                 log.warning(f"close_browser_tab: CDP path failed ({_e}), falling back to legacy")
                 # Cae al path legacy abajo
@@ -2515,18 +3097,89 @@ def execute_action(action_type: str, params: list[str], browser_opened: bool = F
         elif action_type == "search_web":
             # v0.19.42 — pasa prefer_cdp para usar el path CDP cuando esté
             # activo (rápido + sin foco visible).
-            return {"success": True,
-                    "result": search_web(params[0] if params else "",
-                                         prefer_cdp=prefer_cdp, lang=lang),
+            # v0.19.45 — search_web ahora devuelve (msg, success) — propagar
+            # success real para que Ashley se disculpe en personaje cuando
+            # la búsqueda no se abrió (browser cerrado, CDP timeout, etc.).
+            msg, ok = search_web(params[0] if params else "",
+                                  prefer_cdp=prefer_cdp, lang=lang)
+            return {"success": ok, "result": msg,
                     "screenshot": None, "browser_opened": browser_opened}
 
         elif action_type == "open_url":
             # v0.19.42 — pasa prefer_cdp para usar el path CDP con dedupe
             # (si ya está abierta esa URL, activa esa tab en vez de duplicar).
-            return {"success": True,
-                    "result": open_url(params[0] if params else "",
-                                       prefer_cdp=prefer_cdp, lang=lang),
+            # v0.19.45 — open_url devuelve (msg, success) — propagar success.
+            msg, ok = open_url(params[0] if params else "",
+                                prefer_cdp=prefer_cdp, lang=lang)
+            return {"success": ok, "result": msg,
                     "screenshot": None, "browser_opened": browser_opened}
+
+        elif action_type == "wait_then":
+            # v0.19.45 — Acción CHAIN: espera N segundos y luego ejecuta
+            # otra acción. Solución para casos como "pon canción y luego
+            # dale like": play_music abre la tab pero el botón de like no
+            # está visible inmediatamente. wait_then:5:click:like espera
+            # 5s a que cargue YouTube y luego clickea.
+            #
+            # Formato: [action:wait_then:N:NESTED_TYPE:NESTED_PARAMS...]
+            # Ejemplos:
+            #   [action:wait_then:5:click:like]
+            #   [action:wait_then:7:click:subscribe]
+            #
+            # Seguridad: N capeado a 20s para no exceder el timeout 30s
+            # del speculative dispatch (sino el fallback re-ejecutaría).
+            if len(params) < 2:
+                return {"success": False,
+                        "result": "wait_then necesita al menos delay y action nested. "
+                                  "Ejemplo: [action:wait_then:5:click:like]",
+                        "screenshot": None, "browser_opened": browser_opened}
+            try:
+                delay_s = int(params[0])
+            except (ValueError, TypeError):
+                return {"success": False,
+                        "result": f"wait_then: delay '{params[0]}' no es número.",
+                        "screenshot": None, "browser_opened": browser_opened}
+            # Cap [1, 20] segundos
+            delay_s = max(1, min(20, delay_s))
+
+            nested_type = params[1]
+            nested_params_raw = params[2:] if len(params) > 2 else []
+            # v0.19.45 — Para acciones tipo TEXT (que pueden tener ":" en
+            # su param), reunir todo lo que sigue tras el nested_type
+            # como un único string. Sin esto, "type_text:hola:mundo"
+            # quedaría como ["hola", "mundo"] cuando debería ser
+            # ["hola:mundo"].
+            TEXT_NESTED = ("type_text", "search_web", "open_url",
+                           "play_music", "click", "click_selector")
+            if nested_type in TEXT_NESTED and nested_params_raw:
+                nested_params = [":".join(nested_params_raw)]
+            else:
+                nested_params = nested_params_raw
+
+            # Loguear y dormir
+            import logging as _logging
+            _wlog = _logging.getLogger("ashley.wait_then")
+            _wlog.warning(
+                "wait_then: sleeping %ds, then will run %s with params=%r",
+                delay_s, nested_type, nested_params,
+            )
+            time.sleep(delay_s)
+            _wlog.warning("wait_then: woke up, dispatching nested %s", nested_type)
+
+            # v0.19.45 — Recursión defensiva: NO permitir wait_then
+            # anidado dentro de wait_then (evita bombas de delay).
+            if nested_type == "wait_then":
+                return {"success": False,
+                        "result": "wait_then no puede anidar otro wait_then.",
+                        "screenshot": None, "browser_opened": browser_opened}
+
+            # Dispatch nested action vía recursión a execute_action
+            return execute_action(
+                nested_type, nested_params,
+                browser_opened=browser_opened,
+                lang=lang,
+                prefer_cdp=prefer_cdp,
+            )
 
         elif action_type == "volume":
             sub = params[0] if params else "up"
@@ -3032,10 +3685,40 @@ def _get_process_name_for_hwnd(hwnd: int) -> str:
     return ""
 
 
-def get_system_state() -> str:
+def _get_browser_tabs_via_cdp() -> list[dict]:
+    """v0.19.45 (FASE 4) — Lista tabs del browser vía CDP.
+
+    Devuelve [{"title": ..., "url": ...}, ...] solo si CDP disponible.
+    Más rico que UIA: también da URLs (no solo títulos), y todos los
+    tabs (no solo el activo). Útil para que Ashley sepa exactamente
+    QUÉ está abierto y pueda targetear acciones precisas.
+    """
+    try:
+        from . import browser_cdp as _cdp
+        if not _cdp.is_cdp_available():
+            return []
+        tabs = _cdp.list_tabs()
+        return [
+            {"title": t.get("title", "") or "", "url": t.get("url", "") or ""}
+            for t in tabs
+            if t.get("type") == "page"
+        ]
+    except Exception:
+        return []
+
+
+def get_system_state(prefer_cdp: bool = False) -> str:
     """
     Snapshot de ventanas visibles y TODAS las pestañas del navegador.
-    Usa UI Automation para enumerar todas las pestañas (no solo la activa).
+
+    v0.19.45 (FASE 4) — Si `prefer_cdp=True` y CDP está disponible, usa
+    CDP para enriquecer la sección de browser tabs con title + URL
+    (UIA solo da title). Esto le permite a Ashley targetear acciones
+    específicas: "el video de warcraft está en la tab youtube.com/
+    watch?v=XYZ" en vez de adivinar.
+
+    Si CDP no disponible o prefer_cdp=False, fallback a UIA (comportamiento
+    original).
     """
     import ctypes
     user32 = ctypes.windll.user32
@@ -3081,10 +3764,18 @@ def get_system_state() -> str:
 
     user32.EnumWindows(CB(_cb), 0)
 
-    # Obtener TODAS las pestañas via UI Automation; si falla, usar solo el título activo
-    browser_tabs = _get_browser_tabs_via_uia(browser_hwnds)
-    if not browser_tabs:
-        browser_tabs = active_titles  # fallback: solo pestaña activa
+    # v0.19.45 (FASE 4) — Preferir CDP si disponible (incluye URLs + más
+    # rápido + todos los tabs garantizados, no solo activo).
+    cdp_tabs: list[dict] = []
+    if prefer_cdp:
+        cdp_tabs = _get_browser_tabs_via_cdp()
+
+    # Fallback: UI Automation (sin URLs, puede fallar en algunos browsers)
+    browser_tabs: list[str] = []
+    if not cdp_tabs:
+        browser_tabs = _get_browser_tabs_via_uia(browser_hwnds)
+        if not browser_tabs:
+            browser_tabs = active_titles  # último fallback: solo pestaña activa
 
     lines: list[str] = []
     # Nota observacional al inicio: este bloque es CONTEXTO interno para
@@ -3110,10 +3801,41 @@ def get_system_state() -> str:
                 lines.append(f"  - \"{title}\"  [{proc}]")
             else:
                 lines.append(f"  - \"{title}\"")
-    if browser_tabs:
+    # v0.19.45 (FASE 4) — Si tenemos CDP tabs (con URL), las mostramos
+    # con título + URL para que Ashley pueda targetear con precisión.
+    if cdp_tabs:
+        lines.append("Pestañas del navegador (con URL — vía CDP):")
+        for t in cdp_tabs[:20]:
+            title = t.get("title") or "(sin título)"
+            url = t.get("url") or ""
+            # Truncar URLs largas para no quemar tokens del prompt
+            url_short = url if len(url) <= 120 else url[:117] + "..."
+            lines.append(f"  - \"{title}\"  →  {url_short}")
+    elif browser_tabs:
         lines.append("Pestañas del navegador:")
         for t in browser_tabs[:20]:
             lines.append(f"  - \"{t}\"")
+    # v0.19.47 — Lista de apps INSTALADAS (no necesariamente abiertas).
+    # Filtro mínimo language-agnostic; el LLM ignora semánticamente las
+    # que sean uninstaller/about/help (en cualquier idioma). Cacheado 5min.
+    # Cap 250 — efectivamente todas las apps de un user normal. Coste:
+    # ~1500-2000 tokens en el prompt dinámico, que se paga una vez por
+    # turn pero permite a Ashley NO inventar nombres de apps.
+    try:
+        installed = discover_installed_apps(max_total=250)
+    except Exception:
+        installed = []
+    if installed:
+        lines.append("")
+        lines.append("Apps instaladas (escritorio + menú inicio):")
+        lines.append(
+            "  Para abrir, usa el nombre EXACTO de esta lista. IGNORA las "
+            "que sean uninstaller/desinstalar/about/acerca/help/ayuda/manual "
+            "— esas son tools auxiliares, no apps reales."
+        )
+        for app in installed:
+            lines.append(f"  - {app}")
+
     if len(lines) <= 3:
         # Solo el header + la nota — sin contenido real
         return "No se detectaron ventanas abiertas."

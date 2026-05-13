@@ -152,7 +152,17 @@ class TestDedupeWorksWhenTitleHasNoYouTube:
         old_url = _vid_url("oldsong1234")
         new_url = _vid_url("newsong5678")
 
-        # Tab vieja con title sin "youtube"
+        # v0.19.45 (cambio de comportamiento): ahora SOLO cerramos la
+        # tab que ASHLEY abrió antes (track via _last_ashley_music_tab_id),
+        # NO todas las tabs youtube.com. Antes cerrábamos el video de
+        # Warcraft del user al pedir música — bug reportado.
+        #
+        # Para que este test funcione con el nuevo comportamiento,
+        # seteamos _last_ashley_music_tab_id="old_tab" antes (simulando
+        # que Ashley había abierto esa tab antes).
+        from reflex_companion import actions as _actions_mod
+        _actions_mod._last_ashley_music_tab_id = "old_tab"
+
         existing_tabs = [{
             "id": "old_tab",
             "title": "Some old song name",  # sin "youtube"
@@ -165,14 +175,14 @@ class TestDedupeWorksWhenTitleHasNoYouTube:
                    return_value=(new_url, "New Song")):
             actions.play_music("new", prefer_cdp=True, lang="en")
 
-        # close_tab debe haberse llamado para old_tab (debe encontrarse via URL)
+        # v0.19.45 — close_tab debe haberse llamado para old_tab porque
+        # estaba trackeada como Ashley's previous music tab.
         close_calls = mock_cdp_module.close_tab.call_args_list
         close_ids = [c.args[0] if c.args else c.kwargs.get("tab_id")
                      for c in close_calls]
         assert "old_tab" in close_ids, (
-            "v0.19.41: close-old-yt debe encontrar la tab vieja via URL "
-            "match (URL contiene 'youtube.com'), no via title. La tab "
-            "vieja tenía title sin 'youtube' pero URL sí."
+            "v0.19.45: close-old-yt debe cerrar la tab anterior de música "
+            "que Ashley abrió (trackeada via _last_ashley_music_tab_id)."
         )
 
 

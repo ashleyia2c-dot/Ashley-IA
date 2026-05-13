@@ -144,36 +144,65 @@ class TestCDPWizardI18n:
 # ════════════════════════════════════════════════════════════════════════
 
 
-class TestAgenticContinuationDisabled:
-    """v0.19.32 — La agentic continuation auto-replay quedó desactivada.
-    Si el user pide UNA cosa, Ashley la hace UNA vez. Si pide multi-step,
-    Ashley emite múltiples tags en LA MISMA respuesta (extract_all_actions
-    soporta eso desde v0.13.5)."""
+class TestAgenticContinuationModeChanged:
+    """v0.19.32 — desactivada por completo (causaba duplicados).
+    v0.19.45 — RE-HABILITADA en modo COMMENT-ONLY: continuation existe
+    para que Ashley vea el system_result y comente con precisión, pero
+    cualquier action tag emitido en la continuation se STRIPPEA (no se
+    ejecuta). Best of both: precisión narrativa + cero duplicados.
+    """
 
-    def test_should_continue_is_hardcoded_false(self):
-        """should_continue = False debe estar literal en el código."""
+    def test_should_continue_is_conditional(self):
+        """v0.19.45: ya no es `False` hardcoded — depende de
+        executed_results, all_safe_conversational, etc."""
         src = RC_FILE.read_text(encoding="utf-8")
-        idx = src.find("should_continue = ")
-        assert idx != -1, "should_continue no encontrado"
-        # Mirar la asignación en sí
-        block = src[idx:idx + 100]
-        assert "should_continue = False" in block, (
-            "should_continue debe ser False literal en v0.19.32+ — "
-            "evita que Ashley re-emita acciones tras single-action requests"
+        idx = src.find("should_continue = (")
+        # Debe haber una asignación condicional (multi-line tuple),
+        # NO `should_continue = False` literal
+        assert idx != -1, (
+            "v0.19.45: should_continue debe ser condicional `= (...)`, "
+            "no hardcoded False"
         )
 
-    def test_no_executed_count_eq_1_check_active(self):
-        """El check viejo `executed_count == 1` ya no debe estar activo."""
+    def test_continuation_is_comment_only(self):
+        """v0.19.45 — el trigger de la continuation debe explícitamente
+        decir 'COMMENT only, NO action tags'."""
         src = RC_FILE.read_text(encoding="utf-8")
-        # Si aparece, debe ser solo en comments (líneas que empiezan con #)
-        for ln in src.split("\n"):
-            stripped = ln.strip()
-            if stripped.startswith("#"):
-                continue
-            assert "executed_count == 1" not in ln, (
-                f"`executed_count == 1` activo en línea: {ln!r}. "
-                f"v0.19.32 desactiva la continuation, este check ya no aplica."
-            )
+        idx = src.find("def _stream_action_continuation")
+        end = src.find("\n    def ", idx + 1)
+        body = src[idx:end]
+        # Debe haber alguna mención de "COMENTARIO" / "COMMENT" /
+        # "no emit" / "NO emitir"
+        assert ("COMENTARIO" in body or "COMMENT" in body
+                or "comentar" in body.lower() or "comment" in body.lower()), (
+            "Trigger de continuation debe ser explícito sobre modo comment-only"
+        )
+
+    def test_continuation_strips_leaked_actions(self):
+        """v0.19.45 — si el LLM emite un action tag en la continuation
+        (disobedience), debe loguearse como warning y NO ejecutarse."""
+        src = RC_FILE.read_text(encoding="utf-8")
+        idx = src.find("def _stream_action_continuation")
+        end = src.find("\n    def ", idx + 1)
+        body = src[idx:end]
+        # Debe haber check de leaked_action o similar
+        assert ("leaked_action" in body or "STRIPPED" in body
+                or "disobeyed" in body.lower()), (
+            "Continuation debe loguear cuando el LLM emite tags prohibidos"
+        )
+
+    def test_continuation_does_not_call_execute_record_action(self):
+        """v0.19.45 — el follow_action NO debe ejecutarse en la
+        continuation (eso causaba duplicados antes de v0.19.32)."""
+        src = RC_FILE.read_text(encoding="utf-8")
+        idx = src.find("def _stream_action_continuation")
+        end = src.find("\n    def ", idx + 1)
+        body = src[idx:end]
+        # No debe llamar _execute_and_record_action sobre follow_action
+        assert "_execute_and_record_action(follow_action)" not in body, (
+            "v0.19.45: continuation NO debe ejecutar follow_action — "
+            "comment-only mode"
+        )
 
     def test_terminal_actions_set_still_defined(self):
         """_TERMINAL_ACTIONS se mantiene en parsing.py por si algún día

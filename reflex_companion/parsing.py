@@ -69,6 +69,7 @@ _LONG_RUNNING_ACTIONS = {
     "play_music",       # HTTP scrape + CDP new_tab + poll hasta 20s
     "open_url",         # CDP new_tab + poll hasta 10s
     "search_web",       # mismo path que open_url
+    "wait_then",        # delay 1-20s + nested action (total puede ~25s)
 }
 
 # Backward compat alias — código antiguo en algunas branches puede
@@ -233,6 +234,16 @@ def clean_display(text: str) -> str:
         r'(?:^|[\.\n])\s*sin\s+acci[oó]n(?:es)?\.?\s*$',
         r'(?:^|[\.\n])\s*pas\s+d[\'’]actions?\.?\s*$',
         r'(?:^|[\.\n])\s*aucune\s+action\.?\s*$',
+        # v0.19.49 — "No action tag" / "no tag" meta-comments al final
+        # (caso real reportado: "No action tag — just confirming the launch."
+        # se filtraba al chat). Cubre EN/ES/FR.
+        r'(?:^|[\.\n,])\s*no\s+action\s+tag[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*no\s+tag(?:s)?\s+(?:needed|emitted|added|necessary)?[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*just\s+confirming\b[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*sin\s+(?:tag|etiqueta)\s+de\s+acci[oó]n[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*solo\s+confirmando\b[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*pas\s+de\s+tag\s+d[\'’]action[^.\n]*\.?\s*$',
+        r'(?:^|[\.\n,])\s*juste\s+confirmer\b[^.\n]*\.?\s*$',
         # Meta sobre conversación / estilo (NUEVO v0.17.4) — el LLM
         # alucina "conversación fluida" como cierre evaluativo
         r',?\s*conversaci[oó]n\s+(?:fluida|natural|fluida\s+y\s+natural)\.?\s*$',
