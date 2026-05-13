@@ -76,6 +76,147 @@ OLLAMA_SUGGESTED_MODELS = [
 
 
 # ─────────────────────────────────────────────
+#  Capabilities por modelo (v0.19.51)
+# ─────────────────────────────────────────────
+#
+# Tabla declarativa de qué soporta cada modelo. Usado por la UI de
+# Settings para mostrar al user QUÉ pierde/gana al elegir cada uno.
+# Sin esto, el user activaba Vision con un modelo text-only y la app
+# tiraba HTTP 400 silencioso o respuestas que ignoraban la imagen.
+#
+# Categorías:
+#   - vision:      acepta image content parts (screenshot adjunto)
+#   - web_search:  tool nativo de búsqueda web (solo xAI SDK)
+#   - actions:     fiabilidad para emitir [action:...] tags y JSON
+#                  estricto (compress, mental_state, extract_facts).
+#                  "high"=modelo grande que sigue protocolo ✓
+#                  "low" =modelo pequeño que puede ignorar/romper tags
+#   - quality:     calidad subjetiva como companion ("excellent",
+#                  "good", "ok", "basic"). Usado en el banner UI.
+#
+# Si un modelo no está en este dict, asumimos defaults conservadores:
+# vision=False, web_search=False, actions="low", quality="basic".
+
+_MODEL_CAPABILITIES = {
+    # ── xAI ──
+    "grok-4-1-fast-reasoning": {
+        "vision": True, "web_search": True, "actions": "high",
+        "quality": "excellent",
+    },
+    "grok-4-1-fast-non-reasoning": {
+        "vision": True, "web_search": True, "actions": "high",
+        "quality": "excellent",
+    },
+    "grok-3-fast": {
+        "vision": True, "web_search": True, "actions": "high",
+        "quality": "good",
+    },
+    # ── OpenRouter ──
+    "anthropic/claude-sonnet-4.6": {
+        "vision": True, "web_search": False, "actions": "high",
+        "quality": "excellent",
+    },
+    "anthropic/claude-haiku-4.5": {
+        "vision": True, "web_search": False, "actions": "high",
+        "quality": "good",
+    },
+    "deepseek/deepseek-chat": {
+        "vision": False, "web_search": False, "actions": "high",
+        "quality": "good",
+    },
+    "google/gemini-2.5-flash": {
+        "vision": True, "web_search": False, "actions": "high",
+        "quality": "good",
+    },
+    "x-ai/grok-4.1-fast": {
+        "vision": True, "web_search": False, "actions": "high",
+        "quality": "excellent",
+    },
+    "openai/gpt-5": {
+        "vision": True, "web_search": False, "actions": "high",
+        "quality": "excellent",
+    },
+    "minimax/minimax-m2": {
+        "vision": False, "web_search": False, "actions": "high",
+        "quality": "good",
+    },
+    # ── Ollama (sugeridos) ──
+    "llama3.2": {
+        "vision": False, "web_search": False, "actions": "low",
+        "quality": "basic",
+    },
+    "llama3.1:8b": {
+        "vision": False, "web_search": False, "actions": "ok",
+        "quality": "ok",
+    },
+    "qwen2.5:7b": {
+        "vision": False, "web_search": False, "actions": "ok",
+        "quality": "ok",
+    },
+    "mistral": {
+        "vision": False, "web_search": False, "actions": "low",
+        "quality": "basic",
+    },
+    "gemma2:9b": {
+        "vision": False, "web_search": False, "actions": "ok",
+        "quality": "ok",
+    },
+    # Modelos Ollama vision (no en sugerencias pero el user puede bajarlos)
+    "llava": {
+        "vision": True, "web_search": False, "actions": "low",
+        "quality": "basic",
+    },
+    "llama3.2-vision": {
+        "vision": True, "web_search": False, "actions": "ok",
+        "quality": "ok",
+    },
+}
+
+
+def get_model_capabilities(model_id: str) -> dict:
+    """Devuelve dict de capabilities para un model_id. Defaults conservadores
+    si el modelo no está en la tabla (ej. modelos Ollama que el user bajó
+    pero no son los sugeridos).
+
+    Para modelos Ollama unknown, hacemos best-guess por nombre:
+      - Si contiene "vision" o "vl" o "llava" → vision=True
+      - Si parece un modelo grande (13b+/70b+) → actions=ok+
+      - Sino: defaults conservadores.
+    """
+    if model_id in _MODEL_CAPABILITIES:
+        return dict(_MODEL_CAPABILITIES[model_id])
+
+    # Heuristics para Ollama models no listados
+    name = model_id.lower()
+    vision = any(kw in name for kw in ("vision", "vl", "llava", "bakllava"))
+
+    # Estimación de tamaño por nombre — modelos grandes suelen seguir
+    # mejor los tags. Esto NO garantiza nada, solo evita banner pesimista
+    # innecesariamente.
+    # Cubre :Nb (Ollama tags) y -Nb (Hugging Face naming).
+    actions_level = "low"
+    quality = "basic"
+    for big_indicator in (":13b", ":34b", ":70b", "-13b", "-34b", "-70b", "-large"):
+        if big_indicator in name:
+            actions_level = "high"
+            quality = "good"
+            break
+    else:
+        for med_indicator in (":7b", ":8b", ":9b", "-7b", "-8b", "-9b"):
+            if med_indicator in name:
+                actions_level = "ok"
+                quality = "ok"
+                break
+
+    return {
+        "vision": vision,
+        "web_search": False,
+        "actions": actions_level,
+        "quality": quality,
+    }
+
+
+# ─────────────────────────────────────────────
 #  Resolución de configuración activa
 # ─────────────────────────────────────────────
 

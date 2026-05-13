@@ -1183,6 +1183,40 @@ class State(rx.State):
         que depende de web_search no está disponible)."""
         return self.llm_provider == "xai"
 
+    # ── v0.19.51: capabilities del modelo activo (banner UI) ──
+    @rx.var(auto_deps=False, deps=["llm_provider", "llm_model"])
+    def active_model_supports_vision(self) -> bool:
+        """True si el modelo activo acepta imagen (screenshot adjunto).
+        Usado para advertir al user al activar 👁 Vision con un modelo
+        text-only (DeepSeek, MiniMax, Llama3.2 base, etc.)."""
+        from .llm_provider import get_model_capabilities
+        return bool(get_model_capabilities(self.llm_model_display).get("vision"))
+
+    @rx.var(auto_deps=False, deps=["llm_provider", "llm_model"])
+    def active_model_actions_level(self) -> str:
+        """'high' | 'ok' | 'low' — fiabilidad del modelo emitiendo tags
+        [action:...] y JSON estricto (compress/mental_state/extract_facts).
+        Modelos pequeños (Ollama 3B-7B) suelen romper formato."""
+        from .llm_provider import get_model_capabilities
+        return get_model_capabilities(self.llm_model_display).get("actions", "low")
+
+    @rx.var(auto_deps=False, deps=["llm_provider", "llm_model"])
+    def active_model_quality_label(self) -> str:
+        """Label localizado de la calidad subjetiva del modelo activo.
+        Para mostrar en el banner de capabilities."""
+        from .llm_provider import get_model_capabilities
+        q = get_model_capabilities(self.llm_model_display).get("quality", "basic")
+        labels = {
+            "en": {"excellent": "Excellent", "good": "Good", "ok": "OK", "basic": "Basic"},
+            "es": {"excellent": "Excelente", "good": "Buena", "ok": "Aceptable", "basic": "Básica"},
+            "fr": {"excellent": "Excellente", "good": "Bonne", "ok": "Acceptable", "basic": "Basique"},
+            "ja": {"excellent": "最高", "good": "良い", "ok": "普通", "basic": "基本"},
+            "de": {"excellent": "Hervorragend", "good": "Gut", "ok": "OK", "basic": "Basis"},
+            "ru": {"excellent": "Отлично", "good": "Хорошо", "ok": "Приемлемо", "basic": "Базовое"},
+            "ko": {"excellent": "최고", "good": "좋음", "ok": "보통", "basic": "기본"},
+        }
+        return labels.get(self.language, labels["en"]).get(q, q)
+
     @rx.var(auto_deps=False, deps=["llm_provider"])
     def llm_provider_label(self) -> str:
         """Label legible del provider activo (para mensajes UI tipo
@@ -5985,6 +6019,71 @@ def _t_match(key: str):
     )
 
 
+def _caps_banner(warning_text):
+    """v0.19.51 — Banner que muestra capabilities del modelo activo.
+    Se inserta debajo del select de modelo en cada sub-panel de Settings
+    (xAI, OpenRouter, Ollama).
+
+    Líneas mostradas (todas reactivas a State.llm_model):
+      • Vision  ✅/❌  (¿el modelo acepta imagen para Screen Awareness?)
+      • Actions ✅/🟡/⚠ (fiabilidad emitiendo tags y JSON estricto)
+      • Discovery ✅/❌ (web search nativo — solo xAI hoy)
+      • Quality (label legible: Excelente/Buena/Aceptable/Básica)
+      • Tip — un warning text específico del provider que pasamos como
+        argumento (los tres providers tienen distintos trade-offs).
+    """
+    return rx.box(
+        rx.text(
+            State.t["caps_banner_title"],
+            color="#d4a373", font_size="11px",
+            font_weight="700", margin_bottom="4px",
+        ),
+        rx.cond(
+            State.active_model_supports_vision,
+            rx.text(State.t["caps_vision_yes"],
+                    color="#a3d977", font_size="11px", line_height="1.5"),
+            rx.text(State.t["caps_vision_no"],
+                    color="#ff9999", font_size="11px", line_height="1.5"),
+        ),
+        rx.match(
+            State.active_model_actions_level,
+            ("high", rx.text(State.t["caps_actions_high"],
+                              color="#a3d977", font_size="11px",
+                              line_height="1.5")),
+            ("ok", rx.text(State.t["caps_actions_ok"],
+                            color="#e8d877", font_size="11px",
+                            line_height="1.5")),
+            rx.text(State.t["caps_actions_low"],
+                    color="#ff9999", font_size="11px", line_height="1.5"),
+        ),
+        rx.cond(
+            State.web_search_supported,
+            rx.text(State.t["caps_websearch_yes"],
+                    color="#a3d977", font_size="11px", line_height="1.5"),
+            rx.text(State.t["caps_websearch_no"],
+                    color="#ff9999", font_size="11px", line_height="1.5"),
+        ),
+        rx.text(
+            State.t["caps_quality_label"] + " " + State.active_model_quality_label,
+            color="#ccc", font_size="11px",
+            line_height="1.5", margin_top="2px",
+        ),
+        rx.divider(margin_y="6px",
+                    border_color="rgba(212,163,115,0.2)"),
+        rx.text(
+            warning_text,
+            color="#aaa", font_size="10px",
+            line_height="1.4", font_style="italic",
+        ),
+        margin_top="10px",
+        padding="10px 12px",
+        bg="rgba(0,0,0,0.25)",
+        border="1px solid rgba(212,163,115,0.15)",
+        border_radius="8px",
+        width="100%",
+    )
+
+
 def index():
     # ── Input area v0.16 ──────────────────────────────────────
     # En el rediseño boutique noir, los botones de acción
@@ -6633,6 +6732,8 @@ def index():
                                         ),
                                         rx.text(State.t["settings_model_hint"],
                                                 color="#888", font_size="10px", line_height="1.4"),
+                                        # v0.19.51 — banner de capabilities
+                                        _caps_banner(State.t["caps_warning_or"]),
                                         spacing="1", align="stretch", width="100%",
                                     ),
                                     rx.box(),
@@ -6684,6 +6785,8 @@ def index():
                                         ),
                                         rx.text(State.t["settings_model_hint"],
                                                 color="#888", font_size="10px", line_height="1.4"),
+                                        # v0.19.51 — banner de capabilities
+                                        _caps_banner(State.t["caps_warning_oll"]),
                                         spacing="1", align="stretch", width="100%",
                                     ),
                                     rx.box(),
@@ -6705,6 +6808,8 @@ def index():
                                         ),
                                         rx.text(State.t["settings_model_hint"],
                                                 color="#888", font_size="10px", line_height="1.4"),
+                                        # v0.19.51 — banner de capabilities
+                                        _caps_banner(State.t["caps_warning_xai"]),
                                         spacing="1", align="stretch", width="100%",
                                     ),
                                     rx.box(),
