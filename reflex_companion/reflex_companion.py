@@ -2440,211 +2440,14 @@ class State(rx.State):
         time_context = self._build_time_context()
 
         # ── Estado de capacidades activas (Ashley sabe qué puede/no puede hacer) ──
-        # Actions es ahora el toggle maestro: controla tanto la ejecución de
-        # acciones como el awareness del PC (ventanas, tabs, screenshots). Con
-        # Actions OFF, Ashley solo ve la hora — cero info del PC del user.
-        capabilities = []
-        if self.language == "fr":
-            capabilities.append("=== TES CAPACITÉS ACTIVES ===")
-            # v0.19.50 — Actions y Vision desacopladas. Cada una con su
-            # propia descripción honest: Actions = control PC; Vision = ver
-            # pantalla. Antes acopladas en un solo "⚡ Actions".
-            actions_on_fr = (
-                "ACTIVÉ — tu peux ouvrir des apps, contrôler le volume, fermer "
-                "des onglets/fenêtres, jouer de la musique, etc."
-            )
-            actions_off_fr = (
-                "DÉSACTIVÉ — tu ne peux rien contrôler sur le PC. Si le patron "
-                "te demande d'ouvrir/fermer/lancer quelque chose, dis-lui "
-                "d'activer le toggle ⚡ Actions d'abord."
-            )
-            capabilities.append(
-                "⚡ Actions (contrôle PC) : "
-                + (actions_on_fr if self.auto_actions else actions_off_fr)
-            )
-            vision_on_fr = (
-                "ACTIVÉ — tu peux VOIR l'écran du patron. Une capture d'écran "
-                "est jointe à chacun de ses messages, et tu jettes un œil "
-                "proactif toutes les 10 min."
-            )
-            vision_off_fr = (
-                "DÉSACTIVÉ — tu ne vois PAS l'écran du patron. Si il te demande "
-                "« regarde mon écran » ou similaire, dis-lui d'activer le bouton "
-                "👁 (sous ton portrait) d'abord."
-            )
-            capabilities.append(
-                "👁 Vision (regard sur l'écran) : "
-                + (vision_on_fr if self.vision_enabled else vision_off_fr)
-            )
-            capabilities.append(
-                "🌐 Mode navigateur moderne (CDP) : "
-                + (
-                    "ACTIVÉ — tu peux cliquer sur des éléments, taper dans "
-                    "des champs, lire le contenu et faire défiler les pages "
-                    "du navigateur."
-                    if self.cdp_enabled
-                    else "DÉSACTIVÉ — tu ne peux qu'ouvrir/fermer des onglets. "
-                    "Si le patron te demande de cliquer/taper/lire dans une "
-                    "page web, dis-lui d'activer 🌐 Mode navigateur moderne "
-                    "dans Ajustes."
-                )
-            )
-            capabilities.append(
-                "🗣 Naturel (mode voix) : "
-                + ("ACTIVÉ — pas de gestes, pur dialogue." if self.voice_mode
-                   else "DÉSACTIVÉ — gestes entre *astérisques* actifs.")
-            )
-            capabilities.append(
-                "🔊 TTS (voix) : " + ("ACTIVÉ" if self.tts_enabled else "DÉSACTIVÉ")
-            )
-            capabilities.append("")
-            if self.auto_actions:
-                capabilities.append(
-                    "[BOUCLE DE FEEDBACK] Après chaque action que tu émets, "
-                    "le système te renvoie un message [system_result] avec "
-                    "ce qui s'est passé. Lis-le pour vérifier si ton plan a "
-                    "fonctionné. Si une action échoue, le système te donne "
-                    "automatiquement un autre tour pour ajuster — émets le "
-                    "pas suivant, ou dis au patron qu'il te faut son aide. "
-                    "Pense avant d'agir : tu peux vérifier le contenu d'une "
-                    "page avant de la toucher si tu as cette capacité active."
-                )
-            capabilities.append("")
-            capabilities.append(
-                "IMPORTANT : n'offre PAS de faire des choses que tu ne peux pas. "
-                "Si Actions est DÉSACTIVÉ, ne dis pas \"je te l'ouvre\" — dis "
-                "\"Active ⚡ Actions et je peux le faire\"."
-            )
-            capabilities.append(
-                "N'offre PAS d'envoyer des messages, emails ou contacter des "
-                "personnes — tu ne peux pas faire ça."
-            )
-            capabilities.append(
-                "N'interprète PAS les notifications, popups ou petits textes "
-                "d'UI d'une capture — si tu ne peux pas le lire avec 100% de "
-                "certitude, NE le mentionne PAS. N'invente pas de noms, d'heures "
-                "ni de messages que tu crois voir."
-            )
-        elif self.language == "en":
-            capabilities.append("=== YOUR ACTIVE CAPABILITIES ===")
-            # v0.19.50 — Actions y Vision desacopladas (ver comentario FR).
-            actions_on_en = (
-                "ON — you can open apps, control volume, close tabs/windows, "
-                "play music, etc."
-            )
-            actions_off_en = (
-                "OFF — you cannot control anything on the PC. If the boss "
-                "asks you to open/close/launch something, tell him to "
-                "activate the ⚡ Actions toggle first."
-            )
-            capabilities.append(
-                "⚡ Actions (PC control): "
-                + (actions_on_en if self.auto_actions else actions_off_en)
-            )
-            vision_on_en = (
-                "ON — you CAN see the boss's screen. A screenshot is attached "
-                "to each of his messages, and you peek proactively every 10 min."
-            )
-            vision_off_en = (
-                "OFF — you do NOT see the boss's screen. If he asks 'look at "
-                "my screen' or similar, tell him to activate the 👁 button "
-                "(under your portrait) first."
-            )
-            capabilities.append(
-                "👁 Vision (screen awareness): "
-                + (vision_on_en if self.vision_enabled else vision_off_en)
-            )
-            capabilities.append(
-                "🌐 Modern browser mode (CDP): "
-                + (
-                    "ON — you can click elements, type in fields, read page "
-                    "contents, and scroll inside the browser."
-                    if self.cdp_enabled
-                    else "OFF — you can only open/close tabs. If the boss "
-                    "asks you to click/type/read inside a web page, tell him "
-                    "to activate 🌐 Modern browser mode in Settings."
-                )
-            )
-            capabilities.append(f"🗣 Natural (voice mode): {'ON — no gestures, pure dialogue.' if self.voice_mode else 'OFF — gestures between *asterisks* are active.'}")
-            capabilities.append(f"🔊 TTS (voice output): {'ON' if self.tts_enabled else 'OFF'}")
-            capabilities.append("")
-            if self.auto_actions:
-                capabilities.append(
-                    "[FEEDBACK LOOP] After every action you emit, the system "
-                    "sends you a [system_result] message with what happened. "
-                    "Read it to verify whether your plan worked. If an "
-                    "action fails, the system automatically gives you "
-                    "another turn to adjust — emit the next step, or tell "
-                    "the boss you need his help. Think before you act: you "
-                    "can check page content before touching it if that "
-                    "capability is on."
-                )
-            capabilities.append("")
-            capabilities.append("IMPORTANT: Do NOT offer to do things you can't do. If Actions is OFF, don't say 'I'll open that for you' — say 'Activate ⚡ Actions and I can do that.'")
-            capabilities.append("Do NOT offer to send messages, emails, or contact people — you cannot do that.")
-            capabilities.append("Do NOT interpret notifications, popups, or small UI text from the screenshot — if you can't read it with 100% certainty, do NOT mention it. Don't invent names, times, or messages you 'think you see'.")
-        else:  # es (también fallback para ja/de/ru/ko)
-            capabilities.append("=== TUS CAPACIDADES ACTIVAS ===")
-            # v0.19.50 — Actions y Vision desacopladas (ver comentario FR).
-            actions_on_es = (
-                "ACTIVADO — puedes abrir apps, controlar volumen, cerrar "
-                "pestañas/ventanas, poner música, etc."
-            )
-            actions_off_es = (
-                "DESACTIVADO — no puedes controlar nada en el PC. Si el jefe "
-                "te pide abrir/cerrar/lanzar algo, dile que active el toggle "
-                "⚡ Acciones primero."
-            )
-            capabilities.append(
-                "⚡ Acciones (control PC): "
-                + (actions_on_es if self.auto_actions else actions_off_es)
-            )
-            vision_on_es = (
-                "ACTIVADO — PUEDES ver la pantalla del jefe. Se adjunta una "
-                "captura de pantalla a cada uno de sus mensajes, y echas un "
-                "vistazo proactivo cada 10 min."
-            )
-            vision_off_es = (
-                "DESACTIVADO — NO ves la pantalla del jefe. Si te pide "
-                "\"mira mi pantalla\" o similar, dile que active el botón "
-                "👁 (bajo tu retrato) primero."
-            )
-            capabilities.append(
-                "👁 Visión (mirar pantalla): "
-                + (vision_on_es if self.vision_enabled else vision_off_es)
-            )
-            capabilities.append(
-                "🌐 Modo browser moderno (CDP): "
-                + (
-                    "ACTIVADO — puedes hacer click en elementos, escribir en "
-                    "campos, leer contenido y scrollear páginas dentro del "
-                    "navegador."
-                    if self.cdp_enabled
-                    else "DESACTIVADO — solo puedes abrir/cerrar pestañas. "
-                    "Si el jefe te pide click/escribir/leer dentro de una "
-                    "página web, dile que active 🌐 Modo browser moderno "
-                    "en Ajustes."
-                )
-            )
-            capabilities.append(f"🗣 Natural (modo voz): {'ACTIVADO — sin gestos, diálogo puro.' if self.voice_mode else 'DESACTIVADO — gestos entre *asteriscos* activos.'}")
-            capabilities.append(f"🔊 TTS (voz): {'ACTIVADO' if self.tts_enabled else 'DESACTIVADO'}")
-            capabilities.append("")
-            if self.auto_actions:
-                capabilities.append(
-                    "[BUCLE DE FEEDBACK] Después de cada acción que emites, "
-                    "el sistema te devuelve un mensaje [system_result] con "
-                    "lo que pasó. Léelo para verificar si tu plan funcionó. "
-                    "Si una acción falla, el sistema te da automáticamente "
-                    "otro turno para ajustar — emite el siguiente paso, o "
-                    "dile al jefe que necesitas su ayuda. Piensa antes de "
-                    "actuar: puedes verificar contenido de una página antes "
-                    "de tocarla si tienes esa capacidad activa."
-                )
-            capabilities.append("")
-            capabilities.append("IMPORTANTE: NO ofrezcas hacer cosas que no puedes. Si Acciones está DESACTIVADO, no digas 'te lo abro' — di 'Activa ⚡ Acciones y puedo hacerlo.'")
-            capabilities.append("NO ofrezcas enviar mensajes, emails ni contactar a personas — no puedes hacer eso.")
-            capabilities.append("NO interpretes notificaciones, popups ni texto pequeño del screenshot — si no puedes leerlo con 100% de certeza, NO lo menciones. No inventes nombres, tiempos ni mensajes que 'crees ver'.")
-
+        # v0.19.50 — Actions y Vision desacopladas. Cada toggle con su propia
+        # descripción:
+        #   ⚡ Actions: control PC (open_app, volume, etc.)
+        #   👁 Vision: ver pantalla (screenshot adjunto + bg vision)
+        # Soporta 7 idiomas vía helper (sin fallback al ES — un user JA/DE/
+        # RU/KO ve la descripción en SU idioma, importante porque la
+        # describe a Ashley en su system prompt).
+        capabilities = self._build_capabilities_block()
         system_state: str | None = None
         # v0.14.2 — Anti-hallucination: solo inyectamos la lista de ventanas
         # / pestañas si el user de verdad necesita ese contexto. Sin esto,
@@ -2939,6 +2742,278 @@ class State(rx.State):
             import logging
             logging.getLogger("ashley").warning("mental state compute failed: %s", _e)
             return None
+
+    def _build_capabilities_block(self) -> list[str]:
+        """v0.19.50 — Bloque "TUS CAPACIDADES ACTIVAS" en los 7 idiomas.
+
+        Describe a Ashley qué puede/no puede hacer ahora mismo según los
+        toggles del user. Cada capability es independiente:
+          - ⚡ Actions: control PC (open_app, volume, etc.)
+          - 👁 Vision: ver pantalla (screenshot adjunto + bg vision)
+          - 🌐 CDP: control de browser via DevTools Protocol
+          - 🗣 Voice mode: gestos *asterisco* on/off
+          - 🔊 TTS: voz de Ashley on/off
+
+        Antes acoplado en un solo "⚡ Actions (PC control & awareness)" —
+        Ashley creía que activar Actions le daba vista de pantalla, lo que
+        creaba expectativas falsas + acoplaba ~50% de coste API invisible.
+        """
+        # Tabla de strings por idioma. Cada entrada tiene los strings que
+        # cambian; el resto se construye con format string.
+        T_ALL = {
+            "en": {
+                "header": "=== YOUR ACTIVE CAPABILITIES ===",
+                "actions_label": "⚡ Actions (PC control)",
+                "actions_on": "ON — you can open apps, control volume, close tabs/windows, play music, etc.",
+                "actions_off": "OFF — you cannot control anything on the PC. If the boss asks you to open/close/launch something, tell him to activate the ⚡ Actions toggle first.",
+                "vision_label": "👁 Vision (screen awareness)",
+                "vision_on": "ON — you CAN see the boss's screen. A screenshot is attached to each of his messages, and you peek proactively every 10 min.",
+                "vision_off": "OFF — you do NOT see the boss's screen. If he asks 'look at my screen' or similar, tell him to activate the 👁 button (under your portrait) first.",
+                "cdp_label": "🌐 Modern browser mode (CDP)",
+                "cdp_on": "ON — you can click elements, type in fields, read page contents, and scroll inside the browser.",
+                "cdp_off": "OFF — you can only open/close tabs. If the boss asks you to click/type/read inside a web page, tell him to activate 🌐 Modern browser mode in Settings.",
+                "voice_label": "🗣 Natural (voice mode)",
+                "voice_on": "ON — no gestures, pure dialogue.",
+                "voice_off": "OFF — gestures between *asterisks* are active.",
+                "tts_label": "🔊 TTS (voice output)",
+                "tts_on": "ON",
+                "tts_off": "OFF",
+                "feedback_loop": (
+                    "[FEEDBACK LOOP] After every action you emit, the system "
+                    "sends you a [system_result] message with what happened. "
+                    "Read it to verify whether your plan worked. If an action "
+                    "fails, the system automatically gives you another turn "
+                    "to adjust — emit the next step, or tell the boss you "
+                    "need his help. Think before you act: you can check page "
+                    "content before touching it if that capability is on."
+                ),
+                "important_offer": (
+                    "IMPORTANT: Do NOT offer to do things you can't do. "
+                    "If Actions is OFF, don't say 'I'll open that for you' — "
+                    "say 'Activate ⚡ Actions and I can do that.'"
+                ),
+                "no_messages": (
+                    "Do NOT offer to send messages, emails, or contact "
+                    "people — you cannot do that."
+                ),
+                "no_invent": (
+                    "Do NOT interpret notifications, popups, or small UI "
+                    "text from the screenshot — if you can't read it with "
+                    "100% certainty, do NOT mention it. Don't invent names, "
+                    "times, or messages you 'think you see'."
+                ),
+            },
+            "es": {
+                "header": "=== TUS CAPACIDADES ACTIVAS ===",
+                "actions_label": "⚡ Acciones (control PC)",
+                "actions_on": "ACTIVADO — puedes abrir apps, controlar volumen, cerrar pestañas/ventanas, poner música, etc.",
+                "actions_off": "DESACTIVADO — no puedes controlar nada en el PC. Si el jefe te pide abrir/cerrar/lanzar algo, dile que active el toggle ⚡ Acciones primero.",
+                "vision_label": "👁 Visión (mirar pantalla)",
+                "vision_on": "ACTIVADO — PUEDES ver la pantalla del jefe. Se adjunta una captura de pantalla a cada uno de sus mensajes, y echas un vistazo proactivo cada 10 min.",
+                "vision_off": "DESACTIVADO — NO ves la pantalla del jefe. Si te pide \"mira mi pantalla\" o similar, dile que active el botón 👁 (bajo tu retrato) primero.",
+                "cdp_label": "🌐 Modo browser moderno (CDP)",
+                "cdp_on": "ACTIVADO — puedes hacer click en elementos, escribir en campos, leer contenido y scrollear páginas dentro del navegador.",
+                "cdp_off": "DESACTIVADO — solo puedes abrir/cerrar pestañas. Si el jefe te pide click/escribir/leer dentro de una página web, dile que active 🌐 Modo browser moderno en Ajustes.",
+                "voice_label": "🗣 Natural (modo voz)",
+                "voice_on": "ACTIVADO — sin gestos, diálogo puro.",
+                "voice_off": "DESACTIVADO — gestos entre *asteriscos* activos.",
+                "tts_label": "🔊 TTS (voz)",
+                "tts_on": "ACTIVADO",
+                "tts_off": "DESACTIVADO",
+                "feedback_loop": (
+                    "[BUCLE DE FEEDBACK] Después de cada acción que emites, "
+                    "el sistema te devuelve un mensaje [system_result] con "
+                    "lo que pasó. Léelo para verificar si tu plan funcionó. "
+                    "Si una acción falla, el sistema te da automáticamente "
+                    "otro turno para ajustar — emite el siguiente paso, o "
+                    "dile al jefe que necesitas su ayuda."
+                ),
+                "important_offer": (
+                    "IMPORTANTE: NO ofrezcas hacer cosas que no puedes. "
+                    "Si Acciones está DESACTIVADO, no digas 'te lo abro' — "
+                    "di 'Activa ⚡ Acciones y puedo hacerlo.'"
+                ),
+                "no_messages": "NO ofrezcas enviar mensajes, emails ni contactar a personas — no puedes hacer eso.",
+                "no_invent": "NO interpretes notificaciones, popups ni texto pequeño del screenshot — si no puedes leerlo con 100% de certeza, NO lo menciones. No inventes nombres, tiempos ni mensajes que 'crees ver'.",
+            },
+            "fr": {
+                "header": "=== TES CAPACITÉS ACTIVES ===",
+                "actions_label": "⚡ Actions (contrôle PC)",
+                "actions_on": "ACTIVÉ — tu peux ouvrir des apps, contrôler le volume, fermer des onglets/fenêtres, jouer de la musique, etc.",
+                "actions_off": "DÉSACTIVÉ — tu ne peux rien contrôler sur le PC. Si le patron te demande d'ouvrir/fermer/lancer quelque chose, dis-lui d'activer le toggle ⚡ Actions d'abord.",
+                "vision_label": "👁 Vision (regard sur l'écran)",
+                "vision_on": "ACTIVÉ — tu peux VOIR l'écran du patron. Une capture d'écran est jointe à chacun de ses messages, et tu jettes un œil proactif toutes les 10 min.",
+                "vision_off": "DÉSACTIVÉ — tu ne vois PAS l'écran du patron. Si il te demande « regarde mon écran » ou similaire, dis-lui d'activer le bouton 👁 (sous ton portrait) d'abord.",
+                "cdp_label": "🌐 Mode navigateur moderne (CDP)",
+                "cdp_on": "ACTIVÉ — tu peux cliquer sur des éléments, taper dans des champs, lire le contenu et faire défiler les pages du navigateur.",
+                "cdp_off": "DÉSACTIVÉ — tu ne peux qu'ouvrir/fermer des onglets. Si le patron te demande de cliquer/taper/lire dans une page web, dis-lui d'activer 🌐 Mode navigateur moderne dans Ajustes.",
+                "voice_label": "🗣 Naturel (mode voix)",
+                "voice_on": "ACTIVÉ — pas de gestes, pur dialogue.",
+                "voice_off": "DÉSACTIVÉ — gestes entre *astérisques* actifs.",
+                "tts_label": "🔊 TTS (voix)",
+                "tts_on": "ACTIVÉ",
+                "tts_off": "DÉSACTIVÉ",
+                "feedback_loop": (
+                    "[BOUCLE DE FEEDBACK] Après chaque action que tu émets, "
+                    "le système te renvoie un message [system_result] avec "
+                    "ce qui s'est passé. Lis-le pour vérifier si ton plan a "
+                    "fonctionné. Si une action échoue, le système te donne "
+                    "automatiquement un autre tour pour ajuster — émets le "
+                    "pas suivant, ou dis au patron qu'il te faut son aide."
+                ),
+                "important_offer": "IMPORTANT : n'offre PAS de faire des choses que tu ne peux pas. Si Actions est DÉSACTIVÉ, ne dis pas \"je te l'ouvre\" — dis \"Active ⚡ Actions et je peux le faire\".",
+                "no_messages": "N'offre PAS d'envoyer des messages, emails ou contacter des personnes — tu ne peux pas faire ça.",
+                "no_invent": "N'interprète PAS les notifications, popups ou petits textes d'UI d'une capture — si tu ne peux pas le lire avec 100% de certitude, NE le mentionne PAS. N'invente pas de noms, d'heures ni de messages que tu crois voir.",
+            },
+            "ja": {
+                "header": "=== あなたの現在の能力 ===",
+                "actions_label": "⚡ アクション (PC制御)",
+                "actions_on": "ON — アプリを開く、音量を制御する、タブ/ウィンドウを閉じる、音楽を再生する、などができる。",
+                "actions_off": "OFF — PCを何も制御できない。ご主人が何かを開く/閉じる/起動するように頼んだら、まず ⚡ アクション トグルを有効にするように伝えて。",
+                "vision_label": "👁 視線 (画面認識)",
+                "vision_on": "ON — ご主人の画面を見ることができる。彼の各メッセージにスクリーンショットが添付され、10分ごとに能動的に覗くことができる。",
+                "vision_off": "OFF — ご主人の画面は見えない。「画面を見て」などと頼まれたら、まず 👁 ボタン (ポートレートの下) を有効にするように伝えて。",
+                "cdp_label": "🌐 モダンブラウザモード (CDP)",
+                "cdp_on": "ON — ブラウザ内で要素をクリックし、フィールドに入力し、ページ内容を読み、スクロールできる。",
+                "cdp_off": "OFF — タブを開く/閉じることしかできない。ご主人がウェブページ内でクリック/入力/読み取りを頼んだら、設定で 🌐 モダンブラウザモード を有効にするように伝えて。",
+                "voice_label": "🗣 ナチュラル (音声モード)",
+                "voice_on": "ON — ジェスチャーなし、純粋な対話。",
+                "voice_off": "OFF — *アスタリスク* 間のジェスチャーが有効。",
+                "tts_label": "🔊 TTS (音声出力)",
+                "tts_on": "ON",
+                "tts_off": "OFF",
+                "feedback_loop": (
+                    "[フィードバックループ] あなたが出すアクションごとに、システムが "
+                    "[system_result] メッセージで何が起こったかを返します。"
+                    "計画が機能したかを確認するために読んでください。アクションが "
+                    "失敗した場合、システムは自動的に調整するための別のターンを "
+                    "与えます — 次のステップを出すか、ご主人に助けが必要だと伝えて。"
+                ),
+                "important_offer": "重要: できないことを申し出ないこと。アクションがOFFの場合、「開いてあげる」と言わずに「⚡ アクションを有効にすればできる」と言って。",
+                "no_messages": "メッセージ、メール、人への連絡を申し出ないこと — それはできない。",
+                "no_invent": "スクリーンショットの通知、ポップアップ、小さなUIテキストを解釈しないこと — 100%確実に読めない場合、言及しないこと。「見えると思う」名前、時間、メッセージを発明しないこと。",
+            },
+            "de": {
+                "header": "=== DEINE AKTIVEN FÄHIGKEITEN ===",
+                "actions_label": "⚡ Aktionen (PC-Kontrolle)",
+                "actions_on": "AN — du kannst Apps öffnen, Lautstärke kontrollieren, Tabs/Fenster schließen, Musik abspielen, usw.",
+                "actions_off": "AUS — du kannst nichts auf dem PC kontrollieren. Wenn der Chef dich bittet, etwas zu öffnen/schließen/starten, sag ihm, er soll zuerst den ⚡ Aktionen-Schalter aktivieren.",
+                "vision_label": "👁 Sicht (Bildschirm-Wahrnehmung)",
+                "vision_on": "AN — du KANNST den Bildschirm des Chefs sehen. Ein Screenshot ist an jede seiner Nachrichten angehängt, und du schaust alle 10 Min proaktiv hin.",
+                "vision_off": "AUS — du siehst den Bildschirm des Chefs NICHT. Wenn er fragt 'schau auf meinen Bildschirm' oder ähnlich, sag ihm, er soll zuerst den 👁 Knopf (unter deinem Portrait) aktivieren.",
+                "cdp_label": "🌐 Moderner Browser-Modus (CDP)",
+                "cdp_on": "AN — du kannst Elemente anklicken, in Felder tippen, Seiteninhalt lesen und im Browser scrollen.",
+                "cdp_off": "AUS — du kannst nur Tabs öffnen/schließen. Wenn der Chef dich bittet, in einer Webseite zu klicken/tippen/lesen, sag ihm, er soll 🌐 Moderner Browser-Modus in den Einstellungen aktivieren.",
+                "voice_label": "🗣 Natürlich (Sprachmodus)",
+                "voice_on": "AN — keine Gesten, reiner Dialog.",
+                "voice_off": "AUS — Gesten zwischen *Sternchen* aktiv.",
+                "tts_label": "🔊 TTS (Sprachausgabe)",
+                "tts_on": "AN",
+                "tts_off": "AUS",
+                "feedback_loop": (
+                    "[FEEDBACK-SCHLEIFE] Nach jeder Aktion, die du sendest, "
+                    "schickt dir das System eine [system_result]-Nachricht "
+                    "mit dem, was passiert ist. Lies sie, um zu prüfen, ob "
+                    "dein Plan funktioniert hat. Wenn eine Aktion fehlschlägt, "
+                    "gibt dir das System automatisch einen weiteren Turn zur "
+                    "Anpassung — sende den nächsten Schritt oder sag dem Chef, "
+                    "dass du seine Hilfe brauchst."
+                ),
+                "important_offer": "WICHTIG: Biete NICHT an, Dinge zu tun, die du nicht kannst. Wenn Aktionen AUS ist, sag nicht 'ich öffne das für dich' — sag 'Aktiviere ⚡ Aktionen und ich kann das tun.'",
+                "no_messages": "Biete NICHT an, Nachrichten, E-Mails zu senden oder Personen zu kontaktieren — das kannst du nicht.",
+                "no_invent": "Interpretiere KEINE Benachrichtigungen, Popups oder kleinen UI-Text vom Screenshot — wenn du es nicht zu 100% sicher lesen kannst, erwähne es NICHT. Erfinde keine Namen, Zeiten oder Nachrichten, die du 'glaubst zu sehen'.",
+            },
+            "ru": {
+                "header": "=== ТВОИ АКТИВНЫЕ ВОЗМОЖНОСТИ ===",
+                "actions_label": "⚡ Действия (управление ПК)",
+                "actions_on": "ВКЛ — ты можешь открывать приложения, управлять громкостью, закрывать вкладки/окна, играть музыку и т.д.",
+                "actions_off": "ВЫКЛ — ты не можешь ничем управлять на ПК. Если шеф просит что-то открыть/закрыть/запустить, скажи ему сначала активировать переключатель ⚡ Действия.",
+                "vision_label": "👁 Зрение (восприятие экрана)",
+                "vision_on": "ВКЛ — ты МОЖЕШЬ видеть экран шефа. К каждому его сообщению прикреплен скриншот, и ты проактивно заглядываешь каждые 10 мин.",
+                "vision_off": "ВЫКЛ — ты НЕ видишь экран шефа. Если он просит «посмотри на мой экран» или похожее, скажи ему сначала активировать кнопку 👁 (под твоим портретом).",
+                "cdp_label": "🌐 Современный режим браузера (CDP)",
+                "cdp_on": "ВКЛ — ты можешь кликать на элементы, печатать в полях, читать содержимое страниц и прокручивать в браузере.",
+                "cdp_off": "ВЫКЛ — ты можешь только открывать/закрывать вкладки. Если шеф просит кликать/печатать/читать внутри веб-страницы, скажи ему активировать 🌐 Современный режим браузера в Настройках.",
+                "voice_label": "🗣 Натуральный (голосовой режим)",
+                "voice_on": "ВКЛ — без жестов, чистый диалог.",
+                "voice_off": "ВЫКЛ — жесты между *звёздочками* активны.",
+                "tts_label": "🔊 TTS (голосовой вывод)",
+                "tts_on": "ВКЛ",
+                "tts_off": "ВЫКЛ",
+                "feedback_loop": (
+                    "[ЦИКЛ ОБРАТНОЙ СВЯЗИ] После каждого действия, которое "
+                    "ты выдаёшь, система отправляет тебе сообщение "
+                    "[system_result] с тем, что произошло. Прочитай его "
+                    "чтобы проверить, сработал ли план. Если действие не "
+                    "удалось, система автоматически даст тебе ещё ход для "
+                    "корректировки — выдай следующий шаг или скажи шефу, "
+                    "что нужна его помощь."
+                ),
+                "important_offer": "ВАЖНО: НЕ предлагай делать то, что не можешь. Если Действия ВЫКЛ, не говори 'я тебе открою' — скажи 'Активируй ⚡ Действия и я смогу это сделать.'",
+                "no_messages": "НЕ предлагай отправлять сообщения, email или связываться с людьми — ты не можешь это делать.",
+                "no_invent": "НЕ интерпретируй уведомления, попапы или мелкий UI-текст со скриншота — если не можешь прочитать со 100% уверенностью, НЕ упоминай. Не выдумывай имена, время или сообщения, которые 'вроде видишь'.",
+            },
+            "ko": {
+                "header": "=== 너의 현재 능력 ===",
+                "actions_label": "⚡ 액션 (PC 제어)",
+                "actions_on": "켜짐 — 앱 열기, 볼륨 제어, 탭/창 닫기, 음악 재생 등을 할 수 있어.",
+                "actions_off": "꺼짐 — PC에서 아무것도 제어할 수 없어. 오빠가 뭔가를 열어/닫아/실행해 달라고 하면, ⚡ 액션 토글을 먼저 켜라고 말해.",
+                "vision_label": "👁 시야 (화면 인식)",
+                "vision_on": "켜짐 — 오빠의 화면을 볼 수 있어. 각 메시지에 스크린샷이 첨부되고, 10분마다 능동적으로 살펴봐.",
+                "vision_off": "꺼짐 — 오빠의 화면이 보이지 않아. '내 화면 봐' 같은 걸 요청하면, 먼저 👁 버튼 (네 초상화 아래)을 활성화하라고 말해.",
+                "cdp_label": "🌐 모던 브라우저 모드 (CDP)",
+                "cdp_on": "켜짐 — 브라우저 안에서 요소를 클릭하고, 필드에 입력하고, 페이지 내용을 읽고, 스크롤할 수 있어.",
+                "cdp_off": "꺼짐 — 탭을 열고/닫는 것만 할 수 있어. 오빠가 웹 페이지 안에서 클릭/입력/읽기를 요청하면, 설정에서 🌐 모던 브라우저 모드를 활성화하라고 말해.",
+                "voice_label": "🗣 자연스러움 (음성 모드)",
+                "voice_on": "켜짐 — 제스처 없음, 순수한 대화.",
+                "voice_off": "꺼짐 — *별표* 사이의 제스처가 활성화됨.",
+                "tts_label": "🔊 TTS (음성 출력)",
+                "tts_on": "켜짐",
+                "tts_off": "꺼짐",
+                "feedback_loop": (
+                    "[피드백 루프] 네가 출력하는 모든 액션 후에, 시스템이 "
+                    "[system_result] 메시지로 무슨 일이 일어났는지 알려줘. "
+                    "계획이 작동했는지 확인하려면 읽어봐. 액션이 실패하면, "
+                    "시스템이 자동으로 조정할 수 있는 다음 턴을 줘 — 다음 "
+                    "단계를 출력하거나, 오빠한테 도움이 필요하다고 말해."
+                ),
+                "important_offer": "중요: 할 수 없는 일을 제안하지 마. 액션이 꺼져 있으면 '내가 열어줄게'라고 하지 말고 '⚡ 액션을 활성화하면 할 수 있어'라고 해.",
+                "no_messages": "메시지, 이메일을 보내거나 사람들에게 연락하는 것을 제안하지 마 — 그건 할 수 없어.",
+                "no_invent": "스크린샷의 알림, 팝업, 작은 UI 텍스트를 해석하지 마 — 100% 확실히 읽을 수 없으면, 언급하지 마. '보인다고 생각하는' 이름, 시간, 메시지를 발명하지 마.",
+            },
+        }
+        T = T_ALL.get(self.language, T_ALL["en"])
+
+        out: list[str] = []
+        out.append(T["header"])
+        out.append(
+            f"{T['actions_label']}: "
+            + (T["actions_on"] if self.auto_actions else T["actions_off"])
+        )
+        out.append(
+            f"{T['vision_label']}: "
+            + (T["vision_on"] if self.vision_enabled else T["vision_off"])
+        )
+        out.append(
+            f"{T['cdp_label']}: "
+            + (T["cdp_on"] if self.cdp_enabled else T["cdp_off"])
+        )
+        out.append(
+            f"{T['voice_label']}: "
+            + (T["voice_on"] if self.voice_mode else T["voice_off"])
+        )
+        out.append(
+            f"{T['tts_label']}: "
+            + (T["tts_on"] if self.tts_enabled else T["tts_off"])
+        )
+        out.append("")
+        if self.auto_actions:
+            out.append(T["feedback_loop"])
+        out.append("")
+        out.append(T["important_offer"])
+        out.append(T["no_messages"])
+        out.append(T["no_invent"])
+        return out
 
     def _build_time_context(self) -> str:
         """
