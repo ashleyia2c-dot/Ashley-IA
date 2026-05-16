@@ -83,10 +83,20 @@ def test_is_xai_flag():
 
 
 def test_is_openrouter_flag():
-    with _mock_config(llm_provider="openrouter"):
+    # v0.19.51 — provider=openrouter requiere openrouter_key no vacía
+    # para que el flag sea True. Sin key, fallback transparente a xAI.
+    with _mock_config(llm_provider="openrouter", openrouter_key="sk-or-abc"):
         assert lp.is_xai() is False
         assert lp.is_openrouter() is True
         assert lp.is_ollama() is False
+
+
+def test_is_openrouter_without_key_falls_back_to_xai():
+    """v0.19.51 — provider=openrouter sin key se reporta como xai (fallback)."""
+    with _mock_config(llm_provider="openrouter", openrouter_key=""):
+        assert lp.is_xai() is True
+        assert lp.is_openrouter() is False
+        assert lp.is_openai_compat() is False
 
 
 def test_is_ollama_flag():
@@ -99,10 +109,10 @@ def test_is_ollama_flag():
 def test_is_openai_compat_covers_openrouter_and_ollama():
     """is_openai_compat() agrupa los dos providers que comparten el path
     OpenAI-compat. El dispatcher usa este flag para decidir qué stream
-    inicializar."""
+    inicializar. v0.19.51: openrouter requiere key presente."""
     with _mock_config(llm_provider="xai"):
         assert lp.is_openai_compat() is False
-    with _mock_config(llm_provider="openrouter"):
+    with _mock_config(llm_provider="openrouter", openrouter_key="sk-or-abc"):
         assert lp.is_openai_compat() is True
     with _mock_config(llm_provider="ollama"):
         assert lp.is_openai_compat() is True
@@ -112,7 +122,7 @@ def test_supports_web_search_only_for_xai():
     """web_search sólo existe en el SDK nativo de xAI."""
     with _mock_config(llm_provider="xai"):
         assert lp.supports_web_search() is True
-    with _mock_config(llm_provider="openrouter"):
+    with _mock_config(llm_provider="openrouter", openrouter_key="sk-or-abc"):
         assert lp.supports_web_search() is False
     with _mock_config(llm_provider="ollama"):
         assert lp.supports_web_search() is False

@@ -228,6 +228,14 @@ def get_active_config() -> dict[str, str]:
       - api_key: la key correspondiente al provider activo (dummy para ollama)
       - model: el model ID a usar (default si vacío)
       - base_url: URL del endpoint (solo relevante para OpenAI-compat paths)
+
+    v0.19.51 — Validación de credenciales: si el user seleccionó OpenRouter
+    PERO no proporcionó la api_key, hacemos fallback transparente a xAI
+    (con XAI_API_KEY del env) y logueamos warning. Sino, el primer LLM call
+    crasheaba con `OpenAIError: Missing credentials` y rompía on_load
+    completamente — la app entera no funcionaba hasta que el user supiera
+    abrir Settings y completar la key (que a menudo no es obvio si llegó
+    aquí por accidente cambiando el dropdown).
     """
     try:
         from .i18n import load_voice_config
@@ -240,22 +248,48 @@ def get_active_config() -> dict[str, str]:
 
     if provider == "openrouter":
         api_key = cfg.get("openrouter_key") or ""
-        model = user_model or OPENROUTER_MODELS[0][0]
-        base_url = "https://openrouter.ai/api/v1"
+        # v0.19.51 — fallback a xAI si no hay key OpenRouter
+        if not api_key:
+            _log.warning(
+                "Provider=openrouter pero openrouter_key vacía — "
+                "fallback transparente a xAI (XAI_API_KEY del env). "
+                "El user debe completar la key en Settings."
+            )
+            provider = "xai"
+            api_key = XAI_API_KEY
+            # Si user_model parece de OpenRouter (tiene "/"), descartamos
+            # y usamos default xAI para que la llamada no falle por
+            # model no-existente en xAI.
+            if "/" in user_model:
+                user_model = ""
+        else:
+            model = user_model or OPENROUTER_MODELS[0][0]
+            base_url = "https://openrouter.ai/api/v1"
+            return {
+                "provider": provider,
+                "api_key": api_key,
+                "model": model,
+                "base_url": base_url,
+            }
     elif provider == "ollama":
         # Ollama no usa API key real — pero el OpenAI SDK requiere algo no-vacío
         # para inicializar el cliente, así que le pasamos "ollama" como dummy.
         api_key = "ollama"
         model = user_model or OLLAMA_DEFAULT_MODEL
         base_url = OLLAMA_BASE_URL
-    else:
-        # default xAI
-        api_key = XAI_API_KEY
-        model = user_model or GROK_MODEL
-        base_url = ""  # xAI usa su SDK nativo
+        return {
+            "provider": provider,
+            "api_key": api_key,
+            "model": model,
+            "base_url": base_url,
+        }
 
+    # default xAI (también cuando hicimos fallback desde openrouter sin key)
+    api_key = XAI_API_KEY
+    model = user_model or GROK_MODEL
+    base_url = ""  # xAI usa su SDK nativo
     return {
-        "provider": provider,
+        "provider": "xai",
         "api_key": api_key,
         "model": model,
         "base_url": base_url,
